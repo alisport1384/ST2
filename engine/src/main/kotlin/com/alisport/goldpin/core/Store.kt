@@ -234,7 +234,7 @@ object Store {
         "lvH" to s.lvH, "lvL" to s.lvL, "lvBi" to s.lvBi, "lvT" to s.lvT, "lvConfBi" to s.lvConfBi, "lvConfT" to s.lvConfT, "lvZoneId" to s.lvZoneId,
         "hvH" to s.hvH, "hvL" to s.hvL, "hvBi" to s.hvBi, "hvT" to s.hvT, "hvScanBi" to s.hvScanBi, "hvConfBi" to s.hvConfBi, "hvConfT" to s.hvConfT, "hvZoneId" to s.hvZoneId,
         "midConfirmBi" to s.midConfirmBi, "runMax" to s.runMax, "zGone" to s.zGone,
-        "lvTouched" to s.lvTouched, "lvUsed" to s.lvUsed, "lvReEntered" to s.lvReEntered,
+        "lvTouched" to s.lvTouched, "lvUsed" to s.lvUsed, "lvReEntered" to s.lvReEntered, "lvUses" to s.lvUses, "slMidDone" to s.slMidDone,
         "entry" to s.entry, "sl" to s.sl, "tp1" to s.tp1, "tp2" to s.tp2, "tpx" to s.tpx,
         "be" to s.be, "tp2Hit" to s.tp2Hit, "note" to s.note, "orderId" to s.orderId,
         "armBi" to s.armBi, "armT" to s.armT, "armsSinceS" to s.armsSinceS, "prevEntry" to s.prevEntry,
@@ -254,6 +254,7 @@ object Store {
         s.hvZoneId = if (m.containsKey("hvZoneId")) m["hvZoneId"].asL() else -1L
         s.midConfirmBi = m["midConfirmBi"].asI(); s.runMax = m["runMax"].asD(); s.zGone = m["zGone"].asB()
         s.lvTouched = m["lvTouched"].asB(); s.lvUsed = m["lvUsed"].asB(); s.lvReEntered = m["lvReEntered"].asB()
+        s.lvUses = m["lvUses"].asI(); s.slMidDone = m["slMidDone"].asB()
         s.entry = m["entry"].asD(); s.sl = m["sl"].asD(); s.tp1 = m["tp1"].asD(); s.tp2 = m["tp2"].asD()
         s.tpx = m["tpx"].asD(); s.be = m["be"].asB()
         // tp2Hit در فایل‌های ذخیره‌شدهٔ نسخه‌های قبل وجود ندارد → false پیش‌فرض
@@ -283,7 +284,7 @@ object Store {
                 "sl0" to t.sl0, "tp1" to t.tp1, "tp2" to t.tp2, "tpX" to t.tpX, "qty" to t.qty,
                 "zoneTop" to t.zoneTop, "zoneBot" to t.zoneBot, "contractSize" to t.contractSize,
                 "exitT" to (t.exitT ?: 0L), "exitBi" to (t.exitBi ?: -1), "exitPx" to (t.exitPx ?: Double.NaN),
-                "reason" to t.reason, "be" to t.be,
+                "reason" to t.reason, "be" to t.be, "slAdj" to t.slAdj,
                 "fills" to t.fills.map { listOf(it.t, it.bi, it.price, it.qty, it.kind, it.pnl) }
             )
         }
@@ -321,6 +322,7 @@ object Store {
                 val l = f.asList(); if (l.size < 6) continue
                 tr.fills.add(Fill(l[0].asL(), l[1].asI(), l[2].asD(), l[3].asD(), l[4].asS(), l[5].asD()))
             }
+            if (t.containsKey("slAdj")) tr.slAdj = t["slAdj"].asD()
             if (t["exitT"].asL() != 0L) {
                 tr.exitT = t["exitT"].asL(); tr.exitBi = t["exitBi"].asI()
                 tr.exitPx = t["exitPx"].asD(); tr.reason = t["reason"].asS(); tr.be = t["be"].asB()

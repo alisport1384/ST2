@@ -165,6 +165,8 @@ class Trade(
     var exitPx: Double? = null,
     var reason: String = "open",
     var be: Boolean = false,
+    /** §4-9 سند: حد ضرر جابه‌جاشده به ۵۰٪ باکس HV (NaN = هنوز منتقل نشده). */
+    var slAdj: Double = Double.NaN,
     val fills: MutableList<Fill> = mutableListOf()
 ) {
     val open: Boolean get() = exitT == null

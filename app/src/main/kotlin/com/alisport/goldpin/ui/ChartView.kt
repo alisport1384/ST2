@@ -1320,7 +1320,7 @@ class ChartView @JvmOverloads constructor(
         if (t != null) {
             val tIdx = idxOfTime(t.entryT, t.entryBi).toFloat()
             if (showEntryLine) line(t.entry, upCol, if (t.open) "ورود باز" else "ورود", tIdx)
-            if (showSlLine) line(if (t.be) t.entry else t.sl0, dnCol, if (t.be) "سربه‌سر" else "حدضرر", tIdx)
+            if (showSlLine) line(if (t.be) t.entry else if (!t.slAdj.isNaN()) t.slAdj else t.sl0, dnCol, if (t.be) "سربه‌سر" else "حدضرر", tIdx)
             if (showTpFinalLine) line(t.tpX, Palette.violet, "TP", tIdx)
         }
     }
