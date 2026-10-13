@@ -379,29 +379,9 @@ class Engine(val cfg: Settings) {
         while (structBars.size > 400) structBars.removeAt(0)
         val nS = structBars.size
 
-        // ── تشخیص جفت‌کندل‌ها و ثبت کاندید کندل مهم ──
-        if (nS >= 2) {
-            val a = structBars[nS - 2]
-            val b = structBars[nS - 1]
-            if (a.c < a.o && b.c > b.o) {                       // کندل مهم در پایین‌ترین‌ها
-                val (impH, impL, impBi) = pickLow(a, b)
-                // §4-1 سند نهایی: سطح ابطال پایین‌ترین کندل‌ها = کمترین قیمت بین قیمت بسته شدن کندل اول و قیمت باز شدن کندل دوم
-                val refLo = min(a.c, b.o)
-                pins.add(Pin(1, impH, impL, impBi, b.bi, refLo, 0))
-                lg("ENGINE", "کاندید کندل مهم پایین‌ترین‌ها ثبت شد",
-                    "kind=BU hi=${f2(impH)} lo=${f2(impL)} ref=${f2(refLo)} bar=${b.bi}")
-            }
-            if (a.c > a.o && b.c < b.o) {                       // کندل مهم در بالاترین‌ها
-                val (impH2, impL2, impBi2) = pickHigh(a, b)
-                // §4-1 سند نهایی: سطح ابطال بالاترین کندل‌ها = بیشترین قیمت بین قیمت بسته شدن کندل اول و قیمت باز شدن کندل دوم
-                val refHi = max(a.c, b.o)
-                pins.add(Pin(-1, impH2, impL2, impBi2, b.bi, refHi, 0))
-                lg("ENGINE", "کاندید کندل مهم بالاترین‌ها ثبت شد",
-                    "kind=BE hi=${f2(impH2)} lo=${f2(impL2)} ref=${f2(refHi)} bar=${b.bi}")
-            }
-        }
-
         // ── چرخهٔ عمر کاندیدها : ابطال / Ready ──
+        // §18-3/§18-6: در هر لحظه حداکثر یک کاندید IC وجود دارد؛ ثبت کاندید جدید در انتهای
+        // همین متد و فقط پس از تعیین تکلیف کاندید قبلی و با رعایت توالی انجام می‌شود.
         // §4-1 سند نهایی: مرگ کاندید با «باز یا کلوز» آن‌طرف ref، مقایسه اکید
         // (تساوی نمی‌کُشد). Ready فقط با کلوز بالای سقف / زیر کف.
         for (p in pins) {
@@ -442,6 +422,9 @@ class Engine(val cfg: Settings) {
                             LL = lastBUpin; LH = lastBEpin
                             lhPinHi = lastBEpin; lhPinRef = lastBEpinRef; lhPinLo = lastBEpinLo; lhPinSeq = beSeq
                             llPinLo = lastBUpin; llPinRef = lastBUpinRef; llPinHi = lastBUpinHi; llPinSeq = buSeq
+                            addStructLabel("LL", MarkerKind.PIN_BU, LL, pBU.impBi)
+                            addStructLabel("LH", MarkerKind.PIN_BE, LH, -1)
+                            lg("ENGINE", "LL / LH تعریف شد", "LL=${f2(LL)} LH=${f2(LH)} bar=${sb.bi}")
                         }
                     }
                 }
@@ -468,6 +451,9 @@ class Engine(val cfg: Settings) {
                             HH = lastBEpin; HL = lastBUpin
                             hlPinLo = lastBUpin; hlPinRef = lastBUpinRef; hlPinHi = lastBUpinHi; hlPinSeq = buSeq
                             hhPinHi = lastBEpin; hhPinRef = lastBEpinRef; hhPinLo = lastBEpinLo; hhPinSeq = beSeq
+                            addStructLabel("HH", MarkerKind.PIN_BE, HH, pBE.impBi)
+                            addStructLabel("HL", MarkerKind.PIN_BU, HL, -1)
+                            lg("ENGINE", "HH / HL تعریف شد", "HH=${f2(HH)} HL=${f2(HL)} bar=${sb.bi}")
                         }
                     }
                 }
@@ -568,6 +554,7 @@ class Engine(val cfg: Settings) {
                     if (!HH.isNaN() && sb.c > HH) {
                         if (buSeq < beSeq) {
                             clearBEpin()
+                            removeStructLabel("HH", HH); removeStructLabel("HL", HL)
                             HH = Double.NaN; HL = Double.NaN
                             if (!hlPinLo.isNaN()) {
                                 lastBUpin = hlPinLo; lastBUpinRef = hlPinRef; lastBUpinHi = hlPinHi
@@ -589,6 +576,7 @@ class Engine(val cfg: Settings) {
                             val wasHH = !HH.isNaN() && hhPinSeq == beSeq
                             clearBEpin()
                             if (wasHH) {
+                                removeStructLabel("HH", HH); removeStructLabel("HL", HL)
                                 HH = Double.NaN; HL = Double.NaN
                                 if (!hlPinLo.isNaN()) {
                                     lastBUpin = hlPinLo; lastBUpinRef = hlPinRef; lastBUpinHi = hlPinHi
@@ -643,6 +631,7 @@ class Engine(val cfg: Settings) {
                     if (!LL.isNaN() && sb.c < LL) {
                         if (beSeq < buSeq) {
                             clearBUpin()
+                            removeStructLabel("LL", LL); removeStructLabel("LH", LH)
                             LL = Double.NaN; LH = Double.NaN
                             if (!lhPinHi.isNaN()) {
                                 lastBEpin = lhPinHi; lastBEpinRef = lhPinRef; lastBEpinLo = lhPinLo
@@ -664,6 +653,7 @@ class Engine(val cfg: Settings) {
                             val wasLL = !LL.isNaN() && llPinSeq == buSeq
                             clearBUpin()
                             if (wasLL) {
+                                removeStructLabel("LL", LL); removeStructLabel("LH", LH)
                                 LL = Double.NaN; LH = Double.NaN
                                 if (!lhPinHi.isNaN()) {
                                     lastBEpin = lhPinHi; lastBEpinRef = lhPinRef; lastBEpinLo = lhPinLo
@@ -708,6 +698,31 @@ class Engine(val cfg: Settings) {
 
         if (evChgDn || evTrendDn) cancelDir(1)
         if (evChgUp || evTrendUp) cancelDir(-1)
+
+        // ── ثبت کاندید کندل مهم (§4-1 + §18-3/§18-4/§18-6) ──
+        // • کاندیدی که با توالی نمی‌خواند دور ریخته می‌شود (§18-4).
+        // • تا وقتی کاندید قبلی تعیین تکلیف نشده (Ready یا ابطال)، کاندید جدید پذیرفته نمی‌شود (§18-6).
+        // • فقط کاندیدِ هم‌جهت با توالی مورد انتظار ثبت می‌شود (§18-1/§18-3).
+        if (expectedReady != 0) pins.removeAll { it.kind != expectedReady }
+        if (nS >= 2 && pins.isEmpty()) {
+            val a = structBars[nS - 2]
+            val b = structBars[nS - 1]
+            if (a.c < a.o && b.c > b.o && expectedReady != -1) {          // کندل مهم در پایین‌ترین‌ها
+                val (impH, impL, impBi) = pickLow(a, b)
+                // §4-1: سطح ابطال پایین‌ترین کندل‌ها = min(close(a), open(b))
+                val refLo = min(a.c, b.o)
+                pins.add(Pin(1, impH, impL, impBi, b.bi, refLo, 0))
+                lg("ENGINE", "کاندید کندل مهم پایین‌ترین‌ها ثبت شد",
+                    "kind=BU hi=${f2(impH)} lo=${f2(impL)} ref=${f2(refLo)} bar=${b.bi}")
+            } else if (a.c > a.o && b.c < b.o && expectedReady != 1) {    // کندل مهم در بالاترین‌ها
+                val (impH2, impL2, impBi2) = pickHigh(a, b)
+                // §4-1: سطح ابطال بالاترین کندل‌ها = max(close(a), open(b))
+                val refHi = max(a.c, b.o)
+                pins.add(Pin(-1, impH2, impL2, impBi2, b.bi, refHi, 0))
+                lg("ENGINE", "کاندید کندل مهم بالاترین‌ها ثبت شد",
+                    "kind=BE hi=${f2(impH2)} lo=${f2(impL2)} ref=${f2(refHi)} bar=${b.bi}")
+            }
+        }
 
         // در پیش‌بارگذاری تاریخچهٔ ساختار، دیتای تریگر۲ نداریم؛ بنابراین فقط
         // توالی/روند ثبت می‌شود و هیچ باکس پروفایل حدسی ساخته نمی‌شود.
@@ -770,6 +785,20 @@ class Engine(val cfg: Settings) {
                 broker?.onSetupInvalidated(s, curT, curBi)
             }
         }
+    }
+
+    /** §18-10: لغو سفارش مسلح‌شده (معلق) به‌دلیل ابطال/مصرف ناحیهٔ ولوم کم. معاملهٔ باز دست نمی‌خورد (§18-11). */
+    private fun cancelArmedForLv(s: Setup, reason: String) {
+        broker?.onSetupInvalidated(s, curT, curBi)
+        closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
+        closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
+        s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.runMax = Double.NaN
+        s.orderId = -1
+        s.prevEntry = Double.NaN
+        s.rearmAllowed = false
+        events.add("[${s.id}] سفارش معلق لغو شد — $reason")
+        lg("ENGINE", "سفارش معلق لغو شد ($reason) · ستاپ #${s.id}", "bar=$curBi")
+        alarm(AlertKind.CANCEL, "سفارش معلق لغو شد", "ستاپ #${s.id} · $reason")
     }
 
     private fun closeT1Box(s: Setup, status: Int, endBi: Int = curBi, endT: Long = curT) {
@@ -843,14 +872,29 @@ class Engine(val cfg: Settings) {
                     closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
                     closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
                     s.midRef = Double.NaN; s.midBi = -1; s.midT = 0L; s.markBi = -1
-                    s.touchMidStart = aggM.cur?.t ?: mc.t
-                    s.stage = 1
                     s.lvBi = -1; s.lvT = 0L; s.lvConfBi = -1; s.lvConfT = 0L; s.lvH = Double.NaN; s.lvL = Double.NaN
                     s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.hvScanBi = -1; s.runMax = Double.NaN
                     s.lvTouched = false; s.lvUsed = false; s.lvReEntered = false
                     s.orderId = -1
                     addMarker(mc.bi, old, 10, "تایید میانی باطل شد")
                     lg("ENGINE", "تایید میانی باطل شد · ستاپ #${s.id}", "سطح قبلی=${f2(old)} bar=${mc.bi}")
+                    // §18-8: همین کندل میانی که تایید را باطل کرد، به شرط معتبر بودن ناحیهٔ ساختار،
+                    // خودش تایید میانی جدید است و مارک می‌شود.
+                    if (!s.zGone) {
+                        s.midRef = if (s.dir == 1) mc.l else mc.h
+                        s.midBi = mc.bi
+                        s.midT = mc.t
+                        s.midConfirmBi = curBi
+                        s.touchMidStart = mc.t
+                        s.stage = 2
+                        cnt.mid++
+                        lg("ENGINE", "تایید میانی انجام شد (کندل باطل‌کننده، §18-8) · ستاپ #${s.id}",
+                            if (s.dir == 1) "کف تایید=${f2(s.midRef)} bar=${mc.bi}" else "سقف تایید=${f2(s.midRef)} bar=${mc.bi}")
+                        addMarker(mc.bi, s.midRef, 3, if (s.dir == 1) "کف تایید میانی" else "سقف تایید میانی")
+                    } else {
+                        s.touchMidStart = aggM.cur?.t ?: mc.t
+                        s.stage = 1
+                    }
                 } else if (s.markBi < 0) {
                     // ◆ مارک کردن کندل بعد از تایید (فقط نشانه) — فقط اگر ابطال اتفاق نیفتاده باشد
                     s.markH = mc.h; s.markL = mc.l; s.markBi = mc.bi
@@ -953,9 +997,14 @@ class Engine(val cfg: Settings) {
                             "bar=${q1.bi}")
                         continue
                     } else if (s.stage == 6) {
-                        s.lvUsed = true
-                        s.rearmAllowed = false
-                        closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
+                        // §18-10: بعد از مسلح شدن، ابطال LV سفارش مسلح‌شده را لغو می‌کند؛ جست‌وجوی LV از نو.
+                        cancelArmedForLv(s, "ابطال ناحیهٔ ولوم کم پس از مسلح‌شدن")
+                        s.lvBi = -1; s.lvT = 0L; s.lvConfBi = -1; s.lvConfT = 0L; s.lvH = Double.NaN; s.lvL = Double.NaN
+                        s.lvTouched = false; s.lvReEntered = false
+                        s.stage = 3
+                        s.note = "نقض ناحیهٔ ولوم کم (تریگر۱) — سفارش لغو شد"
+                        addMarker(q1.bi, if (bullL) q1.l else q1.h, 10, "ابطال ناحیهٔ ولوم کم · سفارش لغو")
+                        continue
                     }
                 }
             }
@@ -987,9 +1036,12 @@ class Engine(val cfg: Settings) {
                             closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
                             broker?.onSetupInvalidated(s, curT, curBi)
                         } else if (s.stage == 6) {
-                            s.note = "باکس ولوم کم مصرف شد (سفارش معلق زنده ماند)"
-                            events.add("[${s.id}] باکس ولوم کم بعد از مسلح مصرف شد — سفارش معلق معتبر ماند")
-                            // سفارش معلق را لغو نمی‌کنیم.
+                            // §4-7 و §18-10: مصرف باکس ولوم کم سفارش معلق را می‌کُشد؛ ستاپ مسلح‌شده معتبر نیست.
+                            cancelArmedForLv(s, "مصرف باکس ولوم کم پس از مسلح‌شدن")
+                            s.stage = 8
+                            s.rearmAllowed = false
+                            s.note = "باکس ولوم کم مصرف شد (سفارش معلق لغو شد)"
+                            events.add("[${s.id}] باکس ولوم کم بعد از مسلح مصرف شد — سفارش معلق لغو شد")
                         }
                     }
                 }
@@ -1012,7 +1064,7 @@ class Engine(val cfg: Settings) {
             //    در خرید و پایین‌تر از آن‌ها در فروش است و قیمت اول سفارش را پر می‌کند).
             if (s.stage == 6 && curBi > s.hvConfBi) {
                 if (s.priceExpiryRef.isNaN()) {
-                    s.priceExpiryRef = if (bull) lastBEpin else lastBUpin
+                    s.priceExpiryRef = if (bull) HH else LL
                 }
                 val openBreak = !s.priceExpiryRef.isNaN() &&
                         (if (bull) open > s.priceExpiryRef else open < s.priceExpiryRef)
@@ -1026,9 +1078,9 @@ class Engine(val cfg: Settings) {
                     val expReason = if (barExpire) {
                         "گذشت یک کندل ساختار کامل (${nBars} کندل تریگر۲)"
                     } else if (bull) {
-                        "باز/کلوز از بالای pinBE هنگام مسلح‌شدن (${f2(s.priceExpiryRef)}) عبور کرد"
+                        "باز/کلوز از بالای HH هنگام مسلح‌شدن (${f2(s.priceExpiryRef)}) عبور کرد"
                     } else {
-                        "باز/کلوز از زیر pinBU هنگام مسلح‌شدن (${f2(s.priceExpiryRef)}) عبور کرد"
+                        "باز/کلوز از زیر LL هنگام مسلح‌شدن (${f2(s.priceExpiryRef)}) عبور کرد"
                     }
                     closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
                     s.stage = if (s.lvUsed || barExpire) 8 else 4
@@ -1088,8 +1140,8 @@ class Engine(val cfg: Settings) {
                     closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
                     closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
                     s.midRef = Double.NaN; s.midBi = -1; s.midT = 0L; s.markBi = -1
-                    // سند §۴-۶: «کندل بعدی برای تایید میانی سنجیده می‌شود» — یعنی اولین کندل میانی بعد از کندلی که تیک شکست در آن بوده
-                    s.touchMidStart = Tf.bucket(cfg.tfM, cd.t) + cfg.tfM * 1000L
+                    // §18-8: کندل میانی‌ای که تیک شکست در آن رخ داده، هنگام بسته شدن می‌تواند خودش تایید میانی جدید باشد
+                    s.touchMidStart = Tf.bucket(cfg.tfM, cd.t)
                     s.stage = 1
                     s.lvBi = -1; s.lvT = 0L; s.lvConfBi = -1; s.lvConfT = 0L; s.lvH = Double.NaN; s.lvL = Double.NaN
                     s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.hvScanBi = -1; s.runMax = Double.NaN
@@ -1151,7 +1203,18 @@ class Engine(val cfg: Settings) {
                         addMarker(curBi, if (bull) low else high, 10, "ابطال ناحیهٔ ولوم کم")
                         lg("ENGINE", "ناحیهٔ ولوم کم با عبور از سمت مخالف باطل شد · ستاپ #${s.id}",
                             "bar=$curBi")
-                    } else if (s.stage in 6..7) {
+                    } else if (s.stage == 6) {
+                        // §18-10: ابطال LV پس از مسلح‌شدن ⇒ لغو سفارش معلق و جست‌وجوی LV از نو
+                        cancelArmedForLv(s, "ابطال ناحیهٔ ولوم کم پس از مسلح‌شدن")
+                        s.lvBi = -1; s.lvT = 0L; s.lvConfBi = -1; s.lvConfT = 0L; s.lvH = Double.NaN; s.lvL = Double.NaN
+                        s.lvTouched = false; s.lvReEntered = false
+                        s.stage = 3
+                        s.note = "نقض ناحیهٔ ولوم کم (تریگر۱) — سفارش لغو شد"
+                        addMarker(curBi, if (bull) low else high, 10, "ابطال ناحیهٔ ولوم کم · سفارش لغو")
+                        lg("ENGINE", "ناحیهٔ ولوم کم پس از مسلح‌شدن باطل شد → سفارش لغو · ستاپ #${s.id}", "bar=$curBi")
+                        continue
+                    } else if (s.stage == 7) {
+                        // §18-11: معاملهٔ باز تغییری نمی‌کند؛ فقط مسلح‌مجدد بسته می‌شود.
                         s.lvUsed = true
                         s.rearmAllowed = false
                         closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
@@ -1304,7 +1367,8 @@ class Engine(val cfg: Settings) {
     private fun armSetup(s: Setup, cd: Candle, bull: Boolean) {
         val eRef = if (bull) s.hvH else s.hvL
         s.sl = if (bull) s.hvL - cfg.slBufTicks * cfg.mintick else s.hvH + cfg.slBufTicks * cfg.mintick
-        val a0 = if (bull) highestBE else lowestBUpin
+        // §4-8 / §18-5: لنگر صفر فیبوناچی = HH (خرید) / LL (فروش)؛ لنگر ۱۰۰٪ = سطح تایید میانی
+        val a0 = if (bull) HH else LL
         val a1 = s.midRef
         val targets = calculateTargetLevels(bull, eRef, a0, a1, cfg.minTPunits)
         s.tp1 = targets.tp1
@@ -1329,10 +1393,11 @@ class Engine(val cfg: Settings) {
             }
         }
         // §4-8 و §10 سند نهایی: ما فقط مجاز به گذاشتن ۱ سفارش در چارت هستیم (حداکثر ۱ سفارش معلق یا ۱ معامله باز).
-        val hasActiveSetupOrder = setups.any { it.id != s.id && (it.stage == 6 || it.stage == 7) }
-        if (hasActiveSetupOrder) {
+        // §4-8 و §18-12/§18-13: در هر لحظه فقط یک سفارش معلق مجاز است؛ وجود معاملهٔ باز مانع مسلح شدن نیست.
+        val hasPendingSetupOrder = setups.any { it.id != s.id && it.stage == 6 }
+        if (hasPendingSetupOrder) {
             s.hvBi = -1; s.hvT = 0L; s.runMax = Double.NaN
-            lg("ENGINE", "مسلح‌شدن ستاپ #${s.id} رد شد — سفارش یا معاملهٔ فعال دیگری در چارت وجود دارد",
+            lg("ENGINE", "مسلح‌شدن ستاپ #${s.id} رد شد — سفارش معلق دیگری در چارت وجود دارد",
                 "bar=$curBi")
             return
         }
@@ -1348,8 +1413,8 @@ class Engine(val cfg: Settings) {
         s.armT = curT
         s.armsSinceS++
         s.prevEntry = eRef
-        // Pin-level expiration applies to the latest opposing pin as it stood when this order armed.
-        s.priceExpiryRef = if (bull) lastBEpin else lastBUpin
+        // §4-8: انقضای سفارش معلق با عبور باز/کلوز از HH (خرید) / LL (فروش) در لحظهٔ مسلح‌شدن
+        s.priceExpiryRef = if (bull) HH else LL
         s.rearmAllowed = true
         s.stage = 6
         cnt.hv++
@@ -1444,6 +1509,27 @@ class Engine(val cfg: Settings) {
         addMarkerAtTime(t, bi, price, kind, text)
     }
 
+    /**
+     * برچسب ساختار (HH / HL / LL / LH) روی کندل مهمِ همان پین.
+     * اگر ایندکس کندل مهم داده نشده باشد، از مارکر پینِ هم‌قیمت پیدا می‌شود.
+     */
+    private fun addStructLabel(text: String, pinKind: Int, price: Double, impBi: Int) {
+        if (price.isNaN()) return
+        var bi = impBi
+        var t = if (impBi != -1) times[impBi] else null
+        if (impBi == -1) {
+            val pm = markers.lastOrNull { it.kind == pinKind && it.price == price }
+            if (pm != null) { bi = pm.bi; t = pm.t }
+        }
+        markers.removeAll { it.kind == MarkerKind.STRUCT && it.text == text && it.price == price }
+        addMarkerAtTime(t ?: curT, if (bi == -1) curBi else bi, price, MarkerKind.STRUCT, text)
+    }
+
+    private fun removeStructLabel(text: String, price: Double) {
+        if (price.isNaN()) return
+        markers.removeAll { it.kind == MarkerKind.STRUCT && it.text == text && it.price == price }
+    }
+
     /** علامت‌گذاری جهت روند فعلی هنگام بازسازی/بازیابیِ وضعیت قدیمی. */
     fun ensureCurrentTrendMarker(t: Long, price: Double, bi: Int) {
         if (trend == 0 || t <= 0L || price.isNaN()) return
@@ -1460,7 +1546,8 @@ class Engine(val cfg: Settings) {
         while (markers.size > 2000) {
             val discard = markers.indexOfFirst {
                 it.kind != MarkerKind.PIN_BU && it.kind != MarkerKind.PIN_BE &&
-                    it.kind != MarkerKind.TREND_UP && it.kind != MarkerKind.TREND_DOWN
+                    it.kind != MarkerKind.TREND_UP && it.kind != MarkerKind.TREND_DOWN &&
+                    it.kind != MarkerKind.STRUCT
             }
             if (discard < 0) break
             markers.removeAt(discard)

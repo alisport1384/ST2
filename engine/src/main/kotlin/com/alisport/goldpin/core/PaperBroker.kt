@@ -81,11 +81,11 @@ class PaperBroker(private val cfg: Settings) {
         return max(q, 0.0)
     }
 
-    /** ثبت سفارش لیمیت — مطابق §4-8 و §10 سند نهایی، حداکثر ۱ سفارش لیمیت در انتظار یا ۱ معامله باز در هر لحظه مجاز است. */
+    /** ثبت سفارش لیمیت — §4-8 و §18-12/§18-13: حداکثر ۱ سفارش معلق در هر لحظه؛ معاملهٔ باز مانع سفارش جدید نیست. */
     fun registerLimit(s: Setup, bar: Candle): Boolean {
-        val activeCount = pendings.size + opens.count { it.open }
+        val activeCount = pendings.size
         if (activeCount >= 1) {
-            lastError = "فقط ۱ سفارش یا پوزیشن هم‌زمان در چارت مجاز است"
+            lastError = "فقط ۱ سفارش معلق هم‌زمان در چارت مجاز است"
             return false
         }
         // هم‌پوشانی روی یک ستاپ: اگر همین setupId در حال حاضر سفارش معلق دارد، رد شود.

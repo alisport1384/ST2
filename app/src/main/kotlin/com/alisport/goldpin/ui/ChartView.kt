@@ -258,6 +258,11 @@ class ChartView @JvmOverloads constructor(
     private var crossOn = false
     private var crossX = 0f
     private var crossY = 0f
+    /** کراس‌هیر به کندل و سطح قیمت قفل می‌شود (نه به پیکسل) تا با جابه‌جایی/زوم چارت همراه بماند. */
+    private var crossIdx = -1
+    private var crossPrice = Double.NaN
+    /** انگشت روی چارت در حالی که کراس‌هیر روشن است ⇒ کشیدن کراس‌هیر (نه جابه‌جایی چارت). */
+    private var crossDragging = false
     private var hoverIdx = -1
     private var longPressRunnable: Runnable? = null
 
@@ -581,14 +586,16 @@ class ChartView @JvmOverloads constructor(
                 lastX = event.x; lastY = event.y
                 axisDrag = event.x >= plotW
                 timeDrag = event.y >= chartH - timeH
-                crossOn = false
+                // کراس‌هیر با لمس تازه خاموش نمی‌شود؛ اگر روشن باشد، همین انگشت آن را می‌کشد.
+                crossDragging = crossOn && !axisDrag && !timeDrag
+                if (crossDragging) setCross(event.x, event.y)
                 scheduleLongPress(event.x, event.y)
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
                 cancelPendingLongPress()
                 multi = true
-                crossOn = false
+                crossDragging = false
                 pinchStartDist = spacing(event).coerceAtLeast(1f)
                 pinchFocusX = focusX(event)
                 pinchFocusY = focusY(event)
@@ -634,11 +641,10 @@ class ChartView @JvmOverloads constructor(
                 } else {
                     val dx = event.x - lastX
                     val dy = event.y - lastY
-                    if (!crossOn && (abs(event.x - downX) > slop || abs(event.y - downY) > slop)) cancelLongPress()
+                    if (!crossDragging && (abs(event.x - downX) > slop || abs(event.y - downY) > slop)) cancelLongPress()
                     when {
-                        crossOn -> {           // کراس‌هیر را بکش
-                            crossX = event.x.coerceIn(0f, plotW - 1f)
-                            crossY = event.y.coerceIn(0f, chartH - timeH - 1f)
+                        crossDragging -> {     // کراس‌هیر را کندل‌به‌کندل و سطح‌به‌سطح بکش
+                            setCross(event.x, event.y)
                             updateHover()
                             invalidate()
                         }
@@ -671,10 +677,17 @@ class ChartView @JvmOverloads constructor(
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 cancelPendingLongPress()
                 dragging = false
-                if (crossOn) {
-                    crossOn = false
-                    updateHover()
-                    onInfo?.invoke("")
+                if (crossDragging) {
+                    crossDragging = false
+                    val tapped = abs(event.x - downX) < touchSlop && abs(event.y - downY) < touchSlop
+                    if (tapped) {
+                        // ضربهٔ دوباره روی چارت ⇒ کراس‌هیر خاموش
+                        crossOn = false
+                        hoverIdx = -1
+                        onInfo?.invoke("")
+                        lastTapT = SystemClock.uptimeMillis(); lastTapX = event.x; lastTapY = event.y
+                    }
+                    // پس از کشیدن، کراس‌هیر روی چارت می‌ماند
                     invalidate()
                     return true
                 }
@@ -696,10 +709,11 @@ class ChartView @JvmOverloads constructor(
                         return true
                     }
                     lastTapT = now; lastTapX = event.x; lastTapY = event.y
-                    hoverIdx = Math.round(indexAtX(event.x)).coerceIn(0, max(0, candles.size - 1))
-                    crossOn = true
-                    crossX = event.x; crossY = event.y
-                    updateHover(); invalidate()
+                    if (event.x < plotW && event.y < chartH - timeH) {
+                        crossOn = true
+                        setCross(event.x, event.y)
+                        updateHover(); invalidate()
+                    }
                     return true
                 }
                 // پرتاب اینرسی
@@ -742,11 +756,8 @@ class ChartView @JvmOverloads constructor(
         cancelPendingLongPress()
         val r = Runnable {
             crossOn = true
-            // ⚠ `coerceIn(min, max)` وقتی max < min باشد IllegalArgumentException می‌دهد.
-            // اگر لمس طولانی پیش از اولین layout اتفاق بیفتد (plotW == 0)، همین‌جا کرش
-            // می‌کرد. حالا کران پایینِ بازه صفر تضمین می‌شود.
-            crossX = x.coerceIn(0f, maxOf(0f, plotW - 1f))
-            crossY = y.coerceIn(0f, maxOf(0f, chartH - timeH - 1f))
+            setCross(x, y)
+            crossDragging = true
             updateHover()
             invalidate()
             onContextMenu?.invoke()
@@ -760,8 +771,31 @@ class ChartView @JvmOverloads constructor(
         longPressRunnable = null
     }
 
+    /**
+     * قفل کردن کراس‌هیر روی نزدیک‌ترین کندل (خط عمودی) و نزدیک‌ترین سطح قیمتِ گرد
+     * (خط افقی؛ یک‌دهم فاصلهٔ خطوط شبکه). مختصات پیکسلی در هر رسم از همین‌ها ساخته می‌شود.
+     */
+    private fun setCross(x: Float, y: Float) {
+        // ⚠ `coerceIn(min, max)` با max < min استثنا می‌دهد؛ پیش از اولین layout کران صفر تضمین می‌شود.
+        val cx = x.coerceIn(0f, maxOf(0f, plotW - 1f))
+        val cy = y.coerceIn(0f, maxOf(0f, chartH - timeH - 1f))
+        crossIdx = if (candles.isEmpty()) -1 else Math.round(indexAtX(cx)).coerceIn(0, candles.size - 1)
+        val raw = priceAtY(cy)
+        crossPrice = if (priceSpan.isFinite() && priceSpan > 0) {
+            val step = niceStep(priceSpan / 60.0)
+            if (step > 0 && step.isFinite()) Math.round(raw / step) * step else raw
+        } else raw
+        syncCrossPixels()
+    }
+
+    /** مختصات پیکسلی کراس‌هیر از کندل/سطح قفل‌شده (پس از هر جابه‌جایی/زوم چارت). */
+    private fun syncCrossPixels() {
+        if (crossIdx in candles.indices) crossX = xOf(crossIdx.toFloat())
+        if (!crossPrice.isNaN()) crossY = yOf(crossPrice)
+    }
+
     private fun updateHover() {
-        val i = Math.round(indexAtX(crossX))
+        val i = if (crossIdx >= 0) crossIdx else Math.round(indexAtX(crossX))
         hoverIdx = if (i in candles.indices) i else -1
         if (hoverIdx >= 0) {
             val c = candles[hoverIdx]
@@ -950,12 +984,14 @@ class ChartView @JvmOverloads constructor(
         if (showLegend) drawLegend(canvas)
 
         // ── کراس‌هیر ──
-        if (crossOn && crossX < plotW) {
+        if (crossOn) syncCrossPixels()
+        if (crossOn && crossX >= 0f && crossX < plotW && crossY >= 0f && crossY <= h) {
             canvas.drawLine(crossX, 0f, crossX, h, pCross)
             canvas.drawLine(0f, crossY, plotW, crossY, pCross)
-            bubble(canvas, plotW + 1f, crossY - Ui.dp(context, 9f), axisW - 2f, fmtPrice(priceAtY(crossY)))
-            if (hoverIdx in candles.indices) {
-                val t = timeLabelFull(candles[hoverIdx].t)
+            val px = if (crossPrice.isNaN()) priceAtY(crossY) else crossPrice
+            bubble(canvas, plotW + 1f, crossY - Ui.dp(context, 9f), axisW - 2f, fmtPrice(px))
+            if (crossIdx in candles.indices) {
+                val t = timeLabelFull(candles[crossIdx].t)
                 val w = pBubbleTxt.measureText(t) + Ui.dp(context, 10f)
                 bubble(canvas, (crossX - w / 2).coerceIn(0f, plotW - w), h + 1f, w, t)
             }
@@ -1133,7 +1169,7 @@ class ChartView @JvmOverloads constructor(
     }
 
     private fun isMarkerKindVisible(kind: Int): Boolean = when (kind) {
-        MarkerKind.PIN_BU, MarkerKind.PIN_BE -> showPinMarkers
+        MarkerKind.PIN_BU, MarkerKind.PIN_BE, MarkerKind.STRUCT -> showPinMarkers
         MarkerKind.TREND_UP, MarkerKind.TREND_DOWN -> showTrendMarkers
         2 -> showTouchMarkers
         3 -> showMidMarkers
@@ -1168,6 +1204,23 @@ class ChartView @JvmOverloads constructor(
                 else -> Palette.grey
             }
             val r = Ui.dp(context, 3f).toFloat()
+            if (m.kind == MarkerKind.STRUCT) {
+                // برچسب ساختار HH / HL / LL / LH روی کندل مهمِ پین (سند §۴-۱ «روند»)
+                val isHigh = m.text == "HH" || m.text == "LH"
+                val structCol = if (isHigh) Color.parseColor("#C2417C") else Palette.accent
+                val labelW = pLabelTxt.measureText(m.text) + Ui.dp(context, 10f)
+                val labelH = Ui.dp(context, 17f).toFloat()
+                val gap = Ui.dp(context, 14f).toFloat()
+                val left = (x - labelW / 2f).coerceIn(2f, (plotW - labelW - 2f).coerceAtLeast(2f))
+                val wantedTop = if (isHigh) y - gap - labelH else y + gap
+                val top = wantedTop.coerceIn(2f, (priceH - labelH - 2f).coerceAtLeast(2f))
+                pLabelBg.color = (structCol and 0x00FFFFFF) or 0xE6000000.toInt()
+                val rect = RectF(left, top, left + labelW, top + labelH)
+                canvas.drawRoundRect(rect, Ui.dp(context, 3f).toFloat(), Ui.dp(context, 3f).toFloat(), pLabelBg)
+                pLabelTxt.color = Color.WHITE
+                canvas.drawText(m.text, left + Ui.dp(context, 5f), top + labelH * 0.72f, pLabelTxt)
+                continue
+            }
             if (m.kind == MarkerKind.TREND_UP || m.kind == MarkerKind.TREND_DOWN) {
                 val up = m.kind == MarkerKind.TREND_UP
                 val tipY = if (up) y - r * 2.5f else y + r * 2.5f

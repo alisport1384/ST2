@@ -196,6 +196,7 @@ object MarkerKind {
     const val TRIGGER1_USED = 11
     const val TREND_UP = 12
     const val TREND_DOWN = 13
+    const val STRUCT = 14          // برچسب ساختار HH / HL / LL / LH
 }
 
 /** مارکر روی چارت (برچسب‌های استراتژی) — ذخیره و بازیابی می‌شود. */
