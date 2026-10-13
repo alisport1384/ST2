@@ -1133,7 +1133,7 @@ class ChartView @JvmOverloads constructor(
     }
 
     private fun isMarkerKindVisible(kind: Int): Boolean = when (kind) {
-        MarkerKind.PIN_BU, MarkerKind.PIN_BE -> showPinMarkers
+        MarkerKind.PIN_BU, MarkerKind.PIN_BE, MarkerKind.STRUCT -> showPinMarkers
         MarkerKind.TREND_UP, MarkerKind.TREND_DOWN -> showTrendMarkers
         2 -> showTouchMarkers
         3 -> showMidMarkers
@@ -1168,6 +1168,23 @@ class ChartView @JvmOverloads constructor(
                 else -> Palette.grey
             }
             val r = Ui.dp(context, 3f).toFloat()
+            if (m.kind == MarkerKind.STRUCT) {
+                // برچسب ساختار HH / HL / LL / LH روی کندل مهمِ پین (سند §۴-۱ «روند»)
+                val isHigh = m.text == "HH" || m.text == "LH"
+                val structCol = if (isHigh) Color.parseColor("#C2417C") else Palette.accent
+                val labelW = pLabelTxt.measureText(m.text) + Ui.dp(context, 10f)
+                val labelH = Ui.dp(context, 17f).toFloat()
+                val gap = Ui.dp(context, 14f).toFloat()
+                val left = (x - labelW / 2f).coerceIn(2f, (plotW - labelW - 2f).coerceAtLeast(2f))
+                val wantedTop = if (isHigh) y - gap - labelH else y + gap
+                val top = wantedTop.coerceIn(2f, (priceH - labelH - 2f).coerceAtLeast(2f))
+                pLabelBg.color = (structCol and 0x00FFFFFF) or 0xE6000000.toInt()
+                val rect = RectF(left, top, left + labelW, top + labelH)
+                canvas.drawRoundRect(rect, Ui.dp(context, 3f).toFloat(), Ui.dp(context, 3f).toFloat(), pLabelBg)
+                pLabelTxt.color = Color.WHITE
+                canvas.drawText(m.text, left + Ui.dp(context, 5f), top + labelH * 0.72f, pLabelTxt)
+                continue
+            }
             if (m.kind == MarkerKind.TREND_UP || m.kind == MarkerKind.TREND_DOWN) {
                 val up = m.kind == MarkerKind.TREND_UP
                 val tipY = if (up) y - r * 2.5f else y + r * 2.5f

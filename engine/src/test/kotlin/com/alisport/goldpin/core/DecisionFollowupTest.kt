@@ -72,30 +72,30 @@ class DecisionFollowupTest {
     }
 
     @Test
-    fun `arming snapshots the latest opposing pin rather than the sequence extreme`() {
+    fun `arming snapshots HH as the price expiry level (doc 4-8)`() {
         val cfg = Settings().apply { minTPunits = 10.0 }
         val engine = Engine(cfg)
         val broker = PaperBroker(cfg)
         engine.broker = broker
         broker.engine = engine
-        engine.highestBE = 200.0
+        engine.HH = 200.0
+        engine.highestBE = 230.0
         engine.lastBEpin = 190.0
 
         val setup = Setup(1L, 1, 5, 220.0, 210.0, 1, 0).apply {
             hvH = 210.0
             hvL = 209.0
-            midRef = 195.0 // Valid anchor; latest pin differs from the sequence extreme.
+            midRef = 195.0
         }
         val bar = Candle(10, 1_700_000_600_000L, 211.0, 212.0, 210.0, 211.0, 100.0)
         invokePrivate(engine, "armSetup", setup, bar, true)
 
-        assertEquals(190.0, setup.priceExpiryRef, 1e-9)
-        assertEquals(200.0, engine.highestBE, 1e-9)
+        assertEquals(200.0, setup.priceExpiryRef, 1e-9)
         assertEquals(1, broker.pendingOrders.size)
     }
 
     @Test
-    fun `next middle candle after the broken one reconfirms without a new structure touch`() {
+    fun `the middle candle containing the break reconfirms on its own close (doc 18-8)`() {
         val engine = Engine(Settings())
         val setup = Setup(1L, 1, 3, 95.0, 90.0, 1, 0).apply {
             midRef = 100.0
@@ -115,19 +115,13 @@ class DecisionFollowupTest {
         )
         assertTrue(setup.midRef.isNaN())
         assertEquals(1, setup.stage, "بعد از ابطال، ستاپ منتظر کلوز کندل میانی است (مرحلهٔ ۱)")
-        // سند §۴-۶: «کندل بعدی» = اولین کندل میانی بعد از کندلی که تیک شکست در آن بوده
-        val afterBreakStart = Tf.bucket(Tf.M15, nextMiddleStart) + Tf.M15 * 1000L
-        assertEquals(afterBreakStart, setup.touchMidStart)
+        // §18-8: کندل میانی‌ای که تیک شکست در آن بوده، هنگام بسته شدن می‌تواند خودش تایید میانی باشد
+        val breakBucketStart = Tf.bucket(Tf.M15, nextMiddleStart)
+        assertEquals(breakBucketStart, setup.touchMidStart)
 
-        // کلوز همان کندل میانیِ شکسته‌شده، تأیید تازه نمی‌دهد
+        // کلوز همان کندل میانیِ شکسته‌شده، تأیید تازه می‌دهد (کف آن سطح جدید است)
         val brokenMiddle = Candle(2, nextMiddleStart, 101.0, 104.0, 98.0, 102.0, 500.0)
         invokePrivate(engine, "middleEngine", brokenMiddle)
-        assertTrue(setup.midRef.isNaN())
-
-        // کندل میانی بعدی تأیید می‌دهد
-        engine.curBi = 3
-        val nextMiddle = Candle(3, afterBreakStart, 102.0, 105.0, 98.0, 103.0, 500.0)
-        invokePrivate(engine, "middleEngine", nextMiddle)
         assertEquals(98.0, setup.midRef, 1e-9)
         assertEquals(2, setup.stage)
     }
