@@ -93,7 +93,8 @@ class PaperBroker(private val cfg: Settings) {
             lastError = "برای ستاپ #${s.id} قبلاً سفارش معلق ثبت شده"
             return false
         }
-        val entryPx = if (s.bull) s.hvH else s.hvL
+        // §4-8 سند: سطح سفارش = سقف باکس HV + ۲ تیک بافر (خرید) / کف باکس HV − ۲ تیک بافر (فروش)
+        val entryPx = cfg.entryLevel(s.bull, s.hvH, s.hvL)
         val qty = qtyFor(entryPx, s.sl)
         if (qty <= 0) {
             lastError = "حجم صفر بود (مارجین کافی نیست یا حدضرر صفر)"
@@ -194,7 +195,7 @@ class PaperBroker(private val cfg: Settings) {
     private fun manageBar(t: Trade, cd: Candle) {
         val bull = t.dir == 1
         val sameEntryBar = cd.bi == t.entryBi
-        val slLvl = if (t.be) t.entry else t.sl0
+        val slLvl = if (t.be) t.entry else if (!t.slAdj.isNaN()) t.slAdj else t.sl0
         val q1 = t.qty * 0.33
         val q2 = t.qty * 0.33
 
@@ -245,6 +246,19 @@ class PaperBroker(private val cfg: Settings) {
         val returnedToEntry = if (bull) cd.l <= t.entry else cd.h >= t.entry
         if (t.open && t.be && returnedToEntry) {
             closeAll(t, t.entry, cd.t, cd.bi, "خروج سر‌به‌سر")
+        }
+
+        // §4-9 سند («خیلی مهم»): اولین کندل تریگر۲ که کاملاً آن‌سوی سطح سفارش بسته شود
+        // (بدون حتی یک تیک لمس سطح) → حد ضرر یک‌بار به ۵۰٪ باکس HV منتقل می‌شود.
+        // مرکز باکس HV = میانگین سطح سفارش (سقف+۲تیک) و حد ضرر اولیه (کف−۲تیک).
+        if (t.open && !t.be && t.slAdj.isNaN() && !sameEntryBar) {
+            val clear = if (bull) cd.l > t.entry else cd.h < t.entry
+            if (clear) {
+                val mid = (t.entry + t.sl0) / 2.0
+                t.slAdj = mid
+                lg("TRADE", "کندل تریگر۲ کاملاً آن‌سوی سطح سفارش بسته شد → حدضرر به ۵۰٪ باکس HV منتقل شد · معامله #${t.id}",
+                    "sl=${fmt(mid)} bar=${cd.bi}")
+            }
         }
     }
 

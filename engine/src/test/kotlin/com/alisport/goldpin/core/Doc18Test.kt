@@ -176,9 +176,9 @@ class Doc18Test {
         assertEquals(2, s.midBi)
     }
 
-    /** §18-10: بعد از مسلح شدن، مصرف یا ابطال LV سفارش مسلح‌شده را لغو می‌کند. */
+    /** §4-7 (دو بارمصرف) + §18-10: دو مصرف باکس را نگه می‌دارد؛ لمس سوم LV سفارش مسلح‌شده را لغو می‌کند. */
     @Test
-    fun `LV consumption after arming cancels the pending order`() {
+    fun `LV keeps two uses and third touch after arming cancels the pending order`() {
         val cfg = Settings().also { it.tfS = Tf.M1; it.tfM = Tf.M1; it.tf1 = Tf.M1; it.tf2 = Tf.M1 }
         val e = Engine(cfg); val b = PaperBroker(cfg); e.broker = b; b.engine = e
         val s = Setup(1L, 1, 6, 220.0, 200.0, 1, 0).apply {
@@ -186,18 +186,53 @@ class Doc18Test {
             lvBi = 2; lvConfBi = 2; lvH = 212.0; lvL = 205.0; lvReEntered = true; lvTouched = true
             hvBi = 4; hvConfBi = 5; hvH = 214.0; hvL = 213.0; sl = 212.98; tp1 = 220.0; tp2 = 222.0; tpx = 230.0
         }
+        assertEquals(214.02, e.entryLevel(s, true), 1e-9, "سطح سفارش خرید = سقف باکس HV + ۲ تیک")
         e.setups.add(s)
         e.curBi = 6; e.curT = 1_700_001_200_000L
         val bar = Candle(6, e.curT, 214.5, 215.0, 214.2, 214.8, 100.0)
         assertTrue(b.registerLimit(s, bar))
         assertEquals(1, b.pendingOrders.size)
-        val q1 = Candle(7, e.curT + 60_000L, 213.0, 215.0, 212.5, 214.0, 90.0)  // کلوز بالای سقف LV ⇒ مصرف
+        assertEquals(214.02, b.pendingOrders[0].price, 1e-9)
         val mth = Engine::class.java.getDeclaredMethod("trigger1Engine", Candle::class.java).also { it.isAccessible = true }
-        e.curBi = 7; e.curT = q1.t
-        mth.invoke(e, q1)
-        assertTrue(s.lvUsed)
-        assertEquals(0, b.pendingOrders.size, "سفارش مسلح‌شده باید لغو شود (§18-10)")
-        assertEquals(8, s.stage)
+        fun t1(bi: Int, o: Double, h: Double, l: Double, c: Double) {
+            val q = Candle(bi, 1_700_001_200_000L + (bi - 6) * 60_000L, o, h, l, c, 90.0)
+            e.curBi = bi; e.curT = q.t
+            mth.invoke(e, q)
+        }
+        t1(7, 213.0, 215.0, 212.5, 214.0)       // لمس شده بود (lvTouched) + کلوز بالای سقف ⇒ مصرف ۱
+        assertEquals(1, s.lvUses); assertFalse(s.lvUsed)
+        assertEquals(1, b.pendingOrders.size, "پس از مصرف اول، باکس و سفارش می‌مانند")
+        assertEquals(6, s.stage)
+        t1(8, 213.5, 214.0, 211.0, 212.5)       // نفوذ به باکس و کلوز بالای سقف در همان کندل ⇒ مصرف ۲
+        assertEquals(2, s.lvUses); assertFalse(s.lvUsed)
+        assertEquals(1, b.pendingOrders.size, "پس از مصرف دوم هم باکس و سفارش می‌مانند")
+        assertEquals(6, s.stage)
+        t1(9, 213.0, 214.0, 212.0, 213.5)       // لمس سوم (یک تیک) ⇒ ابطال باکس
+        assertEquals(0, b.pendingOrders.size, "سفارش مسلح‌شده باید لغو شود (§4-7 / §18-10)")
+        assertEquals(3, s.stage, "ستاپ تا اعتبار ساختار/میانی منتظر LV جدید می‌ماند")
+        assertEquals(-1, s.lvBi)
+    }
+
+    /** §4-9 «خیلی مهم»: کندل تریگر۲ کاملاً آن‌سوی سطح سفارش ⇒ حد ضرر یک‌بار به ۵۰٪ باکس HV. */
+    @Test
+    fun `clear candle beyond order level moves stop to HV box middle once`() {
+        val cfg = Settings()
+        val b = PaperBroker(cfg)
+        val s = Setup(1L, 1, 5, 220.0, 200.0, 1, 0).apply { hvH = 210.0; hvL = 208.0; sl = 207.98; tp1 = 215.0; tp2 = 218.0; tpx = 225.0 }
+        val t0 = 1_700_001_000_000L
+        assertTrue(b.registerLimit(s, Candle(10, t0, 211.0, 212.0, 210.5, 211.0, 100.0)))
+        b.onBar(Candle(11, t0 + 60_000L, 211.0, 211.5, 209.5, 211.0, 100.0))        // پر شدن روی ۲۱۰٫۰۲
+        assertEquals(1, b.openTrades.size)
+        val tr = b.openTrades[0]
+        assertEquals(210.02, tr.entry, 1e-9)
+        b.onBar(Candle(12, t0 + 120_000L, 211.0, 211.8, 210.02, 211.2, 100.0))      // کف = سطح سفارش (لمس) ⇒ منتقل نمی‌شود
+        assertTrue(tr.slAdj.isNaN())
+        b.onBar(Candle(13, t0 + 180_000L, 211.0, 211.8, 210.5, 211.5, 100.0))       // کاملاً بالای سطح ⇒ SL = ۵۰٪ باکس
+        assertEquals(209.0, tr.slAdj, 1e-9)
+        b.onBar(Candle(14, t0 + 240_000L, 211.0, 211.2, 208.9, 209.5, 100.0))       // لمس حد ضرر جدید
+        assertEquals(0, b.openTrades.size)
+        assertEquals("حد ضرر", tr.reason)
+        assertEquals(209.0, tr.exitPx!!, 1e-9)
     }
 
     /** §18-13: وجود معاملهٔ باز مانع مسلح شدن سفارش جدید نیست؛ فقط یک سفارش معلق مجاز است. */
