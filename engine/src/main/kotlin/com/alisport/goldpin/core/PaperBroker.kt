@@ -203,7 +203,7 @@ class PaperBroker(private val cfg: Settings) {
         // حد ضرر در کندلی که SL و TP لمس شوند برنده است.
         val hitStop = if (bull) cd.l <= slLvl else cd.h >= slLvl
         if (hitStop) {
-            closeAll(t, slLvl, cd.t, cd.bi, if (t.be) "خروج سر‌به‌سر" else "حد ضرر")
+            closeAll(t, slLvl, cd.t, cd.bi, if (t.be || !t.slAdj.isNaN()) "خروج سر‌به‌سر" else "حد ضرر")
             return
         }
         val hitFinal = if (bull) cd.h >= t.tpX else cd.l <= t.tpX
@@ -249,15 +249,13 @@ class PaperBroker(private val cfg: Settings) {
         }
 
         // §4-9 سند («خیلی مهم»): اولین کندل تریگر۲ که کاملاً آن‌سوی سطح سفارش بسته شود
-        // (بدون حتی یک تیک لمس سطح) → حد ضرر یک‌بار به ۵۰٪ باکس HV منتقل می‌شود.
-        // مرکز باکس HV = میانگین سطح سفارش (سقف+۲تیک) و حد ضرر اولیه (کف−۲تیک).
+        // (بدون حتی یک تیک لمس سطح) → حد ضرر یک‌بار به سطح سفارش منتقل می‌شود.
         if (t.open && !t.be && t.slAdj.isNaN() && !sameEntryBar) {
             val clear = if (bull) cd.l > t.entry else cd.h < t.entry
             if (clear) {
-                val mid = (t.entry + t.sl0) / 2.0
-                t.slAdj = mid
-                lg("TRADE", "کندل تریگر۲ کاملاً آن‌سوی سطح سفارش بسته شد → حدضرر به ۵۰٪ باکس HV منتقل شد · معامله #${t.id}",
-                    "sl=${fmt(mid)} bar=${cd.bi}")
+                t.slAdj = t.entry
+                lg("TRADE", "کندل تریگر۲ کاملاً آن‌سوی سطح سفارش بسته شد → حدضرر به سطح سفارش منتقل شد · معامله #${t.id}",
+                    "sl=${fmt(t.entry)} bar=${cd.bi}")
             }
         }
     }

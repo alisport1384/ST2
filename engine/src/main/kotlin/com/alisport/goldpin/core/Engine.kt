@@ -327,6 +327,29 @@ class Engine(val cfg: Settings) {
             val it2 = setups.iterator()
             while (it2.hasNext()) {
                 val s = it2.next()
+                // §18-14: پس از لمس ناحیهٔ ساختار، اولین کندل ساختاری که بعد از لمس باز و بسته شود
+                // ناحیه را باطل (مصرف‌شده) می‌کند؛ ستاپ تا زمان اعتبار تایید میانی فعال می‌ماند.
+                if (!s.zUsed && !s.zGone && s.stage in 1..7 && s.touchT > 0L) {
+                    val sbT = aggS.cl?.t ?: 0L
+                    if (sbT > Tf.bucket(cfg.tfS, s.touchT)) {
+                        s.zUsed = true
+                        zones.firstOrNull { it.dir == s.dir && it.idx == s.zIdx && it.createdBi == s.zBi && it.status == ZoneStatus.ACTIVE }
+                            ?.let { it.status = ZoneStatus.CONSUMED; it.endBi = i; it.endT = cd.t }
+                        if (s.stage == 1 || s.midRef.isNaN()) {
+                            // بدون تایید میانی معتبر چیزی برای ادامه نیست ⇒ ستاپ غیرفعال تا لمس ناحیهٔ بعدی
+                            s.zGone = true
+                            s.stage = 8
+                            s.note = "ناحیهٔ ساختار مصرف شد (یک کندل ساختار پس از لمس) — بدون تایید میانی"
+                            events.add("[${s.id}] ناحیهٔ ساختار مصرف شد — ستاپ غیرفعال")
+                        } else {
+                            s.note = "ناحیهٔ ساختار مصرف شد — ستاپ تا ابطال تایید میانی فعال است"
+                            events.add("[${s.id}] ناحیهٔ ساختار مصرف شد؛ ستاپ تا ابطال تایید میانی فعال می‌ماند")
+                        }
+                        addMarker(i, if (s.dir == 1) s.zBot else s.zTop, 10, "ناحیهٔ ساختار مصرف شد (§18-14)")
+                        lg("ZONE", "ناحیهٔ ساختار پس از لمس و گذشت یک کندل ساختار کامل باطل شد · ستاپ #${s.id}",
+                            "zone=${f2(s.zBot)}-${f2(s.zTop)} stage=${s.stage} bar=$i")
+                    }
+                }
                 val structureElapsed = fullStructureElapsed(s.armBi, i, cfg.tfS, cfg.tf2)
                 if (structureElapsed && s.stage == 4 && s.rearmAllowed) {
                     s.stage = 8; s.note = "گذشت یک کندل ساختار کامل پس از مسلح‌شدن"
@@ -887,7 +910,14 @@ class Engine(val cfg: Settings) {
                     lg("ENGINE", "تایید میانی باطل شد · ستاپ #${s.id}", "سطح قبلی=${f2(old)} bar=${mc.bi}")
                     // §18-8: همین کندل میانی که تایید را باطل کرد، به شرط معتبر بودن ناحیهٔ ساختار،
                     // خودش تایید میانی جدید است و مارک می‌شود.
-                    if (!s.zGone) {
+                    if (s.zUsed) {
+                        // §18-14: ناحیهٔ ساختار مصرف شده بود ⇒ با ابطال تایید میانی ستاپ هم باطل می‌شود
+                        s.zGone = true
+                        s.stage = 8
+                        s.note = "ابطال تایید میانی پس از مصرف ناحیهٔ ساختار — ستاپ باطل"
+                        events.add("[${s.id}] تایید میانی باطل شد و ناحیهٔ ساختار مصرف شده بود — ستاپ باطل")
+                        lg("ENGINE", "ستاپ #${s.id} باطل شد (ابطال میانی پس از مصرف ناحیهٔ ساختار، §18-14)", "bar=${mc.bi}")
+                    } else if (!s.zGone) {
                         s.midRef = if (s.dir == 1) mc.l else mc.h
                         s.midBi = mc.bi
                         s.midT = mc.t
@@ -1166,9 +1196,17 @@ class Engine(val cfg: Settings) {
                     closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
                     closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
                     s.midRef = Double.NaN; s.midBi = -1; s.midT = 0L; s.markBi = -1
-                    // §18-8: کندل میانی‌ای که تیک شکست در آن رخ داده، هنگام بسته شدن می‌تواند خودش تایید میانی جدید باشد
-                    s.touchMidStart = Tf.bucket(cfg.tfM, cd.t)
-                    s.stage = 1
+                    if (s.zUsed) {
+                        // §18-14: ناحیهٔ ساختار مصرف شده بود ⇒ ستاپ باطل و تا لمس ناحیهٔ بعدی غیرفعال
+                        s.zGone = true
+                        s.stage = 8
+                        s.note = "ابطال تایید میانی پس از مصرف ناحیهٔ ساختار — ستاپ باطل"
+                        events.add("[${s.id}] تایید میانی باطل شد و ناحیهٔ ساختار مصرف شده بود — ستاپ باطل")
+                    } else {
+                        // §18-8: کندل میانی‌ای که تیک شکست در آن رخ داده، هنگام بسته شدن می‌تواند خودش تایید میانی جدید باشد
+                        s.touchMidStart = Tf.bucket(cfg.tfM, cd.t)
+                        s.stage = 1
+                    }
                     s.lvBi = -1; s.lvT = 0L; s.lvConfBi = -1; s.lvConfT = 0L; s.lvH = Double.NaN; s.lvL = Double.NaN
                     s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.hvScanBi = -1; s.runMax = Double.NaN
                     s.lvTouched = false; s.lvUsed = false; s.lvReEntered = false; s.lvUses = 0
@@ -1186,6 +1224,7 @@ class Engine(val cfg: Settings) {
                     s.stage = 1
                     cnt.touch++
                     s.touchBi = curBi
+                    s.touchT = cd.t
                     s.touchMidStart = aggM.cur?.t ?: cd.t
                     addMarker(curBi, if (bull) s.zBot else s.zTop, 2, "برخورد · منتظر بسته شدن کندل میانی")
                     lg("ENGINE", "برخورد قیمت با ناحیهٔ ساختار · ستاپ #${s.id}",
@@ -1305,7 +1344,7 @@ class Engine(val cfg: Settings) {
                 var note = ""
                 val entrySameBar = (s.entryBi == curBi)
                 if (bull) {
-                    if (low <= s.sl) { done = true; px = s.sl; note = if (s.be) "خروج سر‌به‌سر" else "حد ضرر" }
+                    if (low <= s.sl) { done = true; px = s.sl; note = if (s.be || s.slMidDone) "خروج سر‌به‌سر" else "حد ضرر" }
                     else if (high >= s.tpx) { done = true; px = s.tpx; note = "حد سود نهایی (1.272)" }
                     else {
                         // §۶-۲۱: ورود و TP1 در یک کندل → خروج سر‌به‌سر خالص (نتیجه صفر)
@@ -1332,7 +1371,7 @@ class Engine(val cfg: Settings) {
                         }
                     }
                 } else {
-                    if (high >= s.sl) { done = true; px = s.sl; note = if (s.be) "خروج سر‌به‌سر" else "حد ضرر" }
+                    if (high >= s.sl) { done = true; px = s.sl; note = if (s.be || s.slMidDone) "خروج سر‌به‌سر" else "حد ضرر" }
                     else if (low <= s.tpx) { done = true; px = s.tpx; note = "حد سود نهایی (1.272)" }
                     else {
                         val sameBarNetZero = entrySameBar && !s.tp1.isNaN()
@@ -1360,19 +1399,15 @@ class Engine(val cfg: Settings) {
                 }
                 // §4-9 سند («خیلی مهم»): اگر پس از پر شدن، یک کندل تریگر۲ کاملاً آن‌سوی سطح سفارش
                 // بسته شود (O/H/L/C همگی بالاتر از سطح در خرید / پایین‌تر در فروش، بدون حتی یک تیک لمس)،
-                // حد ضرر یک‌بار به مرکز (۵۰٪) باکس HV منتقل می‌شود.
-                if (!done && !s.be && !s.slMidDone && !entrySameBar && !s.hvH.isNaN() && !s.hvL.isNaN()) {
+                // حد ضرر یک‌بار به سطح سفارش منتقل می‌شود.
+                if (!done && !s.be && !s.slMidDone && !entrySameBar && !s.entry.isNaN()) {
                     val clear = if (bull) low > s.entry else high < s.entry
                     if (clear) {
-                        val mid = (s.hvH + s.hvL) / 2.0
-                        val better = if (bull) mid > s.sl else mid < s.sl
                         s.slMidDone = true
-                        if (better) {
-                            s.sl = mid
-                            addMarker(curBi, mid, 8, "حدضرر → ۵۰٪ باکس HV")
-                            lg("TRADE", "کندل تریگر۲ کاملاً آن‌سوی سطح سفارش بسته شد → حدضرر به ۵۰٪ باکس HV منتقل شد · ستاپ #${s.id}",
-                                "sl=${f2(mid)} bar=$curBi")
-                        }
+                        s.sl = s.entry
+                        addMarker(curBi, s.entry, 8, "حدضرر → سطح سفارش")
+                        lg("TRADE", "کندل تریگر۲ کاملاً آن‌سوی سطح سفارش بسته شد → حدضرر به سطح سفارش منتقل شد · ستاپ #${s.id}",
+                            "sl=${f2(s.entry)} bar=$curBi")
                     }
                 }
                 if (done) {
@@ -1645,11 +1680,15 @@ class Setup(
     var midConfirmBi = -1
     var runMax = Double.NaN
     var zGone = false
+    /** §18-14 سند: ناحیهٔ ساختار پس از لمس و گذشت یک کندل ساختار کامل «مصرف‌شده/باطل» است؛
+     *  ستاپ تا ابطال تایید میانی فعال می‌ماند و با ابطال میانی پایان می‌یابد. */
+    var zUsed = false
+    var touchT = 0L
     var lvTouched = false
     var lvUsed = false
     /** §4-7 سند: تعداد دفعات مصرف سهمیهٔ باکس LV (حداکثر ۲؛ لمس سوم = ابطال). */
     var lvUses = 0
-    /** §4-9 سند («خیلی مهم»): انتقال یک‌بارهٔ حد ضرر به ۵۰٪ باکس HV انجام شده است. */
+    /** §4-9 سند («خیلی مهم»): انتقال یک‌بارهٔ حد ضرر به سطح سفارش انجام شده است. */
     var slMidDone = false
     var lvReEntered = false
     var entry = Double.NaN

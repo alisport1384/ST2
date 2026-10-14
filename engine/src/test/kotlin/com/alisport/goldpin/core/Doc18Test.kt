@@ -213,9 +213,9 @@ class Doc18Test {
         assertEquals(-1, s.lvBi)
     }
 
-    /** §4-9 «خیلی مهم»: کندل تریگر۲ کاملاً آن‌سوی سطح سفارش ⇒ حد ضرر یک‌بار به ۵۰٪ باکس HV. */
+    /** §4-9 «خیلی مهم»: کندل تریگر۲ کاملاً آن‌سوی سطح سفارش ⇒ حد ضرر یک‌بار به سطح سفارش. */
     @Test
-    fun `clear candle beyond order level moves stop to HV box middle once`() {
+    fun `clear candle beyond order level moves stop to order level once`() {
         val cfg = Settings()
         val b = PaperBroker(cfg)
         val s = Setup(1L, 1, 5, 220.0, 200.0, 1, 0).apply { hvH = 210.0; hvL = 208.0; sl = 207.98; tp1 = 215.0; tp2 = 218.0; tpx = 225.0 }
@@ -227,12 +227,12 @@ class Doc18Test {
         assertEquals(210.02, tr.entry, 1e-9)
         b.onBar(Candle(12, t0 + 120_000L, 211.0, 211.8, 210.02, 211.2, 100.0))      // کف = سطح سفارش (لمس) ⇒ منتقل نمی‌شود
         assertTrue(tr.slAdj.isNaN())
-        b.onBar(Candle(13, t0 + 180_000L, 211.0, 211.8, 210.5, 211.5, 100.0))       // کاملاً بالای سطح ⇒ SL = ۵۰٪ باکس
-        assertEquals(209.0, tr.slAdj, 1e-9)
-        b.onBar(Candle(14, t0 + 240_000L, 211.0, 211.2, 208.9, 209.5, 100.0))       // لمس حد ضرر جدید
+        b.onBar(Candle(13, t0 + 180_000L, 211.0, 211.8, 210.5, 211.5, 100.0))       // کاملاً بالای سطح ⇒ SL = سطح سفارش
+        assertEquals(210.02, tr.slAdj, 1e-9)
+        b.onBar(Candle(14, t0 + 240_000L, 211.0, 211.2, 210.0, 210.5, 100.0))       // لمس حد ضرر جدید (سطح سفارش)
         assertEquals(0, b.openTrades.size)
-        assertEquals("حد ضرر", tr.reason)
-        assertEquals(209.0, tr.exitPx!!, 1e-9)
+        assertEquals("خروج سر‌به‌سر", tr.reason)
+        assertEquals(210.02, tr.exitPx!!, 1e-9)
     }
 
     /** §18-13: وجود معاملهٔ باز مانع مسلح شدن سفارش جدید نیست؛ فقط یک سفارش معلق مجاز است. */
@@ -265,5 +265,23 @@ class Doc18Test {
         assertEquals(200.0, s.priceExpiryRef, 1e-9)
         // R = 200-150 = 50 ⇒ TP1 = 150+19.1 ، TP2 = 175 ، TPX = 150+63.6
         assertEquals(169.1, s.tp1, 1e-9); assertEquals(175.0, s.tp2, 1e-9); assertEquals(213.6, s.tpx, 1e-9)
+    }
+
+    /** §18-14: پس از مصرف ناحیهٔ ساختار، ابطال تایید میانی ستاپ را (به‌جای §18-8) باطل می‌کند. */
+    @Test
+    fun `mid invalidation after consumed structure zone ends the setup`() {
+        val cfg = Settings().also { it.tfS = Tf.M1; it.tfM = Tf.M1; it.tf1 = Tf.M1; it.tf2 = Tf.M1 }
+        val e = Engine(cfg)
+        val s = Setup(1L, 1, 4, 220.0, 200.0, 1, 0).apply {
+            midRef = 205.0; midConfirmBi = 1; zUsed = true
+            lvBi = 2; lvConfBi = 2; lvH = 212.0; lvL = 208.0
+        }
+        e.setups.add(s)
+        val mth = Engine::class.java.getDeclaredMethod("trigger2Engine", Candle::class.java).also { it.isAccessible = true }
+        e.curBi = 5; e.curT = 1_700_001_000_000L
+        mth.invoke(e, Candle(5, e.curT, 206.0, 206.5, 204.9, 205.5, 100.0))   // یک تیک زیر کف تایید میانی
+        assertEquals(8, s.stage, "ستاپ باید باطل شود، نه به مرحلهٔ ۱ برگردد")
+        assertTrue(s.zGone)
+        assertTrue(s.midRef.isNaN())
     }
 }

@@ -233,7 +233,7 @@ object Store {
         "midRef" to s.midRef, "midBi" to s.midBi, "midT" to s.midT, "markH" to s.markH, "markL" to s.markL, "markBi" to s.markBi,
         "lvH" to s.lvH, "lvL" to s.lvL, "lvBi" to s.lvBi, "lvT" to s.lvT, "lvConfBi" to s.lvConfBi, "lvConfT" to s.lvConfT, "lvZoneId" to s.lvZoneId,
         "hvH" to s.hvH, "hvL" to s.hvL, "hvBi" to s.hvBi, "hvT" to s.hvT, "hvScanBi" to s.hvScanBi, "hvConfBi" to s.hvConfBi, "hvConfT" to s.hvConfT, "hvZoneId" to s.hvZoneId,
-        "midConfirmBi" to s.midConfirmBi, "runMax" to s.runMax, "zGone" to s.zGone,
+        "midConfirmBi" to s.midConfirmBi, "runMax" to s.runMax, "zGone" to s.zGone, "zUsed" to s.zUsed, "touchT" to s.touchT,
         "lvTouched" to s.lvTouched, "lvUsed" to s.lvUsed, "lvReEntered" to s.lvReEntered, "lvUses" to s.lvUses, "slMidDone" to s.slMidDone,
         "entry" to s.entry, "sl" to s.sl, "tp1" to s.tp1, "tp2" to s.tp2, "tpx" to s.tpx,
         "be" to s.be, "tp2Hit" to s.tp2Hit, "note" to s.note, "orderId" to s.orderId,
@@ -253,6 +253,7 @@ object Store {
         s.hvScanBi = m["hvScanBi"].asI(); s.hvConfBi = m["hvConfBi"].asI(); s.hvConfT = m["hvConfT"].asL()
         s.hvZoneId = if (m.containsKey("hvZoneId")) m["hvZoneId"].asL() else -1L
         s.midConfirmBi = m["midConfirmBi"].asI(); s.runMax = m["runMax"].asD(); s.zGone = m["zGone"].asB()
+        s.zUsed = m["zUsed"].asB(); s.touchT = m["touchT"].asL()
         s.lvTouched = m["lvTouched"].asB(); s.lvUsed = m["lvUsed"].asB(); s.lvReEntered = m["lvReEntered"].asB()
         s.lvUses = m["lvUses"].asI(); s.slMidDone = m["slMidDone"].asB()
         s.entry = m["entry"].asD(); s.sl = m["sl"].asD(); s.tp1 = m["tp1"].asD(); s.tp2 = m["tp2"].asD()
