@@ -58,10 +58,16 @@ object Store {
         "maxSetups" to c.maxSetups, "midInvalidClose" to c.midInvalidClose,
         "hvScanFirstTouch" to c.hvScanFirstTouch, "hvMarkFirstIncrease" to c.hvMarkFirstIncrease,
         "rejectCandleNext" to c.rejectCandleNext,
-        "mintick" to c.mintick, "slBufTicks" to c.slBufTicks, "minTPunits" to c.minTPunits,
+        "mintick" to c.mintick, "slBufTicks" to c.slBufTicks, "entryBufTicks" to c.entryBufTicks, "minTPunits" to c.minTPunits,
         "useRiskPct" to c.useRiskPct, "riskPct" to c.riskPct, "equityPct" to c.equityPct,
         "maxLeverage" to c.maxLeverage, "roundQty" to c.roundQty,
-        "contractSize" to c.contractSize, "initialEquity" to c.initialEquity
+        "contractSize" to c.contractSize, "initialEquity" to c.initialEquity,
+        // §۲۰ سند — مدیریت مالی و مدیریت زیان
+        "mmMode" to c.mmMode, "minLotAuto" to c.minLotAuto, "minLotManual" to c.minLotManual,
+        "divAuto" to c.divAuto, "divManual" to c.divManual,
+        "cmsnAuto" to c.cmsnAuto, "cmsnManual" to c.cmsnManual,
+        "mixedGrowthPct" to c.mixedGrowthPct, "mmMaxLeverage" to c.mmMaxLeverage,
+        "lotStep" to c.lotStep, "lostResetAtFinalTp" to c.lostResetAtFinalTp
     )
 
     private fun settingsFrom(m: Map<String, Any?>): Settings {
@@ -82,6 +88,19 @@ object Store {
         c.useRiskPct = m["useRiskPct"].asB(); c.riskPct = m["riskPct"].asD(); c.equityPct = m["equityPct"].asD()
         c.maxLeverage = m["maxLeverage"].asD(); c.roundQty = m["roundQty"].asB()
         c.contractSize = m["contractSize"].asD(); c.initialEquity = m["initialEquity"].asD()
+        // کلیدهای جدید در فایل‌های قدیمی نیستند ⇒ مقدار پیش‌فرض Settings() می‌ماند (asB(null)=false درست نیست).
+        if (m.containsKey("entryBufTicks")) c.entryBufTicks = m["entryBufTicks"].asD()
+        if (m.containsKey("mmMode")) c.mmMode = m["mmMode"].asI()
+        if (m.containsKey("minLotAuto")) c.minLotAuto = m["minLotAuto"].asB()
+        if (m.containsKey("minLotManual")) c.minLotManual = m["minLotManual"].asD()
+        if (m.containsKey("divAuto")) c.divAuto = m["divAuto"].asB()
+        if (m.containsKey("divManual")) c.divManual = m["divManual"].asD()
+        if (m.containsKey("cmsnAuto")) c.cmsnAuto = m["cmsnAuto"].asB()
+        if (m.containsKey("cmsnManual")) c.cmsnManual = m["cmsnManual"].asD()
+        if (m.containsKey("mixedGrowthPct")) c.mixedGrowthPct = m["mixedGrowthPct"].asD()
+        if (m.containsKey("mmMaxLeverage")) c.mmMaxLeverage = m["mmMaxLeverage"].asD()
+        if (m.containsKey("lotStep")) c.lotStep = m["lotStep"].asD()
+        if (m.containsKey("lostResetAtFinalTp")) c.lostResetAtFinalTp = m["lostResetAtFinalTp"].asB()
         return c
     }
 
@@ -277,7 +296,10 @@ object Store {
         o["balance"] = b.balance; o["equity"] = b.equity
         o["maxEquity"] = b.maxEquity; o["maxDrawdown"] = b.maxDrawdown
         o["orderSeq"] = b.orderSeq; o["tradeSeq"] = b.tradeSeq
-        o["orders"] = b.orders.map { listOf(it.id, it.setupId, it.dir, it.type, it.price, it.sl, it.tp1, it.tp2, it.tpX, it.qty, it.zoneTop, it.zoneBot, it.placedT, it.placedBi, it.status, it.filledT ?: 0L, it.filledBi ?: -1, it.closedT ?: 0L, it.cancelReason ?: "") }
+        // §۲۰: وضعیت مدیریت زیان (فایل‌های قدیمی این کلیدها را ندارند ⇒ ۰)
+        o["mmLost"] = b.mm.lost; o["mmCmsnLost"] = b.mm.cmsnLost
+        // ۱۹ ستون اول مثل قبل؛ ستون ۲۰ و ۲۱ (§۲۰): توضیح محاسبهٔ حجم، فاز ManageCM
+        o["orders"] = b.orders.map { listOf(it.id, it.setupId, it.dir, it.type, it.price, it.sl, it.tp1, it.tp2, it.tpX, it.qty, it.zoneTop, it.zoneBot, it.placedT, it.placedBi, it.status, it.filledT ?: 0L, it.filledBi ?: -1, it.closedT ?: 0L, it.cancelReason ?: "", it.mmNote, it.mmCm) }
         o["trades"] = b.trades.map { t ->
             linkedMapOf<String, Any?>(
                 "id" to t.id, "orderId" to t.orderId, "setupId" to t.setupId, "dir" to t.dir,
@@ -286,6 +308,7 @@ object Store {
                 "zoneTop" to t.zoneTop, "zoneBot" to t.zoneBot, "contractSize" to t.contractSize,
                 "exitT" to (t.exitT ?: 0L), "exitBi" to (t.exitBi ?: -1), "exitPx" to (t.exitPx ?: Double.NaN),
                 "reason" to t.reason, "be" to t.be, "slAdj" to t.slAdj,
+                "commission" to t.commission, "mmCm" to t.mmCm,
                 "fills" to t.fills.map { listOf(it.t, it.bi, it.price, it.qty, it.kind, it.pnl) }
             )
         }
@@ -303,6 +326,8 @@ object Store {
         b.balance = m["balance"].asD(); b.equity = m["equity"].asD()
         b.maxEquity = m["maxEquity"].asD(); b.maxDrawdown = m["maxDrawdown"].asD()
         b.orderSeq = m["orderSeq"].asL(); b.tradeSeq = m["tradeSeq"].asL()
+        if (m.containsKey("mmLost")) b.mm.lost = m["mmLost"].asD()
+        if (m.containsKey("mmCmsnLost")) b.mm.cmsnLost = m["mmCmsnLost"].asD()
         for (x in m["orders"].asList()) {
             val l = x.asList(); if (l.size < 19) continue
             val or = Order(l[0].asL(), l[1].asL(), l[2].asI(), l[3].asS(), l[4].asD(), l[5].asD(), l[6].asD(),
@@ -311,6 +336,7 @@ object Store {
             or.filledBi = if (l[16].asI() < 0) null else l[16].asI()
             or.closedT = if (l[17].asL() == 0L) null else l[17].asL()
             or.cancelReason = l[18].asS().ifEmpty { null }
+            if (l.size >= 21) { or.mmNote = l[19].asS(); or.mmCm = l[20].asB() }
             b.orders.add(or)
         }
         for (x in m["trades"].asList()) {
@@ -324,6 +350,8 @@ object Store {
                 tr.fills.add(Fill(l[0].asL(), l[1].asI(), l[2].asD(), l[3].asD(), l[4].asS(), l[5].asD()))
             }
             if (t.containsKey("slAdj")) tr.slAdj = t["slAdj"].asD()
+            if (t.containsKey("commission")) tr.commission = t["commission"].asD()
+            if (t.containsKey("mmCm")) tr.mmCm = t["mmCm"].asB()
             if (t["exitT"].asL() != 0L) {
                 tr.exitT = t["exitT"].asL(); tr.exitBi = t["exitBi"].asI()
                 tr.exitPx = t["exitPx"].asD(); tr.reason = t["reason"].asS(); tr.be = t["be"].asB()

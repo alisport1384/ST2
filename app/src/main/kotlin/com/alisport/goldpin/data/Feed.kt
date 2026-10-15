@@ -311,6 +311,31 @@ object Feed {
         }
     }
 
+    /** bid/ask اولین پروفایل پاسخ Swissquote؛ null اگر ساختار پاسخ نامعتبر بود. */
+    internal fun parseSwissquoteBidAsk(body: String): Pair<Double, Double>? = try {
+        val arr = org.json.JSONArray(body)
+        val p = arr.getJSONObject(0).getJSONArray("spreadProfilePrices").getJSONObject(0)
+        val bid = p.optDouble("bid", Double.NaN)
+        val ask = p.optDouble("ask", Double.NaN)
+        if (bid.isNaN() || ask.isNaN()) null else bid to ask
+    } catch (e: Exception) { null }
+
+    /**
+     * §۲۰ cmsn «خودکار»: اسپرد زندهٔ XAU/USD = ask − bid (واحد قیمت، دلار برای هر اونس) از Swissquote.
+     * null اگر در دسترس نبود یا مقدار نامعقول بود (≤ ۰ یا > ۲۰ دلار).
+     */
+    fun swissquoteSpread(): Double? {
+        return try {
+            val body = get("https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/XAU/USD", 4000, 5000)
+            val ba = parseSwissquoteBidAsk(body) ?: return null
+            val sp = ba.second - ba.first
+            if (sp.isNaN() || sp <= 0.0 || sp > 20.0) null else sp
+        } catch (e: Exception) {
+            Log.d(Log.CAT_FEED, "اسپرد Swissquote دریافت نشد", e.message ?: "")
+            null
+        }
+    }
+
     /** نرخ طلای توکنیزه (PAXG) از CoinGecko — پشتیبان سوم */
     fun coinGeckoSpot(): Double? {
         return try {
@@ -417,8 +442,10 @@ object Feed {
     /** اگر فید حجم نداشت، حجم تقریبی از دامنهٔ کندل می‌سازیم (تقریبی — برای کارکرد موتور). */
     fun synthesizeVolumeIfMissing(candles: List<Candle>): List<Candle> {
         if (candles.isEmpty()) return candles
-        val hasVol = candles.count { it.v > 0.0 } > candles.size / 10
-        if (hasVol) return candles
+        // §6 سند: «اگر بیش از ۹۰٪ کندل‌ها حجم صفر داشته باشند» ⇒ حجم ساختگی (دقیقاً ۹۰٪ هنوز ساختگی نیست).
+        val zeros = candles.count { !(it.v > 0.0) }
+        val tooManyZeros = zeros.toLong() * 10L > candles.size.toLong() * 9L
+        if (!tooManyZeros) return candles
         Log.w(Log.CAT_FEED, "فید حجم نداشت → ساخت حجم تقریبی از دامنهٔ کندل", "کندل=${candles.size}")
         try { syntheticVolumeWarning?.invoke(candles.size) }
         catch (t: Throwable) { Log.e(Log.CAT_FEED, "اعلام حجم ساختگی به کاربر ناموفق بود", t) }

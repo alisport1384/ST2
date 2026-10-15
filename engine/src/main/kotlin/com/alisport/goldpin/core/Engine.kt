@@ -66,6 +66,27 @@ class Settings {
     var contractSize: Double = 1.0
     var initialEquity: Double = 100000.0     // §5: سرمایهٔ اولیه ۱۰۰٬۰۰۰ (تصمیم نهایی)
 
+    // ── §۲۰ سند: مدیریت مالی و مدیریت زیان (پیش‌فرض: خاموش ⇒ همان حجم §۵) ──
+    /** [MoneyMode]: ۰ = خاموش (§۵) · ۱ = ManageAllLost · ۲ = Mixed. پیش‌فرض ۰ (تصمیم مالک). */
+    var mmMode: Int = MoneyMode.NONE
+    /** MinLot: true = خودکار (NakedCapital × risk)/100 ؛ false = دستی ([minLotManual]). */
+    var minLotAuto: Boolean = true
+    var minLotManual: Double = 1.0
+    /** div: true = |ورودِ سفارش − حدسود نهایی| ؛ false = دستی ([divManual]). */
+    var divAuto: Boolean = true
+    var divManual: Double = 10.0
+    /** cmsn (اسپرد تحمیلی): true = اسپرد بروکر از فید (اگر نبود، عدد دستی) ؛ false = فقط دستی. واحد: قیمت. */
+    var cmsnAuto: Boolean = true
+    var cmsnManual: Double = 0.0
+    /** Mixed: M = NakedCapital × (1 + mixedGrowthPct/100). سند: ۲۰٪. */
+    var mixedGrowthPct: Double = 20.0
+    /** سقف اهرم فقط در مودهای §۲۰ (تصمیم مالک: تا ۵۰۰؛ لات را مدیریت زیان تعیین می‌کند). مود خاموش از [maxLeverage] (§۵) استفاده می‌کند. */
+    var mmMaxLeverage: Double = 500.0
+    /** گام حجم در مودهای §۲۰ — مثال‌های سند به ۰٫۰۱ کف شده‌اند. ۰ = بدون گرد کردن. */
+    var lotStep: Double = 0.01
+    /** true = با رسیدن معامله به حد سود نهایی، Lost صفر می‌شود (سند: lost = 0.0 بعد از TP)؛ false = فقط به اندازهٔ سود واقعی کم می‌شود. */
+    var lostResetAtFinalTp: Boolean = true
+
     fun copy(): Settings = Settings().also {
         it.tfMode = tfMode; it.tfS = tfS; it.tfM = tfM; it.tf1 = tf1; it.tf2 = tf2
         it.vpRows = vpRows; it.vpVA = vpVA; it.vpSmooth = vpSmooth; it.distMode = distMode
@@ -78,6 +99,11 @@ class Settings {
         it.useRiskPct = useRiskPct; it.riskPct = riskPct; it.equityPct = equityPct
         it.maxLeverage = maxLeverage; it.roundQty = roundQty
         it.contractSize = contractSize; it.initialEquity = initialEquity
+        it.mmMode = mmMode; it.minLotAuto = minLotAuto; it.minLotManual = minLotManual
+        it.divAuto = divAuto; it.divManual = divManual
+        it.cmsnAuto = cmsnAuto; it.cmsnManual = cmsnManual
+        it.mixedGrowthPct = mixedGrowthPct; it.mmMaxLeverage = mmMaxLeverage
+        it.lotStep = lotStep; it.lostResetAtFinalTp = lostResetAtFinalTp
     }
 }
 

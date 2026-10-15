@@ -221,7 +221,7 @@ class AppState {
     /** راه‌اندازی لاگر و هشدارها + وصل کردن آن‌ها به موتور و کارگزار */
     fun initApp(ctx: Context) {
         appCtx = ctx.applicationContext
-        Log.init(appCtx!!, "1.4.18")
+        Log.init(appCtx!!, "1.4.19")
         Alerts.init(appCtx!!)
         val p = appCtx!!.getSharedPreferences("goldpin", Context.MODE_PRIVATE)
         // مهاجرت ۱٫۱ → ۱٫۲: تمام‌صفحهٔ خودکار دیگر پیش‌فرض نیست؛ تنظیم قدیمی true را یک‌بار خاموش کن.
@@ -746,6 +746,31 @@ class AppState {
         }
     }
 
+    @Volatile private var lastSpreadFetchMs = 0L
+
+    /**
+     * §۲۰ cmsn «خودکار»: اسپرد زندهٔ بروکر (ask − bid) از Swissquote — حداکثر هر ۶۰ ثانیه یک‌بار و فقط وقتی
+     * مود مدیریت مالی روشن و cmsn روی «خودکار» باشد. اگر نیامد، همان مقدار قبلی/دستی می‌ماند.
+     * دریافت روی نخ جداگانهٔ daemon انجام می‌شود تا هرگز به‌روزرسانی زنده را معطل نکند.
+     */
+    private fun refreshLiveSpread() {
+        if (cfg.mmMode == MoneyMode.NONE || !cfg.cmsnAuto) return
+        val now = System.currentTimeMillis()
+        if (now - lastSpreadFetchMs < 60_000L) return
+        lastSpreadFetchMs = now
+        val t = Thread({
+            try {
+                val sp = Feed.swissquoteSpread()
+                if (sp != null) {
+                    broker.mm.liveSpread = sp
+                    Log.d(Log.CAT_FEED, "اسپرد زندهٔ بروکر (Swissquote)", Fa.n(sp, 3))
+                }
+            } catch (_: Throwable) { /* بی‌صدا: مقدار قبلی/دستی می‌ماند */ }
+        }, "gp-spread")
+        t.isDaemon = true
+        t.start()
+    }
+
     /**
      * به‌روزرسانی زنده: فقط دنبالهٔ دادهٔ مود (cfg.tf2) را می‌گیریم و با سری مود ادغام می‌کنیم.
      *
@@ -775,7 +800,10 @@ class AppState {
                 var tail = if (base == modeTf) raw else Feed.aggregate(raw, modeTf)
                 if (useSyntheticVolume) tail = Feed.synthesizeVolumeIfMissing(tail)
                 val (spot, spotSrc) = Feed.spotPrice()
-                val last = tail.lastOrNull()?.c ?: Double.NaN
+                // §6 سند: «اگر قیمت زنده نیامد، آخرین کندل بسته‌شده استفاده می‌شود» — آخرین عنصر دنباله
+                // کندل در حال تشکیل است (موتور هم همین را باز می‌داند)، پس کلوز کندل قبل از آن.
+                val last = (if (tail.size >= 2) tail[tail.size - 2] else tail.lastOrNull())?.c ?: Double.NaN
+                refreshLiveSpread()
                 Log.d(Log.CAT_LIVE, "به‌روزرسانی زنده",
                     "دنباله=${tail.size} قیمت=${if (spot != null) Fa.n(spot, 2) else "-"} منبع=$spotSrc مدت=${System.currentTimeMillis() - t0}ms")
                 // ۳) تغییر وضعیت روی نخ سریالی [io]
@@ -861,6 +889,19 @@ class AppState {
                 engine.broker = broker
                 engine.barCommitHook = { cd -> broker.onBar(cd, live = false) }
                 engine.feed(execCandles, lastIsClosed = false)
+                // §1/§3/§6 سند: پر شدن سفارش لیمیت با قیمت زنده — با high/low کندلِ در حال تشکیل.
+                // تصمیم‌های استراتژی همچنان فقط با کندل بسته؛ این فقط سفارش معلق را پر می‌کند.
+                val forming = execCandles.lastOrNull()
+                if (forming != null && forming.bi >= engine.processed && broker.hasPending) {
+                    try {
+                        val n = broker.onLiveCandle(forming)
+                        if (n > 0) Log.i(Log.CAT_LIVE, "سفارش با قیمت زنده پر شد",
+                            "تعداد=$n کندل=${forming.bi} high=${Fa.n(forming.h, 2)} low=${Fa.n(forming.l, 2)}")
+                    } catch (t: Throwable) {
+                        // خطای پر شدن زنده هرگز نباید مسیر تیک لایو را بشکند؛ سفارش با کلوز کندل پر می‌شود.
+                        Log.e(Log.CAT_LIVE, "پر شدن زندهٔ سفارش ناموفق بود", t)
+                    }
+                }
                 publishSnapshot()
             } finally {
                 Alerts.inBacktest = prev
@@ -1120,10 +1161,16 @@ class AppState {
         to.maxSetups = c.maxSetups; to.midInvalidClose = c.midInvalidClose
         to.hvScanFirstTouch = c.hvScanFirstTouch; to.hvMarkFirstIncrease = c.hvMarkFirstIncrease
         to.rejectCandleNext = c.rejectCandleNext
-        to.mintick = c.mintick; to.slBufTicks = c.slBufTicks; to.minTPunits = c.minTPunits
+        to.mintick = c.mintick; to.slBufTicks = c.slBufTicks; to.entryBufTicks = c.entryBufTicks; to.minTPunits = c.minTPunits
         to.useRiskPct = c.useRiskPct; to.riskPct = c.riskPct; to.equityPct = c.equityPct
         to.maxLeverage = c.maxLeverage; to.roundQty = c.roundQty
         to.contractSize = c.contractSize; to.initialEquity = c.initialEquity
+        // §۲۰ سند: مدیریت مالی و مدیریت زیان
+        to.mmMode = c.mmMode; to.minLotAuto = c.minLotAuto; to.minLotManual = c.minLotManual
+        to.divAuto = c.divAuto; to.divManual = c.divManual
+        to.cmsnAuto = c.cmsnAuto; to.cmsnManual = c.cmsnManual
+        to.mixedGrowthPct = c.mixedGrowthPct; to.mmMaxLeverage = c.mmMaxLeverage
+        to.lotStep = c.lotStep; to.lostResetAtFinalTp = c.lostResetAtFinalTp
     }
 
     /** کپی وضعیت موتورِ بازگردانی‌شده به موتور سراسری (تا ارجاع‌ها یکسان بماند) */
@@ -1184,6 +1231,7 @@ class AppState {
         dst.balance = src.balance; dst.equity = src.equity
         dst.maxEquity = src.maxEquity; dst.maxDrawdown = src.maxDrawdown
         dst.orderSeq = src.orderSeq; dst.tradeSeq = src.tradeSeq
+        dst.mm.lost = src.mm.lost; dst.mm.cmsnLost = src.mm.cmsnLost   // §۲۰
         // v1.4.9: همهٔ سفارش‌ها/پوزیشن‌های فعال کپی شوند.
         for (o in src.pendingOrders) dst.restorePending(o)
         for (t in src.openTrades) dst.restoreOpen(t)

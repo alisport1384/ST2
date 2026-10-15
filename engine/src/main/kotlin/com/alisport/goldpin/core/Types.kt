@@ -133,7 +133,12 @@ class Order(
     var filledBi: Int? = null,
     var closedT: Long? = null,
     var cancelReason: String? = null
-)
+) {
+    /** §20: توضیح محاسبهٔ حجم (مود، Lost، div، MinLot …) برای نمایش در جزئیات سفارش؛ خالی = مود خاموش. */
+    var mmNote: String = ""
+    /** §20 Mixed: این سفارش در فاز ManageCM (Capital > M) حجم‌گذاری شده است؟ (فقط آن معاملات cmsnLost را می‌سازند) */
+    var mmCm: Boolean = false
+}
 
 class Fill(
     val t: Long,
@@ -167,13 +172,17 @@ class Trade(
     var be: Boolean = false,
     /** §4-9 سند: حد ضرر جابه‌جاشده به سطح سفارش (NaN = هنوز منتقل نشده). */
     var slAdj: Double = Double.NaN,
-    val fills: MutableList<Fill> = mutableListOf()
+    val fills: MutableList<Fill> = mutableListOf(),
+    /** §20 cmsn: کمیسیون (اسپرد تحمیلی) پرداخت‌شده برای این معامله، به دلار؛ ۰ = بدون کمیسیون (مود §۲۰ خاموش). */
+    var commission: Double = 0.0,
+    /** §20 Mixed: این معامله در فاز ManageCM (Capital > M) حجم‌گذاری شده بود؟ */
+    var mmCm: Boolean = false
 ) {
     val open: Boolean get() = exitT == null
     val risk: Double get() = if (sl0 != 0.0) kotlin.math.abs(entry - sl0) else 0.0
 
-    /** سود/زیان دلاری (خالص، شامل همهٔ پله‌ها). */
-    fun pnl(): Double = fills.sumOf { it.pnl }
+    /** سود/زیان دلاری (خالص، شامل همهٔ پله‌ها و منهای کمیسیون cmsn). */
+    fun pnl(): Double = fills.sumOf { it.pnl } - commission
 
     /** چند R سود/زیان شد. */
     fun rMultiple(): Double {

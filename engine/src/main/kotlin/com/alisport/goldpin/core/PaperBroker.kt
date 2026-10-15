@@ -10,13 +10,19 @@ import kotlin.math.min
 //  ثبت سفارش لیمیت روی لبهٔ ناحیهٔ ولوم زیاد ، پر شدن ، خروج پله‌ای ۳۳/۳۳/۳۴ ،
 //  سر‌به‌سر بعد از TP1 ، انقضای سفارش ، و محاسبهٔ سود/زیان به دلار و R.
 //
-//  از v1.4.9 (تصمیم مالک Q4) چندین سفارش/پوزیشن هم‌زمان تا سقف maxSetups مجازند
-//  (در هر دو جهت، هرم).
+//  §4-8 / §10 / §18-12 / §18-13 سند: در هر لحظه حداکثر ۱ سفارش معلق؛ وجود معاملهٔ باز
+//  مانع مسلح‌شدن سفارش جدید نیست (چند معامله باز می‌توانند هم‌زمان باشند).
+//
+//  §۲۰ سند: مدیریت مالی و مدیریت زیان (ManageAllLost / Mixed) در [MoneyManager]؛
+//  حجم سفارش هنگام ثبت (مسلح‌شدن) با Lost/cmsnLost لحظهٔ ثبت ثابت می‌شود.
 // ═══════════════════════════════════════════════════════════════════════════════
 class PaperBroker(private val cfg: Settings) {
 
     val orders = ArrayList<Order>()
     val trades = ArrayList<Trade>()
+
+    /** §۲۰ سند: Lost / cmsnLost / اسپرد / فرمول Lot. */
+    val mm = MoneyManager(cfg)
 
     var balance = cfg.initialEquity
     var equity = cfg.initialEquity
@@ -51,6 +57,7 @@ class PaperBroker(private val cfg: Settings) {
         balance = cfg.initialEquity; equity = cfg.initialEquity
         maxEquity = cfg.initialEquity; maxDrawdown = 0.0
         lastError = null
+        mm.reset()
     }
 
     /** مارجینِ در استفاده توسط سفارش‌های معلق و پوزیشن‌های باز. */
@@ -59,6 +66,14 @@ class PaperBroker(private val cfg: Settings) {
         for (o in pendings) u += o.qty * o.price
         for (t in opens) if (t.open) u += t.fills.filter { it.kind == "ENTRY" }.sumOf { it.qty } * t.entry
         return u
+    }
+
+    /** §5: سقف حجمِ باقی‌ماندهٔ مجاز با اهرم [leverage] — (equity × اهرم − مارجین مصرف‌شده) ÷ قیمت. */
+    private fun marginCapQty(px: Double, leverage: Double): Double {
+        if (px <= 0) return 0.0
+        val capMargin = equity * leverage
+        val availMargin = max(0.0, capMargin - usedMargin(px))
+        return availMargin / px
     }
 
     /** حجم بر اساس ریسک یا درصد سرمایه — با درنظرگرفتن مارجین مصرف‌شده. */
@@ -73,10 +88,7 @@ class PaperBroker(private val cfg: Settings) {
             eq * cfg.equityPct / 100.0 / px
         }
         // سقف مارجین کل نسبت به equity × maxLeverage
-        val capMargin = eq * cfg.maxLeverage
-        val availMargin = max(0.0, capMargin - usedMargin(px))
-        val capQty = availMargin / px
-        q = min(q, capQty)
+        q = min(q, marginCapQty(px, cfg.maxLeverage))
         if (cfg.roundQty) q = floor(q)
         return max(q, 0.0)
     }
@@ -95,7 +107,25 @@ class PaperBroker(private val cfg: Settings) {
         }
         // §4-8 سند: سطح سفارش = سقف باکس HV + ۲ تیک بافر (خرید) / کف باکس HV − ۲ تیک بافر (فروش)
         val entryPx = cfg.entryLevel(s.bull, s.hvH, s.hvL)
-        val qty = qtyFor(entryPx, s.sl)
+        var mmNote = ""
+        var mmCm = false
+        val qty: Double
+        if (mm.active) {
+            // §۲۰ سند: Lot = Lost/div + MinLot (ManageAllLost) یا ManageNothing/ManageCM (Mixed).
+            // سقف اهرم §5 همچنان آخرین حدّ است («حجم نهایی نباید از سرمایه × اهرم ÷ قیمت بیشتر شود»)،
+            // ولی در مودهای §۲۰ با اهرم mmMaxLeverage (تصمیم مالک: ۵۰۰) سنجیده می‌شود.
+            val m = mm.lotFor(balance, entryPx, s.tpx)
+            val cap = marginCapQty(entryPx, cfg.mmMaxLeverage)
+            var q = min(m.raw, cap)
+            q = mm.floorToStep(q)
+            if (cfg.roundQty) q = floor(q)
+            qty = max(q, 0.0)
+            mmCm = m.cm
+            mmNote = m.note + (if (m.raw > cap) " · سقف اهرم ${MoneyManager.n2(cfg.mmMaxLeverage)}× اعمال شد" else "") +
+                " → حجم ${MoneyManager.n2(qty)}"
+        } else {
+            qty = qtyFor(entryPx, s.sl)
+        }
         if (qty <= 0) {
             lastError = "حجم صفر بود (مارجین کافی نیست یا حدضرر صفر)"
             return false
@@ -106,11 +136,14 @@ class PaperBroker(private val cfg: Settings) {
             qty = qty, zoneTop = s.zTop, zoneBot = s.zBot,
             placedT = bar.t, placedBi = bar.bi
         )
+        o.mmNote = mmNote
+        o.mmCm = mmCm
         s.orderId = o.id
         orders.add(o)
         pendings.add(o)
         lg("ORDER", "سفارش ورود ثبت شد (آماده) · ستاپ #${s.id}",
-            "type=${if (s.dir == 1) "BUY_LIMIT" else "SELL_LIMIT"} price=${fmt(entryPx)} sl=${fmt(s.sl)} tp1=${fmt(s.tp1)} tp2=${fmt(s.tp2)} tp=${fmt(s.tpx)} qty=${fmt(qty)} active=$activeCount+1/${cfg.maxSetups} bar=${bar.bi}")
+            "type=${if (s.dir == 1) "BUY_LIMIT" else "SELL_LIMIT"} price=${fmt(entryPx)} sl=${fmt(s.sl)} tp1=${fmt(s.tp1)} tp2=${fmt(s.tp2)} tp=${fmt(s.tpx)} qty=${fmt(qty)} active=$activeCount+1/${cfg.maxSetups} bar=${bar.bi}" +
+                (if (mmNote.isNotEmpty()) " mm=[$mmNote]" else ""))
         alarm(AlertKind.ARMED, if (s.dir == 1) "سفارش خرید آماده شد" else "سفارش فروش آماده شد",
             "ستاپ #${s.id} · ورود ${fmt(entryPx)} · حدضرر ${fmt(s.sl)} · حدسود ${fmt(s.tpx)} · حجم ${fmt(qty)}")
         return true
@@ -172,7 +205,38 @@ class PaperBroker(private val cfg: Settings) {
         refreshEquity(cd)
     }
 
-    private fun fillEntry(o: Order, cd: Candle) {
+    /**
+     * §1/§3/§6 سند: «پر شدن سفارش لیمیت با قیمت زنده انجام می‌شود» — ولی تصمیم‌های استراتژی فقط با کندل بسته.
+     * [forming] کندلِ در حال تشکیل (باز) است: به‌محض اینکه high/low آن به سطح سفارش رسید، سفارش پر می‌شود.
+     * (قیمت spot طلا با فیوچرز یاهو چند دلار اختلاف دارد؛ پس برای پر شدن از همان داده‌ی کندل نمودار استفاده می‌شود.)
+     *
+     * پر شدن در کندلِ مسلح‌شدن مجاز نیست. وقتی همین کندل بسته شود، [onBar] دوباره آن را می‌بیند؛
+     * چون سفارش دیگر معلق نیست، دوباره پر نمی‌شود و فقط مدیریت معامله (SL/TP) روی کندل بسته اجرا می‌شود.
+     * این تابع هیچ‌وقت خروج/مدیریت معامله یا به‌روزرسانی equity انجام نمی‌دهد.
+     *
+     * @return تعداد سفارش‌های پرشده
+     */
+    fun onLiveCandle(forming: Candle): Int {
+        if (pendings.isEmpty()) return 0
+        var n = 0
+        for (p in ArrayList(pendings)) {
+            if (p.status != OrderStatus.PENDING) continue
+            if (forming.bi <= p.placedBi) continue
+            // هم‌ترازی با اولویت‌های موتور (§4-8): سفارشی که با «باز شدن» کندل بالاتر از HH (فروش: پایین‌تر از LL)
+            // منقضی می‌شود یا یک کندل ساختار کامل از مسلح‌شدنش گذشته، پر نمی‌شود؛ موتور آن را با کلوز همین کندل منقضی می‌کند.
+            val st = engine?.setups?.firstOrNull { it.id == p.setupId }
+            if (st != null) {
+                val ref = st.priceExpiryRef
+                if (!ref.isNaN() && (if (p.dir == 1) forming.o > ref else forming.o < ref)) continue
+                if (fullStructureElapsed(st.armBi, forming.bi, cfg.tfS, cfg.tf2)) continue
+            }
+            val touched = if (p.dir == 1) forming.l <= p.price else forming.h >= p.price
+            if (touched) { fillEntry(p, forming, live = true); n++ }
+        }
+        return n
+    }
+
+    private fun fillEntry(o: Order, cd: Candle, live: Boolean = false) {
         o.status = OrderStatus.FILLED
         o.filledT = cd.t
         o.filledBi = cd.bi
@@ -184,10 +248,21 @@ class PaperBroker(private val cfg: Settings) {
             zoneTop = o.zoneTop, zoneBot = o.zoneBot, contractSize = cfg.contractSize
         )
         tr.fills.add(Fill(cd.t, cd.bi, o.price, o.qty, "ENTRY", 0.0))
+        tr.mmCm = o.mmCm
+        // §۲۰ cmsn: اسپرد تحمیلی هر معامله هنگام ورود از سرمایه کم می‌شود (در مود خاموش ۰ است).
+        val cmsn = mm.commissionFor(o.qty)
+        if (cmsn > 0.0) {
+            tr.commission = cmsn
+            balance -= cmsn
+            maxEquity = max(maxEquity, balance)
+            val dd = maxEquity - balance
+            if (dd > maxDrawdown) maxDrawdown = dd
+        }
         trades.add(tr)
         opens.add(tr)
-        lg("TRADE", "سفارش پر شد → ورود انجام شد · معامله #${tr.id}",
-            "dir=${if (tr.dir == 1) "BUY" else "SELL"} entry=${fmt(tr.entry)} sl=${fmt(tr.sl0)} tp=${fmt(tr.tpX)} qty=${fmt(tr.qty)} bar=${cd.bi}")
+        lg("TRADE", "سفارش پر شد → ورود انجام شد · معامله #${tr.id}" + (if (live) " (قیمت زنده)" else ""),
+            "dir=${if (tr.dir == 1) "BUY" else "SELL"} entry=${fmt(tr.entry)} sl=${fmt(tr.sl0)} tp=${fmt(tr.tpX)} qty=${fmt(tr.qty)} bar=${cd.bi}" +
+                (if (cmsn > 0.0) " cmsn=${fmt(cmsn)}" else ""))
         alarm(AlertKind.FILLED, if (tr.dir == 1) "ورود خرید انجام شد" else "ورود فروش انجام شد",
             "معامله #${tr.id} · ورود ${fmt(tr.entry)} · حدضرر ${fmt(tr.sl0)} · حدسود ${fmt(tr.tpX)}")
     }
@@ -298,6 +373,11 @@ class PaperBroker(private val cfg: Settings) {
         t.exitT = time; t.exitBi = bi; t.exitPx = px
         t.reason = reason
         opens.removeAll { it.id == t.id }
+        // §۲۰: Lost / cmsnLost بعد از بسته شدن کامل معامله به‌روز می‌شود (مود خاموش: بی‌اثر).
+        val lostBefore = mm.lost; val cmsnLostBefore = mm.cmsnLost
+        mm.onTradeClosed(t)
+        if (mm.active) lg("TRADE", "مدیریت مالی §۲۰ بعد از معامله #${t.id}",
+            "Lost ${fmt(lostBefore)} → ${fmt(mm.lost)} · cmsnLost ${fmt(cmsnLostBefore)} → ${fmt(mm.cmsnLost)} · Capital=${fmt(balance)}")
         lg("TRADE", "معامله #${t.id} بسته شد", "reason=$reason exit=${fmt(px)} pnl=${fmt(t.pnl())} R=${fmt(t.rMultiple())} موجودی=${fmt(balance)}")
         val pnl = t.pnl()
         alarm(AlertKind.CLOSE, "معامله بسته شد · ${t.reason}",

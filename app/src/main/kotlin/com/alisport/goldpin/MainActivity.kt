@@ -25,6 +25,7 @@ import android.widget.ListView
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
+import com.alisport.goldpin.core.MoneyMode
 import com.alisport.goldpin.core.Order
 import com.alisport.goldpin.core.OrderStatus
 import com.alisport.goldpin.core.Reports
@@ -1109,12 +1110,17 @@ class MainActivity : Activity() {
         // ── معامله ──
         v.addView(Ui.section(this, "⑥ معامله و بک‌تست"))
         v.addView(numRow("بافر حدضرر (تیک)", s.cfg.slBufTicks) { s.cfg.slBufTicks = it; s.rebuildAsync() })
+        // §4-8 سند: «سطح سفارش = سقف/کف باکس HV ± ۲ تیک بافر … تعداد تیک بافر قابل تغییر است»
+        v.addView(numRow("بافر سطح سفارش (تیک)", s.cfg.entryBufTicks) { s.cfg.entryBufTicks = it; s.rebuildAsync() })
         v.addView(numRow("حداقل فاصلهٔ حدسود (واحد)", s.cfg.minTPunits) { s.cfg.minTPunits = it; s.rebuildAsync() })
         v.addView(switchRow("حجم بر اساس ریسک ثابت (خاموش = درصد سرمایه)", s.cfg.useRiskPct) { s.cfg.useRiskPct = it; s.rebuildAsync() })
         v.addView(numRow("ریسک هر معامله (٪)", s.cfg.riskPct) { s.cfg.riskPct = it; s.rebuildAsync() })
         v.addView(numRow("حداکثر اهرم", s.cfg.maxLeverage) { s.cfg.maxLeverage = it; s.rebuildAsync() })
         v.addView(numRow("سرمایهٔ اولیه", s.cfg.initialEquity) { s.cfg.initialEquity = it; s.rebuildAsync() })
         v.addView(numRow("اندازهٔ قرارداد", s.cfg.contractSize) { s.cfg.contractSize = it; s.rebuildAsync() })
+
+        // ── مدیریت مالی و مدیریت زیان (§۲۰ سند) ──
+        addMoneyManagementSection(v)
 
         // ── فید ──
         v.addView(Ui.section(this, "⑦ فید داده (طلا)"))
@@ -1182,6 +1188,66 @@ class MainActivity : Activity() {
             "معاملات کاغذی است؛ به کارگزار وصل نیست. همهٔ محاسبات داخل گوشی انجام می‌شود.\n" +
             "مستندات کامل پروژه در پوشهٔ docs مخزن گیت‌هاب است.", 10.5f, Palette.dim))
         return scroll
+    }
+
+    /** §۲۰ سند: مدیریت مالی و مدیریت زیان (ManageAllLost / Mixed). پیش‌فرض خاموش = همان حجم §۵. */
+    private fun addMoneyManagementSection(v: LinearLayout) {
+        val d = Palette.dim
+        v.addView(Ui.section(this, "⑥-ب مدیریت مالی و مدیریت زیان (§۲۰)"))
+        v.addView(Ui.tv(this,
+            "خاموش = حجم ریسک ثابت §۵ (پیش‌فرض، بدون کارمزد).  ManageAllLost: Lot = Lost/div + MinLot.  " +
+                "Mixed: تا رشد ۲۰٪ سرمایه Lot = MinLot؛ بعد از آن Lot = cmsnLost/div + MinLot.  " +
+                "تغییر مود یا هر عدد، موتور را از صفر روی داده اجرا می‌کند. crt هنوز در سند تعریف نشده و پیاده نشده است.", 10.5f, d))
+        val modes = listOf(
+            MoneyMode.NONE to "خاموش (حجم §۵)",
+            MoneyMode.MANAGE_ALL_LOST to "ManageAllLost (تهاجمی)",
+            MoneyMode.MIXED to "Mixed"
+        )
+        for ((mode, name) in modes) {
+            val sel = s.cfg.mmMode == mode
+            v.addView(Ui.btn(this, "مود: $name", if (sel) Palette.accent else Palette.panel2,
+                if (sel) Palette.txt else Palette.dim, 11.5f).apply {
+                setOnClickListener {
+                    Log.i(Log.CAT_CFG, "مود مدیریت مالی §۲۰ = ${MoneyMode.label(mode)}")
+                    s.cfg.mmMode = mode; s.rebuildAsync(); showTab(4)
+                }
+            })
+            v.addView(Ui.spacer(this, 3f))
+        }
+        v.addView(Ui.tv(this, "ریسک (risk) همان «ریسک هر معامله (٪)» بالاست (پیش‌فرض ۱).", 10.5f, d))
+        v.addView(switchRow("MinLot خودکار = (NakedCapital × risk) ÷ ۱۰۰", s.cfg.minLotAuto) {
+            s.cfg.minLotAuto = it; s.rebuildAsync(); showTab(4)
+        })
+        v.addView(numRow("MinLot دستی (اونس)", s.cfg.minLotManual) { s.cfg.minLotManual = it; s.rebuildAsync() })
+        v.addView(switchRow("div خودکار = |ورودی سفارش − حدسود نهایی|", s.cfg.divAuto) {
+            s.cfg.divAuto = it; s.rebuildAsync(); showTab(4)
+        })
+        v.addView(numRow("div دستی (واحد قیمت)", s.cfg.divManual) { s.cfg.divManual = it; s.rebuildAsync() })
+        v.addView(switchRow("cmsn خودکار = اسپرد بروکر از فید (اگر نبود: دستی)", s.cfg.cmsnAuto) {
+            s.cfg.cmsnAuto = it; s.rebuildAsync(); showTab(4)
+        })
+        v.addView(numRow("cmsn دستی: اسپرد (واحد قیمت؛ ۰ = بدون کمیسیون)", s.cfg.cmsnManual) { s.cfg.cmsnManual = it; s.rebuildAsync() })
+        v.addView(numRow("آستانهٔ رشد Mixed (٪) ⇒ M = NakedCapital × (۱+٪)", s.cfg.mixedGrowthPct) { s.cfg.mixedGrowthPct = it; s.rebuildAsync() })
+        v.addView(numRow("سقف اهرم در مودهای §۲۰", s.cfg.mmMaxLeverage) { s.cfg.mmMaxLeverage = it; s.rebuildAsync() })
+        v.addView(numRow("گام حجم (۰ = بدون گرد کردن؛ مثال‌های سند ۰٫۰۱)", s.cfg.lotStep) { s.cfg.lotStep = it; s.rebuildAsync() })
+        v.addView(switchRow("با رسیدن به حد سود نهایی، Lost صفر شود", s.cfg.lostResetAtFinalTp) {
+            s.cfg.lostResetAtFinalTp = it; s.rebuildAsync()
+        })
+
+        val mm = s.broker.mm
+        val cap = s.broker.balance
+        val box = Ui.box(this)
+        box.addView(Ui.tv(this, "وضعیت مدیریت مالی (اکنون)", 12f, Palette.gold, true))
+        box.addView(Ui.label(this, "NakedCapital (سرمایهٔ اولیه)", Fa.n(mm.nakedCapital(), 2)))
+        box.addView(Ui.label(this, "Capital (سرمایهٔ فعلی)", Fa.n(cap, 2)))
+        box.addView(Ui.label(this, "MinLot", Fa.n(mm.minLot(), 2)))
+        box.addView(Ui.label(this, "Lost", Fa.n(mm.lost, 2)))
+        box.addView(Ui.label(this, "cmsnLost", Fa.n(mm.cmsnLost, 2)))
+        box.addView(Ui.label(this, "M (آستانهٔ Mixed)", Fa.n(mm.growthLimit(), 2)))
+        box.addView(Ui.label(this, "فاز Mixed", if (cap > mm.growthLimit()) "ManageCM" else "ManageNothing"))
+        val live = s.cfg.cmsnAuto && !mm.liveSpread.isNaN() && mm.liveSpread > 0.0
+        box.addView(Ui.label(this, "اسپرد مؤثر (cmsn)", Fa.n(mm.spread(), 3) + if (live) " (زنده)" else " (دستی)"))
+        v.addView(box)
     }
 
     private fun pickAlertKinds() {
@@ -1338,6 +1404,7 @@ class MainActivity : Activity() {
             add("مدت", duration(t.entryT, t.exitT ?: 0))
         }
         add("سر‌به‌سر", if (t.be) "فعال (پس از TP1)" else "فعال نشد")
+        if (t.commission > 0.0) add("کمیسیون (cmsn، کسرشده از سود/زیان)", "${Fa.n(t.commission, 2)} دلار")
         add("سود/زیان", "${Fa.signed(pnl)} دلار", if (pnl >= 0) Palette.up else Palette.down)
         add("بازده بر ریسک", "${Fa.n(t.rMultiple(), 2)} R")
         box.addView(Ui.spacer(this, 6f))
@@ -1368,6 +1435,7 @@ class MainActivity : Activity() {
         add("حد ضرر", Fa.n(o.sl))
         add("TP1 / TP2 / TP نهایی", "${Fa.n(o.tp1)} / ${Fa.n(o.tp2)} / ${Fa.n(o.tpX)}")
         add("حجم", "${Fa.n(o.qty, 3)} اونس")
+        if (o.mmNote.isNotEmpty()) add("محاسبهٔ حجم (§۲۰)", o.mmNote)
         add("ناحیهٔ ساختار", "${Fa.n(o.zoneBot)} تا ${Fa.n(o.zoneTop)}")
         add("زمان ثبت", Fa.jalali(o.placedT))
         o.filledT?.let { add("زمان پر شدن", Fa.jalali(it)) }
@@ -1490,14 +1558,14 @@ class MainActivity : Activity() {
     }
 
     private fun tradesCsv(): String {
-        val sb = StringBuilder("id,dir,entryT,entry,exitT,exit,sl,tpX,qty,pnl,R,reason\n")
+        val sb = StringBuilder("id,dir,entryT,entry,exitT,exit,sl,tpX,qty,pnl,R,reason,commission\n")
         for (t in s.tradesSnapshot()) {
             sb.append(t.id).append(',').append(if (t.dir == 1) "BUY" else "SELL").append(',')
                 .append(t.entryT).append(',').append(t.entry).append(',')
                 .append(t.exitT ?: 0).append(',').append(t.exitPx ?: 0.0).append(',')
                 .append(t.sl0).append(',').append(t.tpX).append(',').append(t.qty).append(',')
                 .append(String.format("%.2f", t.pnl())).append(',').append(String.format("%.2f", t.rMultiple()))
-                .append(',').append(t.reason).append('\n')
+                .append(',').append(t.reason).append(',').append(String.format("%.2f", t.commission)).append('\n')
         }
         return sb.toString()
     }
