@@ -59,9 +59,6 @@ class MoneyManager(private val cfg: Settings) {
     /** cmsnLost — جمع کمیسیون معاملات ضررده در فاز ManageCM، به دلار. */
     var cmsnLost: Double = 0.0
 
-    /** اسپرد زندهٔ بروکر (ask − bid، واحد قیمت) از فید؛ NaN = نامعلوم. فقط برای cmsn «خودکار». */
-    @Volatile var liveSpread: Double = Double.NaN
-
     val active: Boolean get() = cfg.mmMode != MoneyMode.NONE
 
     fun reset() { lost = 0.0; cmsnLost = 0.0 }
@@ -79,9 +76,12 @@ class MoneyManager(private val cfg: Settings) {
     fun div(entry: Double, finalTp: Double): Double =
         if (cfg.divAuto) abs(entry - finalTp) else abs(cfg.divManual)
 
-    /** اسپرد مؤثر (واحد قیمت): خودکار ⇒ اسپرد زندهٔ فید (در صورت وجود)، وگرنه عدد دستی. */
+    /** اسپرد مؤثر (واحد قیمت): خودکار و دریافت‌شده ⇒ [Settings.cmsnAutoValue] ؛ وگرنه عدد دستی. تابعی فقط از تنظیمات. */
     fun spread(): Double =
-        if (cfg.cmsnAuto && !liveSpread.isNaN() && liveSpread > 0.0) liveSpread else max(0.0, cfg.cmsnManual)
+        if (cfg.cmsnAuto && cfg.cmsnAutoValue > 0.0) cfg.cmsnAutoValue else max(0.0, cfg.cmsnManual)
+
+    /** آیا اسپرد مؤثر از بروکر آمده است (نه دستی)؟ */
+    fun spreadIsBroker(): Boolean = cfg.cmsnAuto && cfg.cmsnAutoValue > 0.0
 
     /** cmsn برای یک معامله با حجم [qty]، به دلار. در مود خاموش همیشه ۰ است (§۵: اپ بدون کارمزد). */
     fun commissionFor(qty: Double): Double =

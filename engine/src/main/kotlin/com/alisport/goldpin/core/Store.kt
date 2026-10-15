@@ -60,13 +60,14 @@ object Store {
         "rejectCandleNext" to c.rejectCandleNext,
         "mintick" to c.mintick, "slBufTicks" to c.slBufTicks, "entryBufTicks" to c.entryBufTicks, "minTPunits" to c.minTPunits,
         "useRiskPct" to c.useRiskPct, "riskPct" to c.riskPct, "equityPct" to c.equityPct,
-        "maxLeverage" to c.maxLeverage, "roundQty" to c.roundQty,
+        "maxLeverage" to c.maxLeverage, "levModel" to 2, "roundQty" to c.roundQty,
         "contractSize" to c.contractSize, "initialEquity" to c.initialEquity,
         // §۲۰ سند — مدیریت مالی و مدیریت زیان
         "mmMode" to c.mmMode, "minLotAuto" to c.minLotAuto, "minLotManual" to c.minLotManual,
         "divAuto" to c.divAuto, "divManual" to c.divManual,
         "cmsnAuto" to c.cmsnAuto, "cmsnManual" to c.cmsnManual,
-        "mixedGrowthPct" to c.mixedGrowthPct, "mmMaxLeverage" to c.mmMaxLeverage,
+        "cmsnAutoValue" to c.cmsnAutoValue, "cmsnAutoAt" to c.cmsnAutoAt,
+        "mixedGrowthPct" to c.mixedGrowthPct,
         "lotStep" to c.lotStep, "lostResetAtFinalTp" to c.lostResetAtFinalTp
     )
 
@@ -97,8 +98,14 @@ object Store {
         if (m.containsKey("divManual")) c.divManual = m["divManual"].asD()
         if (m.containsKey("cmsnAuto")) c.cmsnAuto = m["cmsnAuto"].asB()
         if (m.containsKey("cmsnManual")) c.cmsnManual = m["cmsnManual"].asD()
+        if (m.containsKey("cmsnAutoValue")) c.cmsnAutoValue = m["cmsnAutoValue"].asD()
+        if (m.containsKey("cmsnAutoAt")) c.cmsnAutoAt = m["cmsnAutoAt"].asL()
         if (m.containsKey("mixedGrowthPct")) c.mixedGrowthPct = m["mixedGrowthPct"].asD()
-        if (m.containsKey("mmMaxLeverage")) c.mmMaxLeverage = m["mmMaxLeverage"].asD()
+        // مهاجرت اهرم: پیش‌تر دو متغیر بود (§۵ = ۱۰ و §۲۰ = mmMaxLeverage). حالا یکی است (پیش‌فرض ۵۰۰).
+        // اگر فایل هنوز مقدار پیش‌فرض قدیمی ۱۰ را دارد (کاربر دستش نزده)، به مقدار جدید می‌رود
+        // (mmMaxLeverage فایل نسخهٔ ۱٫۴٫۱۹ اگر بود، همان)؛ اگر عدد دلخواه کاربر بود، دست‌نخورده می‌ماند.
+        if (!m.containsKey("levModel") && c.maxLeverage == 10.0)
+            c.maxLeverage = if (m.containsKey("mmMaxLeverage")) m["mmMaxLeverage"].asD() else 500.0
         if (m.containsKey("lotStep")) c.lotStep = m["lotStep"].asD()
         if (m.containsKey("lostResetAtFinalTp")) c.lostResetAtFinalTp = m["lostResetAtFinalTp"].asB()
         return c
@@ -294,6 +301,8 @@ object Store {
     private fun brokerTo(b: PaperBroker): Map<String, Any?> {
         val o = LinkedHashMap<String, Any?>()
         o["balance"] = b.balance; o["equity"] = b.equity
+        // balModel=2: balance فقط معاملات کاملاً بسته‌شده را دارد (نسخه‌های قبل: پله‌های خروج/کمیسیون معاملهٔ باز هم داخلش بود)
+        o["balModel"] = 2
         o["maxEquity"] = b.maxEquity; o["maxDrawdown"] = b.maxDrawdown
         o["orderSeq"] = b.orderSeq; o["tradeSeq"] = b.tradeSeq
         // §۲۰: وضعیت مدیریت زیان (فایل‌های قدیمی این کلیدها را ندارند ⇒ ۰)
@@ -376,6 +385,14 @@ object Store {
             }
         } else {
             val oid = m["openId"].asL(); if (oid >= 0) b.restoreOpen(b.trades.firstOrNull { it.id == oid })
+        }
+        // مهاجرت: فایل‌های قبل از balModel=2 سود/زیان پله‌های خروج‌شده و کمیسیونِ معاملات هنوز-باز را در balance داشتند؛
+        // الان این‌ها فقط با بسته شدن معامله وارد balance می‌شوند ⇒ همان مقدار را از balance برمی‌داریم (وگرنه دوبار شمرده می‌شود).
+        if (!m.containsKey("balModel")) {
+            for (t in b.openTrades) {
+                // فقط balance؛ equity همان می‌ماند (= balance + سود/زیان باز، که مجموعش در هر دو مدل یکی است)
+                b.balance -= t.fills.sumOf { it.pnl } - t.commission
+            }
         }
         return b
     }

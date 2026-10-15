@@ -25,7 +25,7 @@ class Doc20Test {
         initialEquity = equity
         entryBufTicks = 0.0
         riskPct = 1.0
-        mmMaxLeverage = 500.0
+        maxLeverage = 500.0
         lotStep = 0.01
         cmsnAuto = false
         cmsnManual = 0.0
@@ -104,7 +104,7 @@ class Doc20Test {
         near(10.0, o.qty, what = "Lot = MinLot وقتی Lost=0")
 
         // سقف اهرم: Lost بسیار بزرگ ⇒ Lot خام خیلی بزرگ؛ سقف = equity × اهرم ÷ قیمت
-        val c2 = cfg(MoneyMode.MANAGE_ALL_LOST, 10_000.0).apply { minLotAuto = false; minLotManual = 10.0; mmMaxLeverage = 5.0 }
+        val c2 = cfg(MoneyMode.MANAGE_ALL_LOST, 10_000.0).apply { minLotAuto = false; minLotManual = 10.0; maxLeverage = 5.0 }
         val r2 = Rig(c2)
         r2.b.mm.lost = 1_000_000.0
         val (_, o2) = r2.armBuy(2000.0, 1995.0, 2015.0)
@@ -239,7 +239,7 @@ class Doc20Test {
     }
 
     @Test
-    fun `commission is deducted at entry and counted in the trade pnl`() {
+    fun `commission is fixed at entry and charged to the trade pnl`() {
         val c = cfg(MoneyMode.MANAGE_ALL_LOST, 10_000.0).apply { minLotAuto = false; minLotManual = 10.0; cmsnManual = 0.5 }
         val r = Rig(c)
         r.armBuy(2000.0, 1995.0, 2015.0)
@@ -252,14 +252,19 @@ class Doc20Test {
     }
 
     @Test
-    fun `spread is automatic only when the feed provides one`() {
+    fun `spread is a pure function of the settings - broker value only when auto and already fetched`() {
         val c = cfg(MoneyMode.MIXED, 1_000.0).apply { cmsnAuto = true; cmsnManual = 0.2 }
         val b = PaperBroker(c)
-        near(0.2, b.mm.spread(), what = "فید اسپرد نداده ⇒ دستی")
-        b.mm.liveSpread = 0.45
-        near(0.45, b.mm.spread(), what = "فید اسپرد داده ⇒ خودکار")
+        near(0.2, b.mm.spread(), what = "اسپرد بروکر هنوز دریافت نشده ⇒ دستی")
+        assertFalse(b.mm.spreadIsBroker())
+        c.cmsnAutoValue = 0.45
+        near(0.45, b.mm.spread(), what = "خودکار و دریافت‌شده ⇒ مقدار بروکر")
+        assertTrue(b.mm.spreadIsBroker())
         c.cmsnAuto = false
         near(0.2, b.mm.spread(), what = "خودکار خاموش ⇒ دستی")
+        // مقدار ذخیره‌شده بدون شبکه و بدون وضعیت پنهان: دو کارگزار با تنظیمات یکسان ⇒ اسپرد یکسان
+        c.cmsnAuto = true
+        near(PaperBroker(c).mm.spread(), b.mm.spread(), 1e-12, "اسپرد فقط تابع تنظیمات است")
     }
 
     // ═══ ذخیره و بازیابی ═════════════════════════════════════════════════════
@@ -267,8 +272,9 @@ class Doc20Test {
     fun `settings and money-management state survive save and load`() {
         val c = cfg(MoneyMode.MIXED, 1_000.0).apply {
             minLotAuto = false; minLotManual = 2.5; divAuto = false; divManual = 12.0
-            cmsnAuto = false; cmsnManual = 0.4; mixedGrowthPct = 30.0; mmMaxLeverage = 250.0
+            cmsnAuto = false; cmsnManual = 0.4; mixedGrowthPct = 30.0; maxLeverage = 250.0
             lotStep = 0.1; lostResetAtFinalTp = false; entryBufTicks = 3.0
+            cmsnAutoValue = 0.37; cmsnAutoAt = 1_760_000_000_000L
         }
         val e = Engine(c)
         val r = Rig(c)
@@ -288,9 +294,11 @@ class Doc20Test {
         assertFalse(lc.minLotAuto); assertEquals(2.5, lc.minLotManual)
         assertFalse(lc.divAuto); assertEquals(12.0, lc.divManual)
         assertFalse(lc.cmsnAuto); assertEquals(0.4, lc.cmsnManual)
-        assertEquals(30.0, lc.mixedGrowthPct); assertEquals(250.0, lc.mmMaxLeverage)
+        assertEquals(30.0, lc.mixedGrowthPct); assertEquals(250.0, lc.maxLeverage)
         assertEquals(0.1, lc.lotStep); assertFalse(lc.lostResetAtFinalTp)
         assertEquals(3.0, lc.entryBufTicks, "entryBufTicks قبلاً ذخیره نمی‌شد و بعد از بازیابی به ۲ برمی‌گشت")
+        assertEquals(0.37, lc.cmsnAutoValue, "اسپرد دریافت‌شدهٔ بروکر باید ذخیره شود تا بعد از راه‌اندازی دوباره عدد تغییر نکند")
+        assertEquals(1_760_000_000_000L, lc.cmsnAutoAt)
         near(lostBefore, ld.broker.mm.lost, 1e-9, "Lost")
         near(cmsnLostBefore, ld.broker.mm.cmsnLost, 1e-9, "cmsnLost")
         val t = ld.broker.trades[0]
@@ -314,7 +322,7 @@ class Doc20Test {
         val json = Store.save(c, e, b, listOf(Candle(0, 0L, 1.0, 2.0, 0.5, 1.5, 10.0)))
         var old = json
         for (k in listOf("mmMode", "minLotAuto", "minLotManual", "divAuto", "divManual", "cmsnAuto", "cmsnManual",
-            "mixedGrowthPct", "mmMaxLeverage", "lotStep", "lostResetAtFinalTp", "entryBufTicks")) {
+            "mixedGrowthPct", "levModel", "lotStep", "lostResetAtFinalTp", "entryBufTicks", "cmsnAutoValue", "cmsnAutoAt")) {
             old = old.replace("\"$k\"", "\"zz_$k\"")
         }
         old = old.replace("\"mmLost\"", "\"zz_mmLost\"").replace("\"mmCmsnLost\"", "\"zz_mmCmsnLost\"")
@@ -323,10 +331,115 @@ class Doc20Test {
         assertEquals(MoneyMode.NONE, ld.cfg.mmMode)
         assertEquals(d.minLotAuto, ld.cfg.minLotAuto); assertEquals(d.minLotManual, ld.cfg.minLotManual)
         assertEquals(d.divAuto, ld.cfg.divAuto); assertEquals(d.cmsnAuto, ld.cfg.cmsnAuto)
-        assertEquals(d.mixedGrowthPct, ld.cfg.mixedGrowthPct); assertEquals(d.mmMaxLeverage, ld.cfg.mmMaxLeverage)
+        assertEquals(d.mixedGrowthPct, ld.cfg.mixedGrowthPct); assertEquals(d.maxLeverage, ld.cfg.maxLeverage)
         assertEquals(d.lotStep, ld.cfg.lotStep); assertEquals(d.lostResetAtFinalTp, ld.cfg.lostResetAtFinalTp)
         assertEquals(d.entryBufTicks, ld.cfg.entryBufTicks)
+        assertEquals(0.0, ld.cfg.cmsnAutoValue); assertEquals(0L, ld.cfg.cmsnAutoAt)
         assertEquals(0.0, ld.broker.mm.lost); assertEquals(0.0, ld.broker.mm.cmsnLost)
+    }
+
+    // ═══ اهرم: فقط یک متغیر ═══════════════════════════════════════════════════
+    @Test
+    fun `there is one leverage variable and its default is 500 in every mode`() {
+        assertEquals(500.0, Settings().maxLeverage, "تصمیم مالک: پیش‌فرض ۵۰۰")
+        // همان maxLeverage هم §۵ (مود خاموش) را محدود می‌کند و هم §۲۰ را
+        for (mode in listOf(MoneyMode.NONE, MoneyMode.MANAGE_ALL_LOST)) {
+            val c = cfg(mode, 10_000.0).apply { minLotAuto = false; minLotManual = 1_000.0; maxLeverage = 5.0 }
+            val r = Rig(c)
+            r.armBuy(2000.0, 1999.0, 2010.0)
+            val q = r.b.pendingOrder!!.qty
+            near(10_000.0 * 5.0 / 2000.0, q, 1e-6, "مود $mode: حجم به equity × اهرم ÷ قیمت محدود می‌شود")
+        }
+    }
+
+    @Test
+    fun `leverage migrates from the old two-variable files only when the user never changed it`() {
+        fun jsonWith(maxLev: Double, marker: Boolean, mm: Double?): String {
+            val c = Settings().apply { maxLeverage = maxLev }
+            val e = Engine(c); val b = PaperBroker(c); e.broker = b; b.engine = e
+            var j = Store.save(c, e, b, listOf(Candle(0, 0L, 1.0, 2.0, 0.5, 1.5, 10.0)))
+            if (!marker) j = j.replace("\"levModel\"", "\"zz_levModel\"")
+            if (mm != null) j = j.replace("\"maxLeverage\"", "\"mmMaxLeverage\":$mm,\"maxLeverage\"")
+            return j
+        }
+        assertEquals(500.0, Store.load(jsonWith(10.0, marker = false, mm = null)).cfg.maxLeverage, "فایل ۱٫۴٫۱۸ با پیش‌فرض قدیمی ۱۰ ⇒ ۵۰۰")
+        assertEquals(250.0, Store.load(jsonWith(10.0, marker = false, mm = 250.0)).cfg.maxLeverage, "فایل ۱٫۴٫۱۹: مقدار §۲۰ کاربر حفظ می‌شود")
+        assertEquals(3.0, Store.load(jsonWith(3.0, marker = false, mm = null)).cfg.maxLeverage, "عدد دلخواه کاربر دست‌نخورده می‌ماند")
+        assertEquals(10.0, Store.load(jsonWith(10.0, marker = true, mm = null)).cfg.maxLeverage, "فایل جدید: ۱۰ انتخاب خود کاربر است")
+    }
+
+    // ═══ حسابداری: هر مفهوم یک متغیر، یک جای به‌روزرسانی ═══════════════════════
+    @Test
+    fun `Capital moves only when a trade fully closes while equity follows the open trade`() {
+        val c = cfg(MoneyMode.MANAGE_ALL_LOST, 10_000.0).apply { minLotAuto = false; minLotManual = 10.0; cmsnManual = 0.5 }
+        val r = Rig(c)
+        val s = Setup(1L, 1, 6, 2005.0, 1995.0, 0, 0)
+        s.hvH = 2000.0; s.hvL = 1999.0; s.sl = 1990.0; s.tpx = 2030.0; s.tp1 = 2010.0; s.tp2 = 2020.0
+        assertTrue(r.b.registerLimit(s, r.bar(2002.0, 2003.0, 2001.0, 2002.0)), "ثبت سفارش: ${r.b.lastError}")
+        near(10.0, r.b.pendingOrder!!.qty, what = "Lot = MinLot")
+
+        r.b.onBar(r.bar(2001.0, 2002.0, 1999.5, 2001.0))                 // پر شدن؛ کلوز ۲۰۰۱ ⇒ شناور +۱۰
+        val t = r.b.openTrades.single()
+        near(5.0, t.commission, what = "cmsn = ۰٫۵ × ۱۰")
+        near(10_000.0, r.b.balance, 1e-9, "Capital با پر شدن (و کمیسیون) تغییر نمی‌کند")
+        near(10_000.0 - 5.0 + 10.0, r.b.equity, 1e-6, "equity = −کمیسیون + شناور")
+
+        r.b.onBar(r.bar(2005.0, 2011.0, 2004.0, 2008.0))                 // TP1: ۳٫۳ واحد در ۲۰۱۰ ⇒ +۳۳
+        near(10_000.0, r.b.balance, 1e-9, "Capital با پلهٔ خروج TP1 هم تغییر نمی‌کند")
+        near(10_000.0 + 33.0 - 5.0 + (2008.0 - 2000.0) * 6.7, r.b.equity, 1e-6, "equity پلهٔ خروج‌شده را دارد")
+        near(0.0, r.b.mm.lost, 1e-12, "Lost هنوز تغییری نکرده")
+
+        r.b.onBar(r.bar(2005.0, 2006.0, 1999.0, 2000.5))                 // برگشت به ورود ⇒ سر‌به‌سر؛ معامله کامل بسته می‌شود
+        assertEquals(0, r.b.openTrades.size)
+        near(10_000.0 + 33.0 - 5.0, r.b.balance, 1e-6, "Capital = اولیه + سود/زیان خالص کل معامله")
+        near(r.b.balance, r.b.equity, 1e-9, "بدون معامله باز: equity = Capital")
+        near(r.b.trades[0].pnl(), r.b.balance - 10_000.0, 1e-9, "Capital − اولیه = مجموع سود/زیان معاملات بسته‌شده")
+    }
+
+    @Test
+    fun `Capital and Lost change at the very same event`() {
+        val c = cfg(MoneyMode.MANAGE_ALL_LOST, 10_000.0).apply { minLotAuto = false; minLotManual = 10.0; cmsnManual = 0.5 }
+        val r = Rig(c)
+        r.armBuy(2000.0, 1995.0, 2015.0)
+        r.b.onBar(r.bar(2001.0, 2002.0, 1999.5, 2001.0))                 // پر شد، SL نخورده
+        near(10_000.0, r.b.balance, 1e-9, "Capital قبل از بسته شدن")
+        near(0.0, r.b.mm.lost, 1e-12, "Lost قبل از بسته شدن")
+        r.b.onBar(r.bar(2000.0, 2000.5, 1994.0, 1995.0))                 // SL
+        near(10_000.0 - 55.0, r.b.balance, 1e-9, "Capital بعد از بسته شدن")
+        near(55.0, r.b.mm.lost, 1e-9, "Lost بعد از بسته شدن (همان رخداد)")
+    }
+
+    @Test
+    fun `an old save file with a still-open trade is migrated so nothing is counted twice`() {
+        val c = cfg(MoneyMode.MANAGE_ALL_LOST, 10_000.0).apply { minLotAuto = false; minLotManual = 10.0; cmsnManual = 0.5 }
+        val e = Engine(c)
+        val r = Rig(c)
+        e.broker = r.b; r.b.engine = e
+        val s = Setup(1L, 1, 6, 2005.0, 1995.0, 0, 0)
+        s.hvH = 2000.0; s.hvL = 1999.0; s.sl = 1990.0; s.tpx = 2030.0; s.tp1 = 2010.0; s.tp2 = 2020.0
+        r.b.registerLimit(s, r.bar(2002.0, 2003.0, 2001.0, 2002.0))
+        r.b.onBar(r.bar(2001.0, 2002.0, 1999.5, 2001.0))
+        r.b.onBar(r.bar(2005.0, 2011.0, 2004.0, 2008.0))                 // TP1 خورد؛ معامله هنوز باز است
+        val t = r.b.openTrades.single()
+        val inOldBalance = t.fills.sumOf { it.pnl } - t.commission        // مدل قدیمی این را زودتر داخل balance می‌ریخت
+        near(28.0, inOldBalance, 1e-9, "۳۳ سود TP1 − ۵ کمیسیون")
+        val candles = listOf(Candle(0, 0L, 1.0, 2.0, 0.5, 1.5, 10.0))
+
+        val modern = Store.save(c, e, r.b, candles)
+        val newLoaded = Store.load(modern).broker
+        near(r.b.balance, newLoaded.balance, 1e-9, "فایل جدید دست‌نخورده بارگذاری می‌شود")
+
+        // شبیه‌سازی فایل قدیمی: بدون balModel و با balance مدل قدیمی
+        val oldBalance = r.b.balance + inOldBalance
+        var old = modern.replace("\"balModel\"", "\"zz_balModel\"")
+        old = Regex("\"balance\":[^,}]+").replaceFirst(old, "\"balance\":$oldBalance")
+        val oldLoaded = Store.load(old).broker
+        near(r.b.balance, oldLoaded.balance, 1e-9, "balance فایل قدیمی به مدل جدید مهاجرت می‌کند")
+        near(r.b.equity, oldLoaded.equity, 1e-9, "equity هیچ‌گاه عوض نمی‌شود")
+
+        // و ادامه: بستن معامله بعد از بارگذاری باید همان Capital نهایی را بدهد
+        val rr = Rig(c); rr.b.balance = oldLoaded.balance
+        near(10_000.0, rr.b.balance, 1e-9, "پایهٔ ادامه = سرمایهٔ بسته‌شدهٔ قبل از معامله")
     }
 
     // ═══ §1/§3/§6 — پر شدن سفارش لیمیت با قیمت زنده ═══════════════════════════

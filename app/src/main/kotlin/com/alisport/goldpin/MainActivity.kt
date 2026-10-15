@@ -65,6 +65,8 @@ class MainActivity : Activity() {
     private var chart: ChartView? = null
     private var chartInfo: TextView? = null
     private var eventsBox: LinearLayout? = null
+    /** کادر «وضعیت مدیریت مالی» در تنظیمات؛ با هر رخداد رابط به‌روز می‌شود تا هرگز کهنه نماند. */
+    private var mmStatusBox: LinearLayout? = null
     private var chartBottomPanel: View? = null
     private var fullscreen = false
     private var bannerView: TextView? = null
@@ -160,6 +162,26 @@ class MainActivity : Activity() {
         val liveBtn = Ui.btn(this, "لایو", Palette.panel2, Palette.up, 12f)
         liveBtn.setOnClickListener { toggleLive() }
         titleRow.addView(liveBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        // دکمهٔ گرد با فلش خمیده: همه‌چیز را دوباره بارگذاری می‌کند (دانلود داده + موتور + کارگزار + همهٔ محاسبات از صفر)
+        val reloadBtn = TextView(this).apply {
+            text = "↻"
+            tag = "reload_all"
+            contentDescription = "بارگذاری مجدد همه‌چیز"
+            gravity = Gravity.CENTER
+            textSize = 20f
+            setTextColor(Palette.txt)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(Palette.accent)
+            }
+            setOnClickListener {
+                toast("بارگذاری مجدد همه‌چیز شروع شد…")
+                s.reloadAll { m -> toast(m) }
+            }
+        }
+        titleRow.addView(reloadBtn, LinearLayout.LayoutParams(Ui.dp(this, 38f), Ui.dp(this, 38f)).apply {
+            marginStart = Ui.dp(this@MainActivity, 8f)
+        })
         header.addView(titleRow)
         headerStatus = Ui.tv(this, "آماده", 11f, Palette.dim).apply {
             // لایهٔ دفاعی: حتی اگر رشتهٔ بزرگی به اینجا برسد، TextView کل آن را
@@ -194,7 +216,7 @@ class MainActivity : Activity() {
     private fun showTab(i: Int) {
         if (fullscreen) setFullscreen(false, keepTab = true)
         tab = i
-        chart = null; chartInfo = null; eventsBox = null
+        chart = null; chartInfo = null; eventsBox = null; mmStatusBox = null
         Log.d(Log.CAT_UI, "تب ${arrayOf("چارت", "سفارش‌ها", "سود و زیان", "گزارش‌ها", "تنظیمات").getOrElse(i) { "?" }} باز شد")
         for (k in 0 until tabButtons.childCount) {
             (tabButtons.getChildAt(k) as TextView).setTextColor(if (k == i) Palette.gold else Palette.dim)
@@ -235,7 +257,11 @@ class MainActivity : Activity() {
                 append(if (s.liveRunning) "● لایو" else "○ لایو خاموش")
                 append("  |  ${Tf.label(s.chartTfSec)}  |  روند: $trend")
                 append("  |  معاملات: ${Fa.d(s.tradesSnapshot().count { !it.open }.toString())}")
-                append("  |  موجودی: ${Fa.n(s.broker.equity, 2)}")
+                // Capital = سرمایهٔ اولیه + سود/زیان معاملات بسته‌شده (همان عدد تب سود و زیان و §۲۰)؛
+                // اکوییتی (با سود/زیان شناور) فقط وقتی فرق دارد و با نام جدا نشان داده می‌شود.
+                append("  |  سرمایه: ${Fa.n(s.broker.balance, 2)}")
+                if (kotlin.math.abs(s.broker.equity - s.broker.balance) >= 0.005)
+                    append(" (اکوییتی ${Fa.n(s.broker.equity, 2)})")
                 if (Log.enabled) append("  |  لاگر روشن (${Fa.d(Log.count().toString())})")
                 if (s.busy) append("  |  ⏳ ${s.busyText.ifEmpty { "در حال محاسبه…" }}")
                 // ⚠ مهار دوباره: حتی اگر رشتهٔ بلندی تا اینجا رسید، هرگز کامل داخل
@@ -260,7 +286,11 @@ class MainActivity : Activity() {
                         )
                     }
                 }
-                4 -> Unit // تنظیمات خودش ساخته شده؛ هیچ‌وقت با تب گزارش جایگزین نشود
+                4 -> {
+                    // تنظیمات خودش ساخته شده؛ هیچ‌وقت با تب گزارش جایگزین نشود. فقط کادر وضعیت §۲۰ زنده می‌ماند
+                    // (بعد از تغییر مود/عدد، بازسازی در پس‌زمینه تمام می‌شود و عددها باید همان لحظه عوض شوند).
+                    mmStatusBox?.let { if (it.isAttachedToWindow) fillMmStatus(it) }
+                }
             }
         } finally {
             refreshing = false
@@ -462,6 +492,11 @@ class MainActivity : Activity() {
             toast("دانلود تاریخچه (${Tf.label(s.chartTfSec)}) شروع شد…")
             s.downloadHistory { m -> toast(m) }
         })
+        topRow.addView(barChip("نتیجهٔ معاملات", on = s.showTradeResults) {
+            s.showTradeResults = !s.showTradeResults
+            applyAndSaveChartVis()
+            showTab(0)
+        })
         topRow.addView(barChip("👁 اجزای چارت") { showChartElementsDialog() })
         topRow.addView(barChip("⋮ بیشتر") { showChartContextMenu() })
         col.addView(topBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -561,6 +596,7 @@ class MainActivity : Activity() {
         ChartToggleItem("نشانگرهای تریگر ۱ — ولوم کم (◇/◆ ولوم کم)", { s.showTrigger1Markers }, { s.showTrigger1Markers = it }),
         ChartToggleItem("نشانگرهای تریگر ۲ — ولوم زیاد (★/✦ ولوم زیاد)", { s.showTrigger2Markers }, { s.showTrigger2Markers = it }),
         ChartToggleItem("نشانگرهای ورود و خروج معامله (ورود/SL/TP/BE)", { s.showTradeMarkers }, { s.showTradeMarkers = it }),
+        ChartToggleItem("نتیجهٔ معاملات روی چارت: سود سبز، ضرر قرمز، سر‌به‌سر خط‌چین (پیش‌فرض خاموش)", { s.showTradeResults }, { s.showTradeResults = it }),
         ChartToggleItem("نشانگرهای ابطال، شکست و رد ناحیه (✕)", { s.showInvalidationMarkers }, { s.showInvalidationMarkers = it }),
         ChartToggleItem("متن توضیح کنار نشانگرها روی چارت", { s.showMarkerText }, { s.showMarkerText = it })
     )
@@ -889,11 +925,14 @@ class MainActivity : Activity() {
         box.addView(Ui.tv(this, "خلاصهٔ عملکرد", 13f, Palette.gold, true))
         box.addView(Ui.label(this, "سود/زیان خالص (دلار)", Fa.signed(sum.net), vColor = if (sum.net >= 0) Palette.up else Palette.down))
         box.addView(Ui.label(this, "تعداد معاملات", Fa.d(sum.trades.toString())))
-        box.addView(Ui.label(this, "برد / باخت", "${Fa.d(sum.wins.toString())} / ${Fa.d(sum.losses.toString())}  (${Fa.pct(sum.winRate)})"))
+        // شمارش بر اساس «نتیجهٔ قیمتی» است (TP / SL / سر‌به‌سر) و با کمیسیون و مود مالی عوض نمی‌شود.
+        box.addView(Ui.label(this, "برد (TP) / باخت (SL) / سر‌به‌سر",
+            "${Fa.d(sum.wins.toString())} / ${Fa.d(sum.losses.toString())} / ${Fa.d(sum.breakeven.toString())}  (${Fa.pct(sum.winRate)})"))
         box.addView(Ui.label(this, "ضریب سود", Fa.n(sum.profitFactor, 2)))
         box.addView(Ui.label(this, "میانگین R", Fa.n(sum.avgR, 2)))
         box.addView(Ui.label(this, "بیشترین افت سرمایه", Fa.n(sum.maxDD, 2)))
-        box.addView(Ui.label(this, "موجودی نهایی", Fa.n(s.broker.balance, 2)))
+        box.addView(Ui.label(this, "سرمایهٔ فعلی (Capital)", Fa.n(s.broker.balance, 2)))
+        box.addView(Ui.label(this, "اکوییتی (با سود/زیان شناور)", Fa.n(s.broker.equity, 2)))
         v.addView(box)
         val eq = EquityChartView(this)
         eq.setData(pnlTrades, s.cfg.initialEquity)
@@ -973,7 +1012,7 @@ class MainActivity : Activity() {
                             addView(Ui.tv(this@MainActivity, "${r.label}   ${Fa.signed(r.net)} دلار", 12.5f,
                                 if (r.net >= 0) Palette.up else Palette.down, true))
                             addView(Ui.tv(this@MainActivity,
-                                "معامله ${Fa.d(r.trades.toString())} · برد ${Fa.d(r.wins.toString())} · باخت ${Fa.d(r.losses.toString())} · " +
+                                "معامله ${Fa.d(r.trades.toString())} · برد ${Fa.d(r.wins.toString())} · باخت ${Fa.d(r.losses.toString())} · سر‌به‌سر ${Fa.d(r.breakeven.toString())} · " +
                                     "نرخ برد ${Fa.pct(r.winRate)} · PF ${Fa.n(r.profitFactor, 2)} · میانگین R ${Fa.n(r.avgR, 2)} · افت ${Fa.n(r.maxDD, 1)}",
                                 10.5f, Palette.dim))
                         }
@@ -1134,7 +1173,7 @@ class MainActivity : Activity() {
             })
         }
         v.addView(switchRow("ساخت حجم تقریبی اگر فید حجم نداشت", s.useSyntheticVolume) { s.useSyntheticVolume = it })
-        v.addView(switchRow("حالت بک‌تست کامل (آخرین کندل هم بسته)", s.backtestFull) { s.backtestFull = it; s.rebuildAsync(clearOrders = true) })
+        v.addView(switchRow("حالت بک‌تست کامل (آخرین کندل هم بسته)", s.backtestFull) { s.backtestFull = it; s.rebuildAsync() })
         v.addView(numRow("فاصلهٔ به‌روزرسانی لایو (ثانیه)", s.livePollMs / 1000.0) { s.livePollMs = (it * 1000).toLong().coerceAtLeast(2000) })
         v.addView(numRow("مهلت اتصال فید (ثانیه)", Feed.connectTimeoutMs / 1000.0) {
             Feed.connectTimeoutMs = (it * 1000).toInt().coerceIn(1000, 120000); s.persistPrefs(this)
@@ -1209,45 +1248,78 @@ class MainActivity : Activity() {
                 if (sel) Palette.txt else Palette.dim, 11.5f).apply {
                 setOnClickListener {
                     Log.i(Log.CAT_CFG, "مود مدیریت مالی §۲۰ = ${MoneyMode.label(mode)}")
-                    s.cfg.mmMode = mode; s.rebuildAsync(); showTab(4)
+                    s.cfg.mmMode = mode; s.rebuildAsync(); s.ensureBrokerSpread(); showTab(4)
                 }
             })
             v.addView(Ui.spacer(this, 3f))
         }
-        v.addView(Ui.tv(this, "ریسک (risk) همان «ریسک هر معامله (٪)» بالاست (پیش‌فرض ۱).", 10.5f, d))
-        v.addView(switchRow("MinLot خودکار = (NakedCapital × risk) ÷ ۱۰۰", s.cfg.minLotAuto) {
-            s.cfg.minLotAuto = it; s.rebuildAsync(); showTab(4)
-        })
-        v.addView(numRow("MinLot دستی (اونس)", s.cfg.minLotManual) { s.cfg.minLotManual = it; s.rebuildAsync() })
-        v.addView(switchRow("div خودکار = |ورودی سفارش − حدسود نهایی|", s.cfg.divAuto) {
-            s.cfg.divAuto = it; s.rebuildAsync(); showTab(4)
-        })
-        v.addView(numRow("div دستی (واحد قیمت)", s.cfg.divManual) { s.cfg.divManual = it; s.rebuildAsync() })
-        v.addView(switchRow("cmsn خودکار = اسپرد بروکر از فید (اگر نبود: دستی)", s.cfg.cmsnAuto) {
-            s.cfg.cmsnAuto = it; s.rebuildAsync(); showTab(4)
-        })
-        v.addView(numRow("cmsn دستی: اسپرد (واحد قیمت؛ ۰ = بدون کمیسیون)", s.cfg.cmsnManual) { s.cfg.cmsnManual = it; s.rebuildAsync() })
+        v.addView(Ui.tv(this, "ریسک (risk) همان «ریسک هر معامله (٪)» بالاست (پیش‌فرض ۱). اهرم هم همان «حداکثر اهرم» بالاست (یک متغیر برای همهٔ مودها).", 10.5f, d))
+        if (s.cfg.mmMode == MoneyMode.NONE)
+            v.addView(Ui.tv(this, "⚠ مود خاموش است: MinLot / div / cmsn فقط در ManageAllLost و Mixed اثر دارند.", 10.5f, Palette.gold))
+        val mm = s.broker.mm
+        // هر مفهوم یک ردیف دارد: یا «خودکار» (عددِ مؤثر نمایش داده می‌شود) یا «دستی» (فقط همین‌جا عدد تایپ می‌شود).
+        // ردیف دستی وقتی خودکار روشن است اصلاً نشان داده نمی‌شود تا عددِ بی‌اثر تایپ نشود.
+        v.addView(autoNumRow("MinLot", s.cfg.minLotAuto,
+            "${Fa.n(mm.minLot(), 2)} اونس = NakedCapital × risk ÷ ۱۰۰", s.cfg.minLotManual,
+            onAuto = { on ->
+                if (!on) s.cfg.minLotManual = mm.minLot()            // عددِ فعلیِ مؤثر، نقطهٔ شروع دستی می‌شود
+                s.cfg.minLotAuto = on; s.rebuildAsync(); showTab(4)
+            },
+            onManual = { s.cfg.minLotManual = it; s.rebuildAsync() }))
+        v.addView(autoNumRow("div", s.cfg.divAuto,
+            "هر سفارش جدا: |ورودی سفارش − حدسود نهایی| (واحد قیمت)", s.cfg.divManual,
+            onAuto = { on -> s.cfg.divAuto = on; s.rebuildAsync(); showTab(4) },
+            onManual = { s.cfg.divManual = it; s.rebuildAsync() }))
+        val spreadHint = when {
+            mm.spreadIsBroker() -> "${Fa.n(mm.spread(), 3)} (بروکر · ${Fa.jalali(s.cfg.cmsnAutoAt)})"
+            else -> "هنوز از بروکر دریافت نشده ⇒ ${Fa.n(mm.spread(), 3)} (بدون کمیسیون اگر ۰)"
+        }
+        v.addView(autoNumRow("cmsn (اسپرد تحمیلی، واحد قیمت)", s.cfg.cmsnAuto, spreadHint, s.cfg.cmsnManual,
+            onAuto = { on ->
+                if (!on && mm.spreadIsBroker()) s.cfg.cmsnManual = mm.spread()
+                s.cfg.cmsnAuto = on; s.rebuildAsync()
+                if (on) s.fetchBrokerSpread { m -> toast(m) }
+                showTab(4)
+            },
+            onManual = { s.cfg.cmsnManual = it; s.rebuildAsync() }))
+        if (s.cfg.cmsnAuto) {
+            v.addView(Ui.btn(this, "دریافت دوبارهٔ اسپرد بروکر (Swissquote)", Palette.panel2, Palette.txt, 11f).apply {
+                setOnClickListener { s.fetchBrokerSpread { m -> toast(m) } }
+            })
+        }
         v.addView(numRow("آستانهٔ رشد Mixed (٪) ⇒ M = NakedCapital × (۱+٪)", s.cfg.mixedGrowthPct) { s.cfg.mixedGrowthPct = it; s.rebuildAsync() })
-        v.addView(numRow("سقف اهرم در مودهای §۲۰", s.cfg.mmMaxLeverage) { s.cfg.mmMaxLeverage = it; s.rebuildAsync() })
         v.addView(numRow("گام حجم (۰ = بدون گرد کردن؛ مثال‌های سند ۰٫۰۱)", s.cfg.lotStep) { s.cfg.lotStep = it; s.rebuildAsync() })
         v.addView(switchRow("با رسیدن به حد سود نهایی، Lost صفر شود", s.cfg.lostResetAtFinalTp) {
             s.cfg.lostResetAtFinalTp = it; s.rebuildAsync()
         })
 
+        val box = Ui.box(this)
+        box.tag = "mm_status_box"
+        fillMmStatus(box)
+        mmStatusBox = box
+        v.addView(box)
+    }
+
+    /** محتوای کادر وضعیت §۲۰ را از وضعیت فعلی کارگزار می‌سازد (قابل فراخوانی مکرر). */
+    private fun fillMmStatus(box: LinearLayout) {
+        box.removeAllViews()
         val mm = s.broker.mm
         val cap = s.broker.balance
-        val box = Ui.box(this)
-        box.addView(Ui.tv(this, "وضعیت مدیریت مالی (اکنون)", 12f, Palette.gold, true))
+        box.addView(Ui.tv(this, "وضعیت مدیریت مالی (اکنون)" + if (s.busy) " — در حال بازسازی…" else "", 12f, Palette.gold, true))
         box.addView(Ui.label(this, "NakedCapital (سرمایهٔ اولیه)", Fa.n(mm.nakedCapital(), 2)))
         box.addView(Ui.label(this, "Capital (سرمایهٔ فعلی)", Fa.n(cap, 2)))
+        box.addView(Ui.label(this, "Equity (با سود/زیان شناور)", Fa.n(s.broker.equity, 2)))
         box.addView(Ui.label(this, "MinLot", Fa.n(mm.minLot(), 2)))
         box.addView(Ui.label(this, "Lost", Fa.n(mm.lost, 2)))
         box.addView(Ui.label(this, "cmsnLost", Fa.n(mm.cmsnLost, 2)))
         box.addView(Ui.label(this, "M (آستانهٔ Mixed)", Fa.n(mm.growthLimit(), 2)))
         box.addView(Ui.label(this, "فاز Mixed", if (cap > mm.growthLimit()) "ManageCM" else "ManageNothing"))
-        val live = s.cfg.cmsnAuto && !mm.liveSpread.isNaN() && mm.liveSpread > 0.0
-        box.addView(Ui.label(this, "اسپرد مؤثر (cmsn)", Fa.n(mm.spread(), 3) + if (live) " (زنده)" else " (دستی)"))
-        v.addView(box)
+        val spreadSrc = when {
+            mm.spreadIsBroker() -> " (بروکر · ${Fa.jalali(s.cfg.cmsnAutoAt)})"
+            s.cfg.cmsnAuto -> " (خودکار هنوز دریافت نشده ⇒ دستی)"
+            else -> " (دستی)"
+        }
+        box.addView(Ui.label(this, "اسپرد مؤثر (cmsn)", Fa.n(mm.spread(), 3) + spreadSrc))
     }
 
     private fun pickAlertKinds() {
@@ -1367,6 +1439,24 @@ class MainActivity : Activity() {
         return row
     }
 
+    /**
+     * یک مفهوم = یک ردیف: کلید «خودکار» + (اگر خودکار روشن است) عددِ مؤثرِ محاسبه‌شده، وگرنه یک فیلد عددِ دستی.
+     * فیلد دستی وقتی خودکار روشن است ساخته نمی‌شود؛ پس هرگز عددی تایپ نمی‌شود که بی‌اثر بماند
+     * (قبلاً «MinLot دستی» با خودکارِ روشن نادیده گرفته می‌شد و بالا بردنش هیچ چیز را عوض نمی‌کرد).
+     */
+    private fun autoNumRow(label: String, auto: Boolean, autoHint: String, manual: Double,
+                           onAuto: (Boolean) -> Unit, onManual: (Double) -> Unit): View {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        box.addView(switchRow("$label — خودکار", auto) { onAuto(it) })
+        if (auto) {
+            box.addView(Ui.tv(this, "$label مؤثر: $autoHint", 11f, Palette.accent))
+            box.addView(Ui.tv(this, "برای عدد دلخواه «خودکار» را خاموش کن؛ عدد فعلی به‌عنوان مقدار دستی می‌ماند.", 10f, Palette.dim))
+        } else {
+            box.addView(numRow("$label (دستی — بعد از تایپ «ثبت» را بزن)", manual) { onManual(it) })
+        }
+        return box
+    }
+
     private fun switchRow(label: String, value: Boolean, apply: (Boolean) -> Unit): View {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         row.addView(Ui.tv(this, label, 11.5f, Palette.dim), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -1484,10 +1574,10 @@ class MainActivity : Activity() {
     }
 
     private fun exportReportCsv(rows: List<Reports.Row>, title: String) {
-        val sb = StringBuilder("دوره,معاملات,برد,باخت,نرخ برد,سود خالص,ضریب سود,میانگین R,بیشترین افت\n")
+        val sb = StringBuilder("دوره,معاملات,برد,باخت,سر‌به‌سر,نرخ برد,سود خالص,ضریب سود,میانگین R,بیشترین افت\n")
         for (r in rows) {
             sb.append(r.label).append(',').append(r.trades).append(',').append(r.wins).append(',').append(r.losses)
-                .append(',').append(String.format("%.1f", r.winRate)).append(',').append(String.format("%.2f", r.net))
+                .append(',').append(r.breakeven).append(',').append(String.format("%.1f", r.winRate)).append(',').append(String.format("%.2f", r.net))
                 .append(',').append(String.format("%.2f", r.profitFactor)).append(',').append(String.format("%.2f", r.avgR))
                 .append(',').append(String.format("%.2f", r.maxDD)).append('\n')
         }

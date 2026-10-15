@@ -20,9 +20,12 @@ object Reports {
         var key = ""
         var label = ""
         var trades = 0
+        /** برد/باخت/سر‌به‌سر بر اساس «نتیجهٔ قیمتی» ([Trade.outcome]) — مستقل از کمیسیون و مود مالی. */
         var wins = 0
         var losses = 0
+        var breakeven = 0
         var net = 0.0
+        /** جمع سود/زیان خالص مثبت و منفی (برای ضریب سود؛ کمیسیونِ سر‌به‌سرها جزو هزینه‌هاست). */
         var grossWin = 0.0
         var grossLoss = 0.0
         var rSum = 0.0
@@ -114,7 +117,8 @@ object Reports {
             val row = map.getOrPut(start) { Row().also { it.key = start.toString(); it.label = label(kind, start, tz) } }
             val pnl = t.pnl()
             row.trades++
-            if (pnl >= 0) { row.wins++; row.grossWin += pnl } else { row.losses++; row.grossLoss += -pnl }
+            when (t.outcome()) { 1 -> row.wins++; -1 -> row.losses++; else -> row.breakeven++ }
+            if (pnl >= 0) row.grossWin += pnl else row.grossLoss += -pnl
             row.net += pnl
             row.rSum += t.rMultiple()
             row.best = if (row.best.isNaN()) pnl else max(row.best, pnl)
@@ -140,7 +144,7 @@ object Reports {
 
     /** خلاصهٔ کل. */
     class Summary {
-        var trades = 0; var wins = 0; var losses = 0
+        var trades = 0; var wins = 0; var losses = 0; var breakeven = 0
         var net = 0.0; var grossWin = 0.0; var grossLoss = 0.0
         var rSum = 0.0; var maxDD = 0.0; var best = Double.NaN; var worst = Double.NaN
         var avgWin = 0.0; var avgLoss = 0.0
@@ -153,17 +157,23 @@ object Reports {
         val s = Summary()
         val closed = trades.filter { !it.open }.sortedBy { it.exitT ?: 0 }
         var peak = 0.0; var cum = 0.0
+        var winNet = 0.0; var lossNet = 0.0
         for (t in closed) {
             val pnl = t.pnl()
             s.trades++
-            if (pnl >= 0) { s.wins++; s.grossWin += pnl } else { s.losses++; s.grossLoss += -pnl }
+            when (t.outcome()) {
+                1 -> { s.wins++; winNet += pnl }
+                -1 -> { s.losses++; lossNet += -pnl }
+                else -> s.breakeven++
+            }
+            if (pnl >= 0) s.grossWin += pnl else s.grossLoss += -pnl
             s.net += pnl; s.rSum += t.rMultiple()
             s.best = if (s.best.isNaN()) pnl else max(s.best, pnl)
             s.worst = if (s.worst.isNaN()) pnl else min(s.worst, pnl)
             cum += pnl; peak = max(peak, cum); s.maxDD = max(s.maxDD, peak - cum)
         }
-        s.avgWin = if (s.wins > 0) s.grossWin / s.wins else 0.0
-        s.avgLoss = if (s.losses > 0) s.grossLoss / s.losses else 0.0
+        s.avgWin = if (s.wins > 0) winNet / s.wins else 0.0
+        s.avgLoss = if (s.losses > 0) lossNet / s.losses else 0.0
         return s
     }
 }

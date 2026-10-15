@@ -181,8 +181,23 @@ class Trade(
     val open: Boolean get() = exitT == null
     val risk: Double get() = if (sl0 != 0.0) kotlin.math.abs(entry - sl0) else 0.0
 
+    /** سود/زیان ناخالصِ قیمتی: مجموع همهٔ پله‌ها، بدون کمیسیون. «نتیجهٔ قیمتی» معامله از همین می‌آید. */
+    fun grossPnl(): Double = fills.sumOf { it.pnl }
+
     /** سود/زیان دلاری (خالص، شامل همهٔ پله‌ها و منهای کمیسیون cmsn). */
-    fun pnl(): Double = fills.sumOf { it.pnl } - commission
+    fun pnl(): Double = grossPnl() - commission
+
+    /**
+     * نتیجهٔ قیمتی معامله، **مستقل از کمیسیون و مود مالی**:
+     *  ۱ = سود (حداقل یک پلهٔ سودده خورد: TP1/TP2/TPX)، −۱ = ضرر (SL)،
+     *  ۰ = سر‌به‌سر (خروج روی قیمت ورود، بدون هیچ سود قیمتی).
+     * شمارش «برد/باخت/سر‌به‌سر» در گزارش‌ها از همین است؛ پس روشن‌کردن کمیسیون (مودهای §۲۰) تعداد TP/SL را عوض نمی‌کند
+     * (قبلاً سر‌به‌سرهای صفر‌دلاری «برد» بودند و با کمیسیون یکباره «باخت» می‌شدند).
+     */
+    fun outcome(): Int {
+        val g = grossPnl()
+        return when { g > OUTCOME_EPS -> 1; g < -OUTCOME_EPS -> -1; else -> 0 }
+    }
 
     /** چند R سود/زیان شد. */
     fun rMultiple(): Double {
@@ -190,6 +205,9 @@ class Trade(
         return if (r > 1e-9) pnl() / r else 0.0
     }
 }
+
+/** آستانهٔ صفر بودن سود/زیان ناخالص برای تشخیص سر‌به‌سر (دلار). */
+const val OUTCOME_EPS = 1e-9
 
 /** نوع مارکر روی چارت؛ مقادیر عددی در فایل‌های ذخیره‌شده ثابت می‌مانند. */
 object MarkerKind {

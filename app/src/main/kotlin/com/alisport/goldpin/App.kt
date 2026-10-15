@@ -105,6 +105,8 @@ class AppState {
     var showTrigger1Markers: Boolean = true
     var showTrigger2Markers: Boolean = true
     var showTradeMarkers: Boolean = true
+    /** نتیجهٔ معاملات روی چارت (سود سبز / ضرر قرمز / سر‌به‌سر خط‌چین)؛ پیش‌فرض خاموش. */
+    var showTradeResults: Boolean = false
     var showInvalidationMarkers: Boolean = true
     var showMarkerText: Boolean = true
 
@@ -221,7 +223,7 @@ class AppState {
     /** راه‌اندازی لاگر و هشدارها + وصل کردن آن‌ها به موتور و کارگزار */
     fun initApp(ctx: Context) {
         appCtx = ctx.applicationContext
-        Log.init(appCtx!!, "1.4.19")
+        Log.init(appCtx!!, "1.4.20")
         Alerts.init(appCtx!!)
         val p = appCtx!!.getSharedPreferences("goldpin", Context.MODE_PRIVATE)
         // مهاجرت ۱٫۱ → ۱٫۲: تمام‌صفحهٔ خودکار دیگر پیش‌فرض نیست؛ تنظیم قدیمی true را یک‌بار خاموش کن.
@@ -247,6 +249,7 @@ class AppState {
         showTrigger1Markers = p.getBoolean("cv_show_t1_markers", true)
         showTrigger2Markers = p.getBoolean("cv_show_t2_markers", true)
         showTradeMarkers = p.getBoolean("cv_show_trade_markers", true)
+        showTradeResults = p.getBoolean("cv_show_trade_results", false)
         showInvalidationMarkers = p.getBoolean("cv_show_inv_markers", true)
         showMarkerText = p.getBoolean("cv_show_marker_text", true)
         showTradeLines = p.getBoolean("cv_show_trade_lines", true)
@@ -293,6 +296,7 @@ class AppState {
             .putBoolean("cv_show_t1_markers", showTrigger1Markers)
             .putBoolean("cv_show_t2_markers", showTrigger2Markers)
             .putBoolean("cv_show_trade_markers", showTradeMarkers)
+            .putBoolean("cv_show_trade_results", showTradeResults)
             .putBoolean("cv_show_inv_markers", showInvalidationMarkers)
             .putBoolean("cv_show_marker_text", showMarkerText)
             .putBoolean("cv_show_trade_lines", showTradeLines)
@@ -332,6 +336,7 @@ class AppState {
         cv.showTrigger1Markers = showTrigger1Markers
         cv.showTrigger2Markers = showTrigger2Markers
         cv.showTradeMarkers = showTradeMarkers
+        cv.showTradeResults = showTradeResults
         cv.showInvalidationMarkers = showInvalidationMarkers
         cv.showMarkerText = showMarkerText
         cv.showTradeLines = showTradeLines
@@ -395,13 +400,13 @@ class AppState {
 
     // ── تنظیمات و بازسازی ──────────────────────────────────────────────────────
     /** بازسازی غیرهمزمان؛ تغییرات تنظیمات هرگز نخ رابط را قفل نمی‌کنند. */
-    fun rebuildAsync(clearOrders: Boolean = true) {
+    fun rebuildAsync() {
         busy = true
         busyText = "در حال بازسازی موتور…"
         notifyUi()
         io.execute {
             try {
-                rebuild(clearOrders)
+                rebuild()
             } catch (e: Throwable) {
                 Log.e(Log.CAT_ENGINE, "بازسازی موتور ناموفق بود", e)
                 lastFeedError = "خطای بازسازی موتور: ${e.message}"
@@ -413,17 +418,23 @@ class AppState {
         }
     }
 
-    /** بعد از تغییر تنظیمات: موتور و کارگزار از صفر روی دادهٔ مود انتخاب‌شده (modeCandles) اجرا می‌شوند. */
-    fun rebuild(clearOrders: Boolean = true) {
+    /**
+     * بعد از تغییر تنظیمات: موتور و کارگزار از صفر روی دادهٔ مود انتخاب‌شده (modeCandles) اجرا می‌شوند.
+     *
+     * کارگزار کاغذی تابعی قطعی از (کندل‌ها + تنظیمات) است؛ پس هر بازسازی **همیشه** آن را هم از صفر می‌کند.
+     * (نسخه‌های قبل پارامتر `clearOrders=false` داشتند که موتور را از صفر بازپخش می‌کرد ولی کارگزار را پاک
+     * نمی‌کرد ⇒ سفارش/معامله/موجودی/Lost دوبار شمرده می‌شد و هر بار عدد دیگری درمی‌آمد.)
+     */
+    fun rebuild() {
         synchronized(stateLock) {
         val execCandles = if (modeCandles.isNotEmpty()) modeCandles else candles
         val t0 = System.currentTimeMillis()
         Log.i(Log.CAT_ENGINE, "شروع اجرای مجدد موتور",
-            "کندل‌مود=${execCandles.size} مود=${cfg.tfMode} (tf2=${com.alisport.goldpin.core.Tf.label(cfg.tf2)}) چارت=${com.alisport.goldpin.core.Tf.label(chartTfSec)} بک‌تست‌کامل=$backtestFull پاک‌کردن‌سفارش=$clearOrders")
+            "کندل‌مود=${execCandles.size} مود=${cfg.tfMode} (tf2=${com.alisport.goldpin.core.Tf.label(cfg.tf2)}) چارت=${com.alisport.goldpin.core.Tf.label(chartTfSec)} بک‌تست‌کامل=$backtestFull")
         engine.reset()
         engine.broker = broker
         broker.engine = engine
-        if (clearOrders) broker.reset()
+        broker.reset()
         engine.barCommitHook = { cd -> broker.onBar(cd, live = false) }
         val prev = Alerts.inBacktest
         Alerts.inBacktest = true
@@ -672,7 +683,7 @@ class AppState {
     }
 
     // ── دانلود تاریخچه از فید ───────────────────────────────────────────────────
-    fun downloadHistory(onDone: (String) -> Unit = {}) {
+    fun downloadHistory(forceRebuild: Boolean = false, onDone: (String) -> Unit = {}) {
         val t0 = System.currentTimeMillis()
         val targetTf = chartTfSec
         val modeTf = cfg.tf2
@@ -715,8 +726,8 @@ class AppState {
                             busyText = "در حال محاسبهٔ موتور روی ${com.alisport.goldpin.util.Fa.d(modeSeries.size.toString())} کندل…"
                             setCandles(modeSeries, rebuildNow = false)
                         }
-                        if (needModeDownload || structureSource.isNotEmpty()) {
-                            rebuild(clearOrders = needModeDownload)
+                        if (forceRebuild || needModeDownload || structureSource.isNotEmpty()) {
+                            rebuild()
                         }
                         if (targetTf != modeTf) {
                             setDisplayCandles(mergeDisplayWithMode(chart, targetTf))
@@ -746,29 +757,57 @@ class AppState {
         }
     }
 
-    @Volatile private var lastSpreadFetchMs = 0L
+    /**
+     * «بارگذاری مجدد همه‌چیز» (دکمهٔ گرد ↻): دادهٔ تازه را می‌گیرد و موتور + کارگزار + همهٔ محاسبات را از صفر می‌سازد.
+     * اگر شبکه نبود، دست‌کم همهٔ محاسبات روی دادهٔ فعلی از صفر انجام می‌شود.
+     * @param download false = فقط بازمحاسبه (بدون شبکه) — برای آزمون و حالت آفلاین
+     */
+    fun reloadAll(download: Boolean = true, onDone: (String) -> Unit = {}) {
+        Log.i(Log.CAT_APP, "بارگذاری مجدد کامل (دکمهٔ ↻)", "دانلود=$download")
+        if (!download) {
+            rebuildAsync()
+            main.post { onDone("همهٔ محاسبات از صفر انجام شد") }
+            return
+        }
+        downloadHistory(forceRebuild = true) { msg ->
+            if (msg.startsWith("خطای دانلود")) {
+                rebuildAsync()
+                onDone("دانلود ممکن نشد؛ همهٔ محاسبات روی داده‌های فعلی از صفر انجام شد")
+            } else {
+                onDone("بارگذاری مجدد کامل شد · $msg")
+            }
+        }
+    }
+
+    /** منبع اسپرد بروکر؛ در آزمون‌ها جایگزین می‌شود تا شبکهٔ واقعی دخالت نکند. */
+    @Volatile var spreadFetcher: () -> Double? = { Feed.swissquoteSpread() }
 
     /**
-     * §۲۰ cmsn «خودکار»: اسپرد زندهٔ بروکر (ask − bid) از Swissquote — حداکثر هر ۶۰ ثانیه یک‌بار و فقط وقتی
-     * مود مدیریت مالی روشن و cmsn روی «خودکار» باشد. اگر نیامد، همان مقدار قبلی/دستی می‌ماند.
-     * دریافت روی نخ جداگانهٔ daemon انجام می‌شود تا هرگز به‌روزرسانی زنده را معطل نکند.
+     * §۲۰ cmsn «خودکار»: اسپرد فعلی بروکر (ask − bid از Swissquote) را **یک‌بار** می‌گیرد و داخل تنظیمات ذخیره می‌کند
+     * ([Settings.cmsnAutoValue]). فقط وقتی اجرا می‌شود که کاربر بخواهد (روشن‌کردن «خودکار»، دکمهٔ دریافت) یا هنوز
+     * مقداری نداریم؛ در تیک‌های لایو هرگز — تا نتیجهٔ معاملات بی‌صدا عوض نشود («هر بار یک جور حساب می‌کند»).
+     * مقدار تازه در همهٔ معاملات (تاریخچه و زنده) یکسان اعمال می‌شود، پس بازسازی لازم است.
      */
-    private fun refreshLiveSpread() {
-        if (cfg.mmMode == MoneyMode.NONE || !cfg.cmsnAuto) return
-        val now = System.currentTimeMillis()
-        if (now - lastSpreadFetchMs < 60_000L) return
-        lastSpreadFetchMs = now
-        val t = Thread({
-            try {
-                val sp = Feed.swissquoteSpread()
-                if (sp != null) {
-                    broker.mm.liveSpread = sp
-                    Log.d(Log.CAT_FEED, "اسپرد زندهٔ بروکر (Swissquote)", Fa.n(sp, 3))
+    fun fetchBrokerSpread(onDone: (String) -> Unit = {}) {
+        net.execute {
+            val sp = try { spreadFetcher() } catch (e: Throwable) { null }
+            io.execute {
+                if (sp == null || sp.isNaN() || sp <= 0.0) {
+                    main.post { onDone("اسپرد بروکر دریافت نشد؛ عدد دستی/قبلی می‌ماند") }
+                    return@execute
                 }
-            } catch (_: Throwable) { /* بی‌صدا: مقدار قبلی/دستی می‌ماند */ }
-        }, "gp-spread")
-        t.isDaemon = true
-        t.start()
+                cfg.cmsnAutoValue = sp
+                cfg.cmsnAutoAt = System.currentTimeMillis()
+                Log.i(Log.CAT_FEED, "اسپرد بروکر دریافت و ذخیره شد (Swissquote)", Fa.n(sp, 3))
+                if (cfg.mmMode != MoneyMode.NONE && cfg.cmsnAuto) rebuildAsync()
+                main.post { notifyUi(); onDone("اسپرد بروکر: ${Fa.n(sp, 3)}") }
+            }
+        }
+    }
+
+    /** مود §۲۰ روشن، cmsn «خودکار» و هنوز اسپردی نداریم ⇒ یک‌بار بگیر (بعدش فقط با درخواست کاربر عوض می‌شود). */
+    fun ensureBrokerSpread() {
+        if (cfg.mmMode != MoneyMode.NONE && cfg.cmsnAuto && cfg.cmsnAutoValue <= 0.0) fetchBrokerSpread()
     }
 
     /**
@@ -803,7 +842,6 @@ class AppState {
                 // §6 سند: «اگر قیمت زنده نیامد، آخرین کندل بسته‌شده استفاده می‌شود» — آخرین عنصر دنباله
                 // کندل در حال تشکیل است (موتور هم همین را باز می‌داند)، پس کلوز کندل قبل از آن.
                 val last = (if (tail.size >= 2) tail[tail.size - 2] else tail.lastOrNull())?.c ?: Double.NaN
-                refreshLiveSpread()
                 Log.d(Log.CAT_LIVE, "به‌روزرسانی زنده",
                     "دنباله=${tail.size} قیمت=${if (spot != null) Fa.n(spot, 2) else "-"} منبع=$spotSrc مدت=${System.currentTimeMillis() - t0}ms")
                 // ۳) تغییر وضعیت روی نخ سریالی [io]
@@ -1169,7 +1207,8 @@ class AppState {
         to.mmMode = c.mmMode; to.minLotAuto = c.minLotAuto; to.minLotManual = c.minLotManual
         to.divAuto = c.divAuto; to.divManual = c.divManual
         to.cmsnAuto = c.cmsnAuto; to.cmsnManual = c.cmsnManual
-        to.mixedGrowthPct = c.mixedGrowthPct; to.mmMaxLeverage = c.mmMaxLeverage
+        to.cmsnAutoValue = c.cmsnAutoValue; to.cmsnAutoAt = c.cmsnAutoAt
+        to.mixedGrowthPct = c.mixedGrowthPct
         to.lotStep = c.lotStep; to.lostResetAtFinalTp = c.lostResetAtFinalTp
     }
 
@@ -1315,6 +1354,7 @@ class AppState {
                 busy = false
                 busyText = ""
                 onDone(msg)
+                ensureBrokerSpread()      // §۲۰: اگر cmsn «خودکار» است و هنوز اسپردی ذخیره نشده، یک‌بار بگیر
             }
         }
     }

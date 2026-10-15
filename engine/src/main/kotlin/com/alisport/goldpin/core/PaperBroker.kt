@@ -15,6 +15,13 @@ import kotlin.math.min
 //
 //  §۲۰ سند: مدیریت مالی و مدیریت زیان (ManageAllLost / Mixed) در [MoneyManager]؛
 //  حجم سفارش هنگام ثبت (مسلح‌شدن) با Lost/cmsnLost لحظهٔ ثبت ثابت می‌شود.
+//
+//  حسابداری — هر مفهوم دقیقاً یک متغیر و یک جای به‌روزرسانی دارد:
+//    • [balance] (= Capital سند) = سرمایهٔ اولیه + سود/زیان خالص معاملاتِ **کاملاً بسته‌شده**.
+//      فقط در [closeAll] عوض می‌شود — همان لحظه‌ای که Lost / cmsnLost هم عوض می‌شوند.
+//    • [equity] = balance + سود/زیان معاملات باز (پله‌های خروج‌شده − کمیسیون + شناور).
+//      فقط در [refreshEquity] محاسبه می‌شود؛ پایهٔ سقف اهرم و حجم §۵ است.
+//    • کمیسیون هر معامله در [Trade.commission] می‌ماند و در سود/زیان همان معامله حساب می‌شود (نه جداگانه از موجودی).
 // ═══════════════════════════════════════════════════════════════════════════════
 class PaperBroker(private val cfg: Settings) {
 
@@ -56,6 +63,9 @@ class PaperBroker(private val cfg: Settings) {
         orders.clear(); trades.clear(); pendings.clear(); opens.clear()
         balance = cfg.initialEquity; equity = cfg.initialEquity
         maxEquity = cfg.initialEquity; maxDrawdown = 0.0
+        // شمارندهٔ شناسه‌ها هم از صفر (مثل شمارندهٔ ستاپ‌های موتور)؛ وگرنه بعد از هر بازسازی شمارهٔ
+        // سفارش/معامله ادامه پیدا می‌کرد (#۲۵، #۵۰ …) و دو اجرای یکسان ظاهراً یکسان نبودند.
+        orderSeq = 0L; tradeSeq = 0L
         lastError = null
         mm.reset()
     }
@@ -112,16 +122,15 @@ class PaperBroker(private val cfg: Settings) {
         val qty: Double
         if (mm.active) {
             // §۲۰ سند: Lot = Lost/div + MinLot (ManageAllLost) یا ManageNothing/ManageCM (Mixed).
-            // سقف اهرم §5 همچنان آخرین حدّ است («حجم نهایی نباید از سرمایه × اهرم ÷ قیمت بیشتر شود»)،
-            // ولی در مودهای §۲۰ با اهرم mmMaxLeverage (تصمیم مالک: ۵۰۰) سنجیده می‌شود.
+            // سقف اهرم (تنها متغیر اهرم، [Settings.maxLeverage]) آخرین حدّ است: «حجم نهایی نباید از سرمایه × اهرم ÷ قیمت بیشتر شود».
             val m = mm.lotFor(balance, entryPx, s.tpx)
-            val cap = marginCapQty(entryPx, cfg.mmMaxLeverage)
+            val cap = marginCapQty(entryPx, cfg.maxLeverage)
             var q = min(m.raw, cap)
             q = mm.floorToStep(q)
             if (cfg.roundQty) q = floor(q)
             qty = max(q, 0.0)
             mmCm = m.cm
-            mmNote = m.note + (if (m.raw > cap) " · سقف اهرم ${MoneyManager.n2(cfg.mmMaxLeverage)}× اعمال شد" else "") +
+            mmNote = m.note + (if (m.raw > cap) " · سقف اهرم ${MoneyManager.n2(cfg.maxLeverage)}× اعمال شد" else "") +
                 " → حجم ${MoneyManager.n2(qty)}"
         } else {
             qty = qtyFor(entryPx, s.sl)
@@ -212,7 +221,7 @@ class PaperBroker(private val cfg: Settings) {
      *
      * پر شدن در کندلِ مسلح‌شدن مجاز نیست. وقتی همین کندل بسته شود، [onBar] دوباره آن را می‌بیند؛
      * چون سفارش دیگر معلق نیست، دوباره پر نمی‌شود و فقط مدیریت معامله (SL/TP) روی کندل بسته اجرا می‌شود.
-     * این تابع هیچ‌وقت خروج/مدیریت معامله یا به‌روزرسانی equity انجام نمی‌دهد.
+     * این تابع هیچ‌وقت خروج/مدیریت معامله انجام نمی‌دهد (فقط پر شدن + به‌روزرسانی equity).
      *
      * @return تعداد سفارش‌های پرشده
      */
@@ -233,6 +242,7 @@ class PaperBroker(private val cfg: Settings) {
             val touched = if (p.dir == 1) forming.l <= p.price else forming.h >= p.price
             if (touched) { fillEntry(p, forming, live = true); n++ }
         }
+        if (n > 0) refreshEquity(forming)      // معامله باز شد ⇒ equity (کمیسیون/شناور) همان لحظه درست باشد
         return n
     }
 
@@ -249,15 +259,10 @@ class PaperBroker(private val cfg: Settings) {
         )
         tr.fills.add(Fill(cd.t, cd.bi, o.price, o.qty, "ENTRY", 0.0))
         tr.mmCm = o.mmCm
-        // §۲۰ cmsn: اسپرد تحمیلی هر معامله هنگام ورود از سرمایه کم می‌شود (در مود خاموش ۰ است).
+        // §۲۰ cmsn: اسپرد تحمیلی هر معامله هنگام ورود تعیین و روی خودِ معامله ثبت می‌شود (در مود خاموش ۰ است)؛
+        // از سود/زیان همین معامله کم می‌شود و با بسته شدن کامل وارد موجودی (Capital) می‌گردد.
         val cmsn = mm.commissionFor(o.qty)
-        if (cmsn > 0.0) {
-            tr.commission = cmsn
-            balance -= cmsn
-            maxEquity = max(maxEquity, balance)
-            val dd = maxEquity - balance
-            if (dd > maxDrawdown) maxDrawdown = dd
-        }
+        if (cmsn > 0.0) tr.commission = cmsn
         trades.add(tr)
         opens.add(tr)
         lg("TRADE", "سفارش پر شد → ورود انجام شد · معامله #${tr.id}" + (if (live) " (قیمت زنده)" else ""),
@@ -340,12 +345,8 @@ class PaperBroker(private val cfg: Settings) {
         if (q <= 0) return
         val pnl = if (t.dir == 1) (px - t.entry) * q * t.contractSize else (t.entry - px) * q * t.contractSize
         t.fills.add(Fill(cd.t, cd.bi, px, q, kind, pnl))
-        balance += pnl
-        maxEquity = max(maxEquity, balance)
-        val dd = maxEquity - balance
-        if (dd > maxDrawdown) maxDrawdown = dd
         lg("TRADE", "پلهٔ خروج $kind اجرا شد · معامله #${t.id}",
-            "px=${fmt(px)} qty=${fmt(q)} pnl=${fmt(pnl)} موجودی=${fmt(balance)}")
+            "px=${fmt(px)} qty=${fmt(q)} pnl=${fmt(pnl)} سود/زیان معامله تاکنون=${fmt(t.pnl())}")
         val kindAlert = when (kind) {
             "TP1" -> AlertKind.TP1; "TP2" -> AlertKind.TP2; "TPX" -> AlertKind.TPX
             "SL" -> AlertKind.SL; "BE" -> AlertKind.BE; else -> AlertKind.CLOSE
@@ -365,14 +366,12 @@ class PaperBroker(private val cfg: Settings) {
         if (remaining > 1e-9) {
             val pnl = if (t.dir == 1) (px - t.entry) * remaining * t.contractSize else (t.entry - px) * remaining * t.contractSize
             t.fills.add(Fill(time, bi, px, remaining, kind, pnl))
-            balance += pnl
-            maxEquity = max(maxEquity, balance)
-            val dd = maxEquity - balance
-            if (dd > maxDrawdown) maxDrawdown = dd
         }
         t.exitT = time; t.exitBi = bi; t.exitPx = px
         t.reason = reason
         opens.removeAll { it.id == t.id }
+        // Capital: تنها جای به‌روزرسانی — سود/زیان خالص کل معامله (همهٔ پله‌ها − کمیسیون) یک‌جا.
+        balance += t.pnl()
         // §۲۰: Lost / cmsnLost بعد از بسته شدن کامل معامله به‌روز می‌شود (مود خاموش: بی‌اثر).
         val lostBefore = mm.lost; val cmsnLostBefore = mm.cmsnLost
         mm.onTradeClosed(t)
@@ -384,17 +383,21 @@ class PaperBroker(private val cfg: Settings) {
             "معامله #${t.id} · خروج ${fmt(px)} · سود/زیان ${fmt(pnl)} دلار · ${fmt(t.rMultiple())}R")
     }
 
-    /** به‌روزرسانی سود/زیان شناور مجموع همهٔ پوزیشن‌های باز. */
+    /**
+     * equity = Capital + سود/زیان همهٔ معاملات باز: پله‌های خروج‌شده، منهای کمیسیون، به‌علاوهٔ شناورِ باقی‌ماندهٔ حجم
+     * با قیمت [cd].close. تنها جای محاسبهٔ equity؛ افت سرمایه هم از همین مقدار سنجیده می‌شود.
+     */
     fun refreshEquity(cd: Candle) {
-        var unreal = 0.0
+        var open = 0.0
         for (t in opens) {
             if (!t.open) continue
             val used = t.fills.filter { it.kind != "ENTRY" }.sumOf { it.qty }
             val rem = t.qty - used
-            unreal += if (t.dir == 1) (cd.c - t.entry) * rem * t.contractSize
-                     else (t.entry - cd.c) * rem * t.contractSize
+            val unreal = if (t.dir == 1) (cd.c - t.entry) * rem * t.contractSize
+                         else (t.entry - cd.c) * rem * t.contractSize
+            open += t.pnl() + unreal
         }
-        equity = balance + unreal
+        equity = balance + open
         maxEquity = max(maxEquity, equity)
         val dd = maxEquity - equity
         if (dd > maxDrawdown) maxDrawdown = dd

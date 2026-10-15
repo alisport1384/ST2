@@ -114,6 +114,8 @@ class ChartView @JvmOverloads constructor(
     var showTrigger1Markers = true
     var showTrigger2Markers = true
     var showTradeMarkers = true
+    /** نتیجهٔ هر معامله روی چارت: سود سبز (با مبلغ)، ضرر قرمز (با مبلغ)، سر‌به‌سر خط‌چین؛ پیش‌فرض خاموش. */
+    var showTradeResults = false
     var showInvalidationMarkers = true
     var showMarkerText = true
 
@@ -211,6 +213,16 @@ class ChartView @JvmOverloads constructor(
     private val pDashed = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeWidth = max(1f, Ui.dp(context, 1.1f).toFloat())
         pathEffect = DashPathEffect(floatArrayOf(11f, 6f), 0f)
+    }
+    private val resWinCol = Color.parseColor("#2ECC71")
+    private val resLossCol = Color.parseColor("#FF4D4F")
+    private val resBeCol = Color.parseColor("#B0BAC9")
+    private val pTradeRes = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = max(2f, Ui.dp(context, 2f).toFloat()); strokeCap = Paint.Cap.ROUND
+    }
+    private val pTradeResDash = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = max(1.5f, Ui.dp(context, 1.6f).toFloat())
+        pathEffect = DashPathEffect(floatArrayOf(14f, 9f), 0f)
     }
     private val pCross = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeWidth = 1f; color = crossCol
@@ -925,6 +937,9 @@ class ChartView @JvmOverloads constructor(
         // ── برچسب‌های استراتژی ──
         if (showMarkers) drawMarkers(canvas, from, to, priceH)
 
+        // ── نتیجهٔ معاملات (اختیاری، پیش‌فرض خاموش) ──
+        if (showTradeResults) drawTradeResults(canvas, from, to, priceH)
+
         // ── محور زمان (تراز بر مرزهای طبیعی زمان — مانند تریدینگ‌ویو) ──
         // پیش‌تر برچسب‌ها «هر N کندل» انتخاب می‌شدند، پس روی زمان‌های دلخواه می‌افتادند
         // (مثلاً ۱۴:۳۷). حالا فقط روی مرزهای طبیعی (ساعت، نیم‌روز، روز، هفته) می‌نشینند
@@ -1265,6 +1280,71 @@ class ChartView @JvmOverloads constructor(
                 canvas.drawText(t, x + r * 2.4f, cy, pTxtSm)
                 pTxtSm.color = axisText
             }
+        }
+    }
+
+    /**
+     * نتیجهٔ هر معامله روی چارت: یک خط از (کندل و قیمت ورود) تا (کندل و قیمت خروج)
+     *  • سود (حداقل یک پلهٔ سودده): خط سبز + برچسب سبز با مبلغ خالص، مثل «+۱۷۶٫۶۰»
+     *  • ضرر (SL): خط قرمز + برچسب قرمز با مبلغ خالص، مثل «−۵۸٫۹۷»
+     *  • سر‌به‌سر (خروج روی ورود، بدون سود قیمتی): خط‌چین خاکستری + «BE» (اگر کمیسیون دارد، مبلغش هم)
+     *  • معاملهٔ باز: خط‌چین آبی تا آخرین کندل + سود/زیان شناورِ همین لحظه
+     * رنگ و تعداد از [Trade.outcome] می‌آید (مستقل از کمیسیون)؛ مبلغ همیشه سود/زیان خالص دلاری است.
+     */
+    private fun drawTradeResults(canvas: Canvas, from: Int, to: Int, priceH: Float) {
+        if (trades.isEmpty() || candles.isEmpty()) return
+        val used = ArrayList<RectF>()
+        val dot = max(2.5f, Ui.dp(context, 2.6f).toFloat())
+        val labelH = Ui.dp(context, 15f).toFloat()
+        val pad = Ui.dp(context, 4f).toFloat()
+        val gap = Ui.dp(context, 5f).toFloat()
+        val round = Ui.dp(context, 3f).toFloat()
+        for (t in trades) {
+            val i0 = idxOfTime(t.entryT, t.entryBi)
+            val isOpen = t.open
+            val i1 = if (isOpen) candles.size - 1 else idxOfTime(t.exitT ?: t.entryT, t.exitBi ?: t.entryBi)
+            if (i1 < from - 1 || i0 > to + 1) continue
+            val x0 = xOf(i0.toFloat()); val x1 = xOf(i1.toFloat())
+            val endPx = if (isOpen) candles.last().c else (t.exitPx ?: t.entry)
+            val y0 = yOf(t.entry); val y1 = yOf(endPx)
+            if ((y0 < -priceH && y1 < -priceH) || (y0 > priceH * 2 && y1 > priceH * 2)) continue
+            val oc = if (isOpen) 2 else t.outcome()
+            val net = t.pnl()
+            val col = when (oc) { 1 -> resWinCol; -1 -> resLossCol; 0 -> resBeCol; else -> Palette.accent }
+            val p = if (oc == 1 || oc == -1) pTradeRes else pTradeResDash
+            p.color = col
+            canvas.drawLine(x0, y0, x1, y1, p)
+            pBody.color = col
+            canvas.drawCircle(x0, y0, dot, pBody)
+            canvas.drawCircle(x1, y1, dot, pBody)
+
+            val text = when (oc) {
+                1, -1 -> Fa.signed(net)
+                0 -> if (abs(net) >= 0.005) "BE " + Fa.signed(net) else "BE"
+                else -> "باز " + Fa.signed(net)
+            }
+            val w = pLabelTxt.measureText(text) + pad * 2
+            var left = x1 + gap
+            if (left + w > plotW - 2f) left = x1 - gap - w
+            left = left.coerceIn(2f, (plotW - w - 2f).coerceAtLeast(2f))
+            val above = y1 <= y0                                     // خروج بالاتر از ورود ⇒ برچسب بالا
+            var top = if (above) y1 - gap - labelH else y1 + gap
+            // اگر روی برچسب دیگری افتاد، جابه‌جا شود (حداکثر چند بار)
+            var tries = 0
+            while (tries < 4) {
+                val r = RectF(left, top, left + w, top + labelH)
+                if (used.none { RectF.intersects(it, r) }) break
+                top += if (above) -(labelH + 2f) else (labelH + 2f)
+                tries++
+            }
+            top = top.coerceIn(2f, (priceH - labelH - 2f).coerceAtLeast(2f))
+            val rect = RectF(left, top, left + w, top + labelH)
+            used.add(rect)
+            pLabelBg.color = (col and 0x00FFFFFF) or 0xE6000000.toInt()
+            canvas.drawRoundRect(rect, round, round, pLabelBg)
+            pLabelTxt.color = if (oc == 0) Color.parseColor("#1B2230") else Color.WHITE
+            canvas.drawText(text, left + pad, top + labelH * 0.72f, pLabelTxt)
+            pLabelTxt.color = Color.WHITE
         }
     }
 

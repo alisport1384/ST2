@@ -93,7 +93,7 @@ fun main(args: Array<String>) {
     val s = Reports.summary(broker.trades)
     println("──────── نتیجهٔ بک‌تست ────────")
     println("سفارش‌ها: ${broker.orders.size} (پر شده ${broker.orders.count { it.status == OrderStatus.FILLED }})")
-    println("معاملات: ${s.trades} | برد ${s.wins} | باخت ${s.losses} | نرخ برد ${"%.1f".format(s.winRate)}٪")
+    println("معاملات: ${s.trades} | برد ${s.wins} | باخت ${s.losses} | سر‌به‌سر ${s.breakeven} | نرخ برد ${"%.1f".format(s.winRate)}٪")
     println("سود خالص: ${"%.2f".format(s.net)} | ضریب سود ${"%.2f".format(s.profitFactor)} | میانگین R ${"%.2f".format(s.avgR)}")
     println("بیشترین افت سرمایه: ${"%.2f".format(s.maxDD)} | موجودی نهایی: ${"%.2f".format(broker.balance)}")
     println("آمار موتور: ستاپ ${eng.cnt.setup} · برخورد ${eng.cnt.touch} · میانی ${eng.cnt.mid} · ولوم‌کم ${eng.cnt.lv} · ولوم‌زیاد ${eng.cnt.hv} · ورود ${eng.cnt.entry} · پایان ${eng.cnt.done}")

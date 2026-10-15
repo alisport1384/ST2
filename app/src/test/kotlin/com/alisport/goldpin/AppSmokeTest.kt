@@ -70,10 +70,10 @@ class AppSmokeTest {
         s.chartTfSec = Tf.M1
         candles = Feed.synthesizeVolumeIfMissing(candles)
         s.setCandles(candles)
-        s.rebuild(clearOrders = true)
+        s.rebuild()
 
         s.backtestFull = true
-        s.rebuild(clearOrders = true)
+        s.rebuild()
         assertEquals("همهٔ کندل‌ها پردازش نشدند", candles.size, s.engine.processed)
         assertTrue("هیچ ناحیه‌ای ساخته نشد", s.engine.cnt.setup > 0)
         assertTrue("هیچ برخوردی ثبت نشد", s.engine.cnt.touch > 0)
@@ -133,7 +133,7 @@ class AppSmokeTest {
         assertEquals("تعداد معاملات بعد از بازیابی", beforeTrades, s.broker.trades.size)
 
         // ادامهٔ اجرا نباید خطا بدهد
-        s.rebuild(clearOrders = false)
+        s.rebuild()
         assertTrue(s.engine.processed > 0)
     }
 
