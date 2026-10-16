@@ -44,6 +44,10 @@ class PaperBroker(private val cfg: Settings) {
     private val pendings = ArrayList<Order>()
     private val opens = ArrayList<Trade>()
 
+    /** استراتژی ۲: آیا در جهت [dir] (۱ خرید / ‎−۱ فروش) سفارش معلق یا معاملهٔ بازی وجود دارد؟ */
+    fun hasActiveOrder(dir: Int): Boolean =
+        pendings.any { it.dir == dir } || opens.any { it.open && it.dir == dir }
+
     /** سازگاری با کدهای قدیمی که یک سفارش/پوزیشن انتظار داشتند (اولین مورد). */
     val hasOpenTrade: Boolean get() = opens.isNotEmpty()
     val hasPending: Boolean get() = pendings.isNotEmpty()
@@ -106,7 +110,13 @@ class PaperBroker(private val cfg: Settings) {
     /** ثبت سفارش لیمیت — §4-8 و §18-12/§18-13: حداکثر ۱ سفارش معلق در هر لحظه؛ معاملهٔ باز مانع سفارش جدید نیست. */
     fun registerLimit(s: Setup, bar: Candle): Boolean {
         val activeCount = pendings.size
-        if (activeCount >= 1) {
+        if (cfg.strategy == Strategy.NO_TREND) {
+            // استراتژی ۲: خرید و فروش هم‌زمان مجازند؛ از هر جهت فقط یک سفارش (معلق یا باز).
+            if (hasActiveOrder(s.dir)) {
+                lastError = "از هر جهت فقط یک سفارش (معلق یا باز) مجاز است"
+                return false
+            }
+        } else if (activeCount >= 1) {
             lastError = "فقط ۱ سفارش معلق هم‌زمان در چارت مجاز است"
             return false
         }

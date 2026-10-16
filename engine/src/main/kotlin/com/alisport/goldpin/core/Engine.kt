@@ -55,6 +55,18 @@ class Settings {
     }
     var minTPunits: Double = 10.0
 
+    /**
+     * استراتژی انتخاب‌شده ([Strategy]).
+     *  ۱ = سند (پیش‌فرض): روند + کندل مهم/پین؛ ناحیه فقط روی کندل هم‌جهت با روند؛ حد سود فیبوناچی (TP1 ۳۸٪ / TP2 ۵۰٪ / TPX ۱٫۲۷۲).
+     *  ۲ = استراتژی دوم: تعیین روند حذف است؛ روی **همهٔ** کندل‌های ساختار (سبز ⇒ ناحیهٔ خرید، قرمز ⇒ ناحیهٔ فروش) با همان
+     *      الگوریتم و ضوابط (حداکثر ۲ ناحیه) ناحیه ثبت می‌شود؛ حد سود فقط [tpUnits] واحد از ورود (بدون فیبو، بدون TP1/TP2)؛
+     *      هم‌زمان یک سفارش خرید و یک سفارش فروش مجاز است ولی از هر جهت فقط یکی (معلق یا باز).
+     *      بقیهٔ قواعد (برخورد، تایید میانی، LV، HV، سطح سفارش، حد ضرر، مدیریت معامله) دقیقاً همان استراتژی ۱.
+     */
+    var strategy: Int = Strategy.DOC
+    /** استراتژی ۲: حد سود نهایی = ورود ± این مقدار (واحد قیمت). پیش‌فرض ۱۰. */
+    var tpUnits: Double = 10.0
+
     var useRiskPct: Boolean = true
     var riskPct: Double = 1.0
     var equityPct: Double = 100.0
@@ -105,6 +117,7 @@ class Settings {
         it.hvScanFirstTouch = hvScanFirstTouch; it.hvMarkFirstIncrease = hvMarkFirstIncrease
         it.rejectCandleNext = rejectCandleNext
         it.mintick = mintick; it.slBufTicks = slBufTicks; it.entryBufTicks = entryBufTicks; it.minTPunits = minTPunits
+        it.strategy = strategy; it.tpUnits = tpUnits
         it.useRiskPct = useRiskPct; it.riskPct = riskPct; it.equityPct = equityPct
         it.maxLeverage = maxLeverage; it.roundQty = roundQty
         it.contractSize = contractSize; it.initialEquity = initialEquity
@@ -444,6 +457,13 @@ class Engine(val cfg: Settings) {
         structBars.add(sb)
         while (structBars.size > 400) structBars.removeAt(0)
         val nS = structBars.size
+
+        // استراتژی ۲: تعیین روند (کندل مهم · Ready · پین · HH/HL/LL/LH) حذف است؛ مستقیم ناحیه‌ها ثبت می‌شوند.
+        if (cfg.strategy == Strategy.NO_TREND) {
+            // در پیش‌بارگذاری تاریخچهٔ ساختار (buildZones=false) دیتای تریگر۲ نداریم ⇒ هیچ کاری لازم نیست.
+            if (buildZones) registerZones(sb)
+            return
+        }
 
         // ── چرخهٔ عمر کاندیدها : ابطال / Ready ──
         // §18-3/§18-6: در هر لحظه حداکثر یک کاندید IC وجود دارد؛ ثبت کاندید جدید در انتهای
@@ -794,10 +814,22 @@ class Engine(val cfg: Settings) {
         // توالی/روند ثبت می‌شود و هیچ باکس پروفایل حدسی ساخته نمی‌شود.
         if (!buildZones) return
 
+        registerZones(sb)
+    }
+
+    /**
+     * پروفایل حجم فیکس‌رنج روی کندل ساختار بستهٔ [sb] + ثبت ناحیه‌ها و ستاپ‌هایشان (حداکثر ۲ ناحیه در هر کندل، §۴-۵ سند).
+     * فقط روی کندل بستهٔ ساختار صدا زده می‌شود (§۱۸-۱۵).
+     */
+    private fun registerZones(sb: Candle) {
         // ── پروفایل حجم فیکس‌رنج + ثبت ناحیه‌ها ──
         val bullC = sb.c > sb.o
         val bearC = sb.c < sb.o
-        val dirOK = (trend == 1 && bullC) || (trend == -1 && bearC)
+        // استراتژی ۱ (سند): فقط کندل هم‌جهت با روند، و جهت ناحیه = جهت روند.
+        // استراتژی ۲: روند نیست؛ هر کندل سبز ناحیهٔ خرید و هر کندل قرمز ناحیهٔ فروش می‌سازد (دوجی = بدون جهت = هیچ).
+        val noTrend = cfg.strategy == Strategy.NO_TREND
+        val zoneDir = if (noTrend) (if (bullC) 1 else if (bearC) -1 else 0) else trend
+        val dirOK = if (noTrend) zoneDir != 0 else ((trend == 1 && bullC) || (trend == -1 && bearC))
         val prof = VolumeProfile.build(microS, cfg.vpRows, cfg.vpVA, cfg.distMode, cfg.vpSmooth, cfg.mintick)
         profileOnLastS = prof
         lastProfBars = microS.size
@@ -806,17 +838,17 @@ class Engine(val cfg: Settings) {
             val rej = VolumeProfile.zones(prof, cfg.vpRows, bullC, sb.c, cfg.minZoneRows, wantRejected = true)
             cnt.zoneRejected += rej.size
             if (cfg.showRejectedZones) for (rz in rej) {
-                addZoneBox(trend, rz, sb, ZoneStatus.REJECTED)
+                addZoneBox(zoneDir, rz, sb, ZoneStatus.REJECTED)
                 lg("ZONE", "ناحیهٔ ردشده (کلوز داخل محدوده بود)",
                     "dir=${if (bullC) "BULL" else "BEAR"} top=${f2(rz.top)} bot=${f2(rz.bot)} rows=${rz.loIdx}-${rz.hiIdx} bar=${sb.bi}")
             }
             val zs = VolumeProfile.zones(prof, cfg.vpRows, bullC, sb.c, cfg.minZoneRows)
             for (z in zs) {
                 if (z.top > z.bot) {
-                    addZoneBox(trend, z, sb, ZoneStatus.ACTIVE)
+                    addZoneBox(zoneDir, z, sb, ZoneStatus.ACTIVE)
                     lastZoneTop = z.top; lastZoneBot = z.bot
                     cnt.setup++
-                    val st = Setup(setupSeq++, trend, 0, z.top, z.bot, z.idx, sb.bi)
+                    val st = Setup(setupSeq++, zoneDir, 0, z.top, z.bot, z.idx, sb.bi)
                     st.zT = sb.t
                     st.note = "ثبت شد"
                     setups.add(st)
@@ -1488,7 +1520,10 @@ class Engine(val cfg: Settings) {
         // §4-8 / §18-5: لنگر صفر فیبوناچی = HH (خرید) / LL (فروش)؛ لنگر ۱۰۰٪ = سطح تایید میانی
         val a0 = if (bull) HH else LL
         val a1 = s.midRef
-        val targets = calculateTargetLevels(bull, eRef, a0, a1, cfg.minTPunits)
+        // استراتژی ۲: بدون فیبو؛ حد سود نهایی فقط «ورود ± tpUnits» (TP1/TP2 ندارد) — همان مسیر «فیبوی نامعتبر» سند.
+        val targets = if (cfg.strategy == Strategy.NO_TREND)
+            calculateTargetLevels(bull, eRef, Double.NaN, Double.NaN, maxOf(cfg.tpUnits, cfg.mintick))
+        else calculateTargetLevels(bull, eRef, a0, a1, cfg.minTPunits)
         s.tp1 = targets.tp1
         s.tp2 = targets.tp2
         s.tpx = targets.tpx
@@ -1512,10 +1547,16 @@ class Engine(val cfg: Settings) {
         }
         // §4-8 و §10 سند نهایی: ما فقط مجاز به گذاشتن ۱ سفارش در چارت هستیم (حداکثر ۱ سفارش معلق یا ۱ معامله باز).
         // §4-8 و §18-12/§18-13: در هر لحظه فقط یک سفارش معلق مجاز است؛ وجود معاملهٔ باز مانع مسلح شدن نیست.
-        val hasPendingSetupOrder = setups.any { it.id != s.id && it.stage == 6 }
+        // استراتژی ۲: خرید و فروش هم‌زمان مجازند ولی از هر جهت فقط یک سفارش (معلق یا باز).
+        val hasPendingSetupOrder = if (cfg.strategy == Strategy.NO_TREND)
+            setups.any { it.id != s.id && it.dir == s.dir && (it.stage == 6 || it.stage == 7) } ||
+                broker?.hasActiveOrder(s.dir) == true
+        else setups.any { it.id != s.id && it.stage == 6 }
         if (hasPendingSetupOrder) {
             s.hvBi = -1; s.hvT = 0L; s.runMax = Double.NaN
-            lg("ENGINE", "مسلح‌شدن ستاپ #${s.id} رد شد — سفارش معلق دیگری در چارت وجود دارد",
+            lg("ENGINE", if (cfg.strategy == Strategy.NO_TREND)
+                "مسلح‌شدن ستاپ #${s.id} رد شد — از هر جهت فقط یک سفارش (معلق یا باز) مجاز است"
+            else "مسلح‌شدن ستاپ #${s.id} رد شد — سفارش معلق دیگری در چارت وجود دارد",
                 "bar=$curBi")
             return
         }

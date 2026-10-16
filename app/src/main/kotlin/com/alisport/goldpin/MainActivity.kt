@@ -29,6 +29,7 @@ import com.alisport.goldpin.core.MoneyMode
 import com.alisport.goldpin.core.Order
 import com.alisport.goldpin.core.OrderStatus
 import com.alisport.goldpin.core.Reports
+import com.alisport.goldpin.core.Strategy
 import com.alisport.goldpin.core.TF_MODES
 import com.alisport.goldpin.core.Tf
 import com.alisport.goldpin.core.Trade
@@ -252,7 +253,8 @@ class MainActivity : Activity() {
         refreshing = true
         try {
             headerPrice.text = if (s.lastLivePrice.isNaN()) "—" else Fa.n(s.lastLivePrice, 2)
-            val trend = when (s.engine.trend) { 1 -> "صعودی"; -1 -> "نزولی"; else -> "بدون روند" }
+            val trend = if (s.cfg.strategy == Strategy.NO_TREND) "ندارد (استراتژی ۲)"
+                else when (s.engine.trend) { 1 -> "صعودی"; -1 -> "نزولی"; else -> "بدون روند" }
             headerStatus.text = buildString {
                 append(if (s.liveRunning) "● لایو" else "○ لایو خاموش")
                 append("  |  ${Tf.label(s.chartTfSec)}  |  روند: $trend")
@@ -1122,6 +1124,27 @@ class MainActivity : Activity() {
             v.addView(pickRow("تریگر ۲ (چارت)", s.cfg.tf2) { s.setCustomTf2(it) })
         }
 
+        // ── استراتژی (قابل انتخاب) ──
+        v.addView(Ui.section(this, "③-ب استراتژی"))
+        v.addView(Ui.tv(this,
+            "استراتژی ۱ = سند اصلی (پیش‌فرض). استراتژی ۲: تعیین روند حذف می‌شود؛ روی همهٔ کندل‌های ساختار (سبز ⇒ ناحیهٔ خرید، قرمز ⇒ ناحیهٔ فروش) " +
+                "با همان ضوابط ناحیه ثبت می‌شود؛ حد سود فقط چند واحد از ورود (به‌جای فیبو)؛ هم‌زمان یک سفارش خرید و یک سفارش فروش مجاز است " +
+                "ولی از هر جهت فقط یکی (معلق یا باز). بقیهٔ شرایط یکسان است. تغییر استراتژی موتور را از صفر روی داده اجرا می‌کند.", 10.5f, Palette.dim))
+        for (st in listOf(Strategy.DOC, Strategy.NO_TREND)) {
+            val sel = s.cfg.strategy == st
+            v.addView(Ui.btn(this, Strategy.label(st), if (sel) Palette.accent else Palette.panel2,
+                if (sel) Palette.txt else Palette.dim, 11.5f).apply {
+                tag = "strategy_$st"
+                setOnClickListener {
+                    if (s.cfg.strategy != st) {
+                        Log.i(Log.CAT_CFG, "استراتژی = ${Strategy.label(st)}")
+                        s.cfg.strategy = st; s.rebuildAsync(); showTab(4)
+                    }
+                }
+            })
+            v.addView(Ui.spacer(this, 3f))
+        }
+
         // ── پروفایل حجم ──
         v.addView(Ui.section(this, "④ پروفایل حجم و ناحیه‌ها (الگوریتم v2)"))
         v.addView(numRow("تعداد ردیف‌ها", s.cfg.vpRows.toDouble()) { s.cfg.vpRows = it.toInt(); s.rebuildAsync() })
@@ -1151,7 +1174,12 @@ class MainActivity : Activity() {
         v.addView(numRow("بافر حدضرر (تیک)", s.cfg.slBufTicks) { s.cfg.slBufTicks = it; s.rebuildAsync() })
         // §4-8 سند: «سطح سفارش = سقف/کف باکس HV ± ۲ تیک بافر … تعداد تیک بافر قابل تغییر است»
         v.addView(numRow("بافر سطح سفارش (تیک)", s.cfg.entryBufTicks) { s.cfg.entryBufTicks = it; s.rebuildAsync() })
-        v.addView(numRow("حداقل فاصلهٔ حدسود (واحد)", s.cfg.minTPunits) { s.cfg.minTPunits = it; s.rebuildAsync() })
+        if (s.cfg.strategy == Strategy.NO_TREND) {
+            // استراتژی ۲: حد سود فقط «واحد» است (بدون فیبو و بدون TP1/TP2)؛ پیش‌فرض ۱۰
+            v.addView(numRow("حد سود (واحد) — استراتژی ۲", s.cfg.tpUnits) { s.cfg.tpUnits = it; s.rebuildAsync() })
+        } else {
+            v.addView(numRow("حداقل فاصلهٔ حدسود (واحد)", s.cfg.minTPunits) { s.cfg.minTPunits = it; s.rebuildAsync() })
+        }
         v.addView(switchRow("حجم بر اساس ریسک ثابت (خاموش = درصد سرمایه)", s.cfg.useRiskPct) { s.cfg.useRiskPct = it; s.rebuildAsync() })
         v.addView(numRow("ریسک هر معامله (٪)", s.cfg.riskPct) { s.cfg.riskPct = it; s.rebuildAsync() })
         v.addView(numRow("حداکثر اهرم", s.cfg.maxLeverage) { s.cfg.maxLeverage = it; s.rebuildAsync() })
@@ -1224,6 +1252,7 @@ class MainActivity : Activity() {
         v.addView(Ui.section(this, "⑨ دربارهٔ اپ"))
         v.addView(Ui.tv(this, "GoldPin نسخهٔ ${Fa.d(appVersionName())}\n" +
             "موتور: کندل مهم → Ready → pin → روند → ناحیهٔ فیکس‌رنج (الگوریتم v2) → تایید میانی → ولوم کم (تریگر۱) → ولوم زیاد (تریگر۲) → ورود/حدضرر/TP1 ۳۸٪/TP2 ۵۰٪/حدسود ۱٫۲۷۲\n" +
+            "استراتژی ۲ (انتخابی): بدون روند · ناحیه روی همهٔ کندل‌های ساختار · حد سود ثابت به واحد · یک سفارش از هر جهت.\n" +
             "معاملات کاغذی است؛ به کارگزار وصل نیست. همهٔ محاسبات داخل گوشی انجام می‌شود.\n" +
             "مستندات کامل پروژه در پوشهٔ docs مخزن گیت‌هاب است.", 10.5f, Palette.dim))
         return scroll

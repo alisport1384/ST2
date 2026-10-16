@@ -15,6 +15,7 @@ import android.os.PowerManager
 import com.alisport.goldpin.AppState
 import com.alisport.goldpin.MainActivity
 import com.alisport.goldpin.core.OrderStatus
+import com.alisport.goldpin.core.Strategy
 import com.alisport.goldpin.util.Alerts
 import com.alisport.goldpin.util.Fa
 import com.alisport.goldpin.util.Log
@@ -158,7 +159,7 @@ class EngineService : Service() {
     private fun buildNotification(): Notification {
         val s = state
         val price = if (s.lastLivePrice.isNaN()) "—" else Fa.n(s.lastLivePrice, 2)
-        val trend = when (s.engine.trend) {
+        val trend = if (s.cfg.strategy == Strategy.NO_TREND) "ندارد (استراتژی ۲)" else when (s.engine.trend) {
             1 -> "صعودی"; -1 -> "نزولی"; else -> "بدون روند"
         }
         val open = s.broker.openTrade

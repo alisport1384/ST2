@@ -8,6 +8,8 @@ import android.widget.TextView
 import com.alisport.goldpin.core.Candle
 import com.alisport.goldpin.core.MoneyMode
 import com.alisport.goldpin.core.Setup
+import com.alisport.goldpin.core.Settings
+import com.alisport.goldpin.core.Strategy
 import com.alisport.goldpin.core.Tf
 import com.alisport.goldpin.data.Feed
 import com.alisport.goldpin.util.Fa
@@ -133,6 +135,59 @@ class SpecAlignmentTest {
                 all.any { it.contains("وضعیت مدیریت مالی") })
         } finally {
             s.cfg.mmMode = prevMode
+            c.pause().stop().destroy()
+        }
+    }
+
+    /**
+     * استراتژی دوم (انتخابی): دکمه‌های انتخاب در تنظیمات هستند، پیش‌فرض استراتژی ۱ است، با انتخاب استراتژی ۲ موتور بدون روند
+     * بازسازی می‌شود، ردیف حد سود «واحد» جای «حداقل فاصلهٔ حدسود» می‌نشیند و سرصفحه «روند: ندارد» می‌نویسد.
+     */
+    @Test
+    fun `strategy buttons switch the strategy the take profit row and the header`() {
+        val c = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val act = c.get()
+        shadowOf(Looper.getMainLooper()).idle()
+        val s = AppState.instance
+        s.spreadFetcher = { null }
+        waitUntilIdle(s)
+        val prevStrategy = s.cfg.strategy
+        val prevUnits = s.cfg.tpUnits
+        try {
+            assertEquals("پیش‌فرض: استراتژی ۱ (سند)", Strategy.DOC, Settings().strategy)
+            assertEquals(10.0, Settings().tpUnits, 0.0)
+            s.cfg.strategy = Strategy.DOC
+            val m: Method = act.javaClass.getDeclaredMethod("showTab", Int::class.javaPrimitiveType)
+            m.isAccessible = true
+            m.invoke(act, 4)
+            shadowOf(Looper.getMainLooper()).idle()
+            val root = act.window.decorView.findViewById<ViewGroup>(android.R.id.content)
+            var all = texts(root).map { it.text.toString() }
+            val buttons = texts(root).filterIsInstance<Button>()
+            assertTrue("دکمهٔ استراتژی ۱", buttons.any { it.text.toString().contains("استراتژی ۱") })
+            assertTrue("دکمهٔ استراتژی ۲", buttons.any { it.text.toString().contains("استراتژی ۲") })
+            assertTrue("استراتژی ۱: ردیف حداقل فاصلهٔ حدسود", all.any { it.contains("حداقل فاصلهٔ حدسود") })
+            assertFalse(all.any { it.contains("حد سود (واحد) — استراتژی ۲") })
+
+            buttons.first { it.text.toString().contains("استراتژی ۲ —") }.performClick()
+            assertEquals(Strategy.NO_TREND, s.cfg.strategy)
+            waitUntilIdle(s)
+            shadowOf(Looper.getMainLooper()).idle()
+            all = texts(root).map { it.text.toString() }
+            assertTrue("استراتژی ۲: ردیف حد سود به واحد", all.any { it.contains("حد سود (واحد) — استراتژی ۲") })
+            assertFalse("استراتژی ۲: فیبو/حداقل فاصله نیست", all.any { it.contains("حداقل فاصلهٔ حدسود") })
+            assertTrue("سرصفحه: بدون روند", all.any { it.contains("روند: ندارد (استراتژی ۲)") })
+            assertEquals("موتور روند نمی‌سازد", 0, s.engine.trend)
+            assertTrue(s.engine.pins.isEmpty())
+
+            texts(root).filterIsInstance<Button>().first { it.text.toString().contains("استراتژی ۱ —") }.performClick()
+            assertEquals(Strategy.DOC, s.cfg.strategy)
+            waitUntilIdle(s)
+        } finally {
+            s.cfg.strategy = prevStrategy
+            s.cfg.tpUnits = prevUnits
+            s.rebuildAsync()
+            waitUntilIdle(s)
             c.pause().stop().destroy()
         }
     }

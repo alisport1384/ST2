@@ -223,7 +223,7 @@ class AppState {
     /** راه‌اندازی لاگر و هشدارها + وصل کردن آن‌ها به موتور و کارگزار */
     fun initApp(ctx: Context) {
         appCtx = ctx.applicationContext
-        Log.init(appCtx!!, "1.4.20")
+        Log.init(appCtx!!, "1.4.21")
         Alerts.init(appCtx!!)
         val p = appCtx!!.getSharedPreferences("goldpin", Context.MODE_PRIVATE)
         // مهاجرت ۱٫۱ → ۱٫۲: تمام‌صفحهٔ خودکار دیگر پیش‌فرض نیست؛ تنظیم قدیمی true را یک‌بار خاموش کن.
@@ -1200,6 +1200,7 @@ class AppState {
         to.hvScanFirstTouch = c.hvScanFirstTouch; to.hvMarkFirstIncrease = c.hvMarkFirstIncrease
         to.rejectCandleNext = c.rejectCandleNext
         to.mintick = c.mintick; to.slBufTicks = c.slBufTicks; to.entryBufTicks = c.entryBufTicks; to.minTPunits = c.minTPunits
+        to.strategy = c.strategy; to.tpUnits = c.tpUnits
         to.useRiskPct = c.useRiskPct; to.riskPct = c.riskPct; to.equityPct = c.equityPct
         to.maxLeverage = c.maxLeverage; to.roundQty = c.roundQty
         to.contractSize = c.contractSize; to.initialEquity = c.initialEquity

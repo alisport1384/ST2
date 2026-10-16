@@ -15,6 +15,9 @@ fun main(args: Array<String>) {
     var smooth = 1
     var tfMode = 1
     var maxRows = Int.MAX_VALUE
+    var strategy = Strategy.DOC
+    var tpUnits = 10.0
+    var maxSetups = -1
     var i = 0
     while (i < args.size) {
         when (args[i]) {
@@ -24,6 +27,9 @@ fun main(args: Array<String>) {
             "--smooth" -> smooth = args[++i].toInt()
             "--mode" -> tfMode = args[++i].toInt()
             "--max" -> maxRows = args[++i].toInt()
+            "--strategy" -> strategy = args[++i].toInt()          // ۱ = سند (پیش‌فرض) · ۲ = بدون روند، حد سود ثابت
+            "--tp-units" -> tpUnits = args[++i].toDouble()        // استراتژی ۲: حد سود (واحد قیمت)، پیش‌فرض ۱۰
+            "--max-setups" -> maxSetups = args[++i].toInt()
         }
         i++
     }
@@ -59,10 +65,14 @@ fun main(args: Array<String>) {
         if (candles.size >= maxRows) break
     }
     if (candles.isEmpty()) { println("هیچ کندل معتبری در $csv پیدا نشد (قالب: timestamp,open,high,low,close[,volume])"); return }
+    println("استراتژی: ${Strategy.label(strategy)}")
     println("کندل‌های بارگذاری‌شده: ${candles.size}   حجم واقعی: ${hasVolume && vol != "synthetic"}   ردیف ردشده: $skipped")
 
     val cfg = Settings().apply {
         this.vpRows = rows; this.vpSmooth = smooth; this.tfMode = tfMode
+        if (Strategy.valid(strategy)) this.strategy = strategy
+        this.tpUnits = tpUnits
+        if (maxSetups > 0) this.maxSetups = maxSetups
     }
     val t2 = TF_MODES.first { it.idx == tfMode }
     cfg.tfS = t2.s; cfg.tfM = t2.m; cfg.tf1 = t2.t1; cfg.tf2 = t2.t2
