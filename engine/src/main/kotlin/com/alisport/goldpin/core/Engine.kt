@@ -72,9 +72,9 @@ class Settings {
     var equityPct: Double = 100.0
     /**
      * سقف اهرم — **تنها** متغیر اهرم، برای همهٔ مودها (§۵ و §۲۰).
-     * تصمیم مالک (۱٫۴٫۲۰): پیش‌فرض ۵۰۰ و حجم را سیستم مدیریت مالی تعیین می‌کند. (پیش‌تر §۵: ۱۰ و برای §۲۰ متغیر جدا بود.)
+     * §۵ سند: «اهرم پیش‌فرض: **۱۰** — کاربر می‌تواند تغییر دهد.» (یک متغیر برای همهٔ مودها.)
      */
-    var maxLeverage: Double = 500.0
+    var maxLeverage: Double = 10.0
     var roundQty: Boolean = false
     // §4-8/§۱۴ سند نهایی: انقضای سفارش معلق با عبور باز/کلوز از آخرین pinBE/pinBU
     // (سطح هنگام مسلح‌شدن ذخیره می‌شود) یا گذشت یک کندل ساختار کامل بعد از مسلح‌شدن.
@@ -101,6 +101,14 @@ class Settings {
     /** آخرین اسپرد دریافت‌شده از بروکر (۰ = هنوز دریافت نشده ⇒ cmsnManual) و زمان دریافت (میلی‌ثانیه). */
     var cmsnAutoValue: Double = 0.0
     var cmsnAutoAt: Long = 0L
+    /**
+     * §۲۰ بند ۵ (crt): «در شرایط حساس اگر کپیتال از یک مقدار مشخص کمتر شد ورودی‌های حجم را crt
+     * محاسبه می‌کند — پیش‌فرض ۱۰ درصد کل capital» و «crt در مود ManageAllLost فقط فعال است».
+     * مقدار آستانه (درصد از Capital) و کلید روشن/خاموش در تنظیمات قابل تغییرند.
+     */
+    var crtEnabled: Boolean = true
+    var crtPct: Double = 10.0
+
     /** Mixed: M = NakedCapital × (1 + mixedGrowthPct/100). سند: ۲۰٪. */
     var mixedGrowthPct: Double = 20.0
     /** گام حجم در مودهای §۲۰ — مثال‌های سند به ۰٫۰۱ کف شده‌اند. ۰ = بدون گرد کردن. */
@@ -125,6 +133,7 @@ class Settings {
         it.divAuto = divAuto; it.divManual = divManual
         it.cmsnAuto = cmsnAuto; it.cmsnManual = cmsnManual
         it.cmsnAutoValue = cmsnAutoValue; it.cmsnAutoAt = cmsnAutoAt
+        it.crtEnabled = crtEnabled; it.crtPct = crtPct
         it.mixedGrowthPct = mixedGrowthPct
         it.lotStep = lotStep; it.lostResetAtFinalTp = lostResetAtFinalTp
     }
@@ -835,14 +844,16 @@ class Engine(val cfg: Settings) {
         lastProfBars = microS.size
         if (cfg.showPocVA && !prof.poc.isNaN()) lastPocPx = prof.poc
         if (dirOK && !prof.step.isNaN() && prof.step > 0) {
-            val rej = VolumeProfile.zones(prof, cfg.vpRows, bullC, sb.c, cfg.minZoneRows, wantRejected = true)
-            cnt.zoneRejected += rej.size
-            if (cfg.showRejectedZones) for (rz in rej) {
+            // §4-5: یک پیمایش برای هر کندل ساختار؛ حداکثر ۲ ناحیه در کل و نامزدهای ردشده هم
+            // سهمیه را مصرف می‌کنند (شمارهٔ Z1/Z2 بین پذیرفته‌ها و ردشده‌ها مشترک است).
+            val cand = VolumeProfile.zoneCandidates(prof, cfg.vpRows, bullC, sb.c, cfg.minZoneRows)
+            cnt.zoneRejected += cand.rejected.size
+            if (cfg.showRejectedZones) for (rz in cand.rejected) {
                 addZoneBox(zoneDir, rz, sb, ZoneStatus.REJECTED)
                 lg("ZONE", "ناحیهٔ ردشده (کلوز داخل محدوده بود)",
                     "dir=${if (bullC) "BULL" else "BEAR"} top=${f2(rz.top)} bot=${f2(rz.bot)} rows=${rz.loIdx}-${rz.hiIdx} bar=${sb.bi}")
             }
-            val zs = VolumeProfile.zones(prof, cfg.vpRows, bullC, sb.c, cfg.minZoneRows)
+            val zs = cand.accepted
             for (z in zs) {
                 if (z.top > z.bot) {
                     addZoneBox(zoneDir, z, sb, ZoneStatus.ACTIVE)

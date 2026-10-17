@@ -131,6 +131,25 @@ object VolumeProfile {
         minRows: Int,
         wantRejected: Boolean = false
     ): List<Zone> {
+        val c = zoneCandidates(p, rows, bull, cClose, minRows)
+        return if (wantRejected) c.rejected else c.accepted
+    }
+
+    /** نتیجهٔ یک‌بارِ پیمایش: ناحیه‌های پذیرفته‌شده و ردشده‌ها با شمارهٔ مشترک (Z1/Z2). */
+    class ZoneCandidates(val accepted: List<Zone>, val rejected: List<Zone>)
+
+    /**
+     * §4-5 سند: «حداکثر دو ناحیه در هر کندل ساختار ساخته می‌شود؛ ناحیه‌ای که شرط کلوز را ندارد
+     * ردشده است». پس **یک** پیمایش انجام می‌شود و نامزدهای ردشده هم سهمیهٔ دو ناحیه را مصرف
+     * می‌کنند (پیش‌تر دو پیمایش جدا بود ⇒ تا ۲ پذیرفته + ۲ ردشده با شمارهٔ تکراری).
+     */
+    fun zoneCandidates(
+        p: Profile,
+        rows: Int,
+        bull: Boolean,
+        cClose: Double,
+        minRows: Int
+    ): ZoneCandidates {
         val out = ArrayList<Zone>(2)
         val rej = ArrayList<Zone>(2)
         var found = 0
@@ -206,6 +225,6 @@ object VolumeProfile {
                 i = tr + stepDir
             }
         }
-        return if (wantRejected) rej else out
+        return ZoneCandidates(out, rej)
     }
 }

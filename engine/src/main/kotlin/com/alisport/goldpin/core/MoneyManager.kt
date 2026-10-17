@@ -23,7 +23,8 @@ import kotlin.math.max
 //    Lost         = ضرر خالصِ هنوز جبران‌نشده (دلار)
 //    cmsnLost     = جمع کمیسیون معاملاتی که با ضرر بسته شدند (فقط در فاز ManageCM)
 //
-//  crt (بند ۵ سند) عمداً پیاده نشده است: تصمیم مالک — بندش را خودش در سند می‌نویسد.
+//  crt (بند ۵ سند): فقط در مود ManageAllLost فعال است. اگر Lost از درصد آستانهٔ Capital
+//  بیشتر شود (پیش‌فرض ۱۰٪)، حجم با crt محاسبه می‌شود: Lot = Lost / div (بدون MinLot).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /** حالت‌های مدیریت مالی. مقدارهای عددی در فایل ذخیره می‌شوند؛ تغییر ندهید. */
@@ -107,8 +108,17 @@ class MoneyManager(private val cfg: Settings) {
         val note: String
         when (cfg.mmMode) {
             MoneyMode.MANAGE_ALL_LOST -> {
-                raw = if (d > 1e-9) lost / d + minLot else minLot
-                note = "ManageAllLost: Lot = Lost ${n2(lost)} ÷ div ${n2(d)} + MinLot ${n2(minLot)}"
+                // §۲۰ بند ۵: crt فقط در ManageAllLost — «if lost > (capital*10)/100 ⇒ lot = (lost/div)»
+                val crtLimit = capital * cfg.crtPct / 100.0
+                val crt = cfg.crtEnabled && capital > 0.0 && lost > crtLimit
+                if (crt) {
+                    raw = if (d > 1e-9) lost / d else minLot
+                    note = "ManageAllLost/crt (Lost ${n2(lost)} > ${n2(cfg.crtPct)}٪ Capital ${n2(capital)}): " +
+                        "Lot = Lost ${n2(lost)} ÷ div ${n2(d)}"
+                } else {
+                    raw = if (d > 1e-9) lost / d + minLot else minLot
+                    note = "ManageAllLost: Lot = Lost ${n2(lost)} ÷ div ${n2(d)} + MinLot ${n2(minLot)}"
+                }
             }
             MoneyMode.MIXED -> {
                 val m = growthLimit()

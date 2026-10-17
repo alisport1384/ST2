@@ -1209,6 +1209,7 @@ class AppState {
         to.divAuto = c.divAuto; to.divManual = c.divManual
         to.cmsnAuto = c.cmsnAuto; to.cmsnManual = c.cmsnManual
         to.cmsnAutoValue = c.cmsnAutoValue; to.cmsnAutoAt = c.cmsnAutoAt
+        to.crtEnabled = c.crtEnabled; to.crtPct = c.crtPct
         to.mixedGrowthPct = c.mixedGrowthPct
         to.lotStep = c.lotStep; to.lostResetAtFinalTp = c.lostResetAtFinalTp
     }

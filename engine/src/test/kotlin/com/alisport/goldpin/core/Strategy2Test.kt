@@ -49,7 +49,9 @@ class Strategy2Test {
         val sm = Reports.summary(b.trades)
         assertEquals(103, sm.trades)
         assertEquals(12, sm.wins); assertEquals(48, sm.losses); assertEquals(43, sm.breakeven)
-        assertEquals(9592.28, sm.net, 0.01)
+        // اهرم پیش‌فرض طبق §۵ سند ۱۰ است ⇒ حجم‌ها ۱/۵۰ حجمِ حالت اهرم ۵۰۰ ⇒ سود/زیان خالص کوچک‌تر
+        // (تعداد معاملات و برد/باخت/سر‌به‌سر بدون تغییر است؛ فقط اندازهٔ حجم عوض می‌شود).
+        assertEquals(2298.37, sm.net, 0.01)
         assertTrue(e.markers.any { it.kind == MarkerKind.TREND_UP || it.kind == MarkerKind.TREND_DOWN }, "استراتژی ۱ روند می‌سازد")
         assertTrue(b.orders.any { !it.tp1.isNaN() }, "استراتژی ۱ فیبو دارد")
     }
