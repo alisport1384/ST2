@@ -1164,8 +1164,9 @@ class Engine(val cfg: Settings) {
                     continue
                 }
                 if (inside && !s.lvTouched) {
+                    // §۱۸-۷: این لمس فقط برای «مصرف» باکس است؛ شروع اسکن HV روی تریگر۲
+                    // سنجیده می‌شود و شاخصش در همان موتور (③-الف) ثبت می‌شود.
                     s.lvTouched = true
-                    if (s.hvScanBi < 0 && cfg.hvScanFirstTouch) s.hvScanBi = q1.bi
                 }
                 if (s.lvTouched) {
                     // سند: خروج با کلوز آن‌سوی لبهٔ نزدیک باکس سنجیده می‌شود (لمس و کلوز می‌توانند در یک کندل باشند).
@@ -1381,7 +1382,10 @@ class Engine(val cfg: Settings) {
             // ③-ب ناحیهٔ ولوم زیاد (تریگر ۲)
             // §4-8 سند نهایی: کندل تایید ناحیه پرحجم صرفاً باید بالای سقف (خرید) یا زیر کف (فروش)
             // کندل پرحجم بسته شود و شرط افزایش مجدد حجم روی کندل تایید وجود ندارد.
-            if (s.stage in 4..5 && s.lvBi >= 0 && s.lvReEntered) {
+            // پیش‌فرض سند: از اولین برگشت/برخورد قیمت به باکس LV. اگر گزینه خاموش باشد،
+            // اسکن از «لحظهٔ تایید ناحیهٔ ولوم کم» (کندل بعد از تایید) شروع می‌شود.
+            val scanReady = s.lvReEntered || (!cfg.hvScanFirstTouch && curBi > s.lvConfBi)
+            if (s.stage in 4..5 && s.lvBi >= 0 && scanReady) {
                 val scanOK = if (s.hvScanBi < 0) true else curBi >= s.hvScanBi
                 if (scanOK) {
                     val marked = s.hvBi >= 0
@@ -1523,6 +1527,17 @@ class Engine(val cfg: Settings) {
     /** §4-8 سند: سطح سفارش خرید = سقف باکس HV + ۲ تیک؛ سطح سفارش فروش = کف باکس HV − ۲ تیک (همیشه مثبت). */
     fun entryLevel(s: Setup, bull: Boolean): Double = cfg.entryLevel(bull, s.hvH, s.hvL)
 
+    /**
+     * §۴-۸ سند: «بعد از باطل شدن [مارک]، جست‌وجو از نو شروع می‌شود.»
+     * هر جا مارک HV پاک می‌شود ولی سفارشی مسلح نشده، ستاپ باید به مرحلهٔ «اسکن ولوم زیاد» (۴)
+     * برگردد؛ ماندن روی مرحلهٔ ۵ باعث می‌شود چارت خط‌های مارکِ پاک‌شده را نگه دارد و
+     * پنل هم «مارک شد» را نشان دهد، در حالی که hvBi منفی است.
+     */
+    private fun clearHvMark(s: Setup) {
+        s.hvBi = -1; s.hvT = 0L; s.runMax = Double.NaN
+        if (s.stage == 5) s.stage = 4
+    }
+
     /** لحظهٔ مسلح شدن (تایید ناحیهٔ ولوم زیاد) → محاسبهٔ SL/TP و ثبت سفارش ورود. */
     private fun armSetup(s: Setup, cd: Candle, bull: Boolean) {
         // §4-8 سند: سطح سفارش = سقف باکس + ۲ تیک بافر (خرید) / کف باکس − ۲ تیک بافر (فروش)
@@ -1542,15 +1557,23 @@ class Engine(val cfg: Settings) {
         // ورود جدید نیز باید بهتر از قبلی باشد (خرید پایین‌تر، فروش بالاتر).
         val isRearm = !s.prevEntry.isNaN()
         if (isRearm) {
+            // §۴-۸: شرط «هنوز کندل ساختار جدیدی باز و بسته نشده باشد» — پس از گذشت یک بازهٔ
+            // ساختار کامل از آخرین مسلح‌شدن، مسلح‌شدن دوباره هرگز مجاز نیست (مستقل از مرحلهٔ ستاپ).
+            if (fullStructureElapsed(s.armBi, curBi, cfg.tfS, cfg.tf2)) {
+                clearHvMark(s)
+                lg("ENGINE", "مسلح‌مجدد ستاپ #${s.id} رد شد (یک کندل ساختار کامل از آخرین مسلح‌شدن گذشته)",
+                    "armBi=${s.armBi} curBi=$curBi n=${cfg.tfS / maxOf(1, cfg.tf2)}")
+                return
+            }
             if (!s.rearmAllowed || !rearmPrerequisitesValid(s)) {
-                s.hvBi = -1; s.hvT = 0L; s.runMax = Double.NaN
+                clearHvMark(s)
                 lg("ENGINE", "مسلح‌مجدد ستاپ #${s.id} رد شد (پیش‌نیازهای ساختار/میانی/تریگر۱ برقرار نیست)",
                     "rearmAllowed=${s.rearmAllowed} zGone=${s.zGone} midValid=${!s.midRef.isNaN()} lvBi=${s.lvBi} lvReEntered=${s.lvReEntered} lvUsed=${s.lvUsed} bar=$curBi")
                 return
             }
             val better = if (bull) eRef < s.prevEntry else eRef > s.prevEntry
             if (!better) {
-                s.hvBi = -1; s.hvT = 0L; s.runMax = Double.NaN
+                clearHvMark(s)
                 lg("ENGINE", "مسلح مجدد برای ستاپ #${s.id} رد شد (ورود جدید بهتر از قبلی نیست)",
                     "prev=${f2(s.prevEntry)} new=${f2(eRef)} bar=$curBi")
                 return
@@ -1564,7 +1587,7 @@ class Engine(val cfg: Settings) {
                 broker?.hasActiveOrder(s.dir) == true
         else setups.any { it.id != s.id && it.stage == 6 }
         if (hasPendingSetupOrder) {
-            s.hvBi = -1; s.hvT = 0L; s.runMax = Double.NaN
+            clearHvMark(s)
             lg("ENGINE", if (cfg.strategy == Strategy.NO_TREND)
                 "مسلح‌شدن ستاپ #${s.id} رد شد — از هر جهت فقط یک سفارش (معلق یا باز) مجاز است"
             else "مسلح‌شدن ستاپ #${s.id} رد شد — سفارش معلق دیگری در چارت وجود دارد",
@@ -1575,7 +1598,7 @@ class Engine(val cfg: Settings) {
         s.entry = eRef   // سطح سفارش (§4-8) — کارگزار همین سطح را ثبت می‌کند
         val registered = broker?.registerLimit(s, cd) ?: true
         if (!registered) {
-            s.hvBi = -1; s.hvT = 0L; s.runMax = Double.NaN
+            clearHvMark(s)
             lg("ENGINE", "ثبت سفارش برای ستاپ #${s.id} رد شد (${broker?.lastError}) — کندل HV ریست شد",
                 "bar=$curBi")
             return
