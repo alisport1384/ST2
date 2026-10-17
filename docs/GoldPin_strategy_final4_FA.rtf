@@ -556,9 +556,9 @@ volume[1]>volume[2]\par
 \f1\rtlch\lang1065 ==================================\par
 \'81\u1740?\'d4 \'e4\u1740?\'c7\'d2 \'e5\'c7:\par
 0.\f0\ltrch\lang1033 NakedCapital\par
-\f1\rtlch\lang1065\'e3\'de\'cf\'c7\'d1 \'da\'cf\'cf\u1740? \'d3\'d1\'e3\'c7\u1740?\'e5 \'c7\'e6\'e1\u1740?\'e5 \'c8\'e5 \'da\'e1\'c7\'e6\'e5 \'d3\'e6\'cf \u1740?\'c7 \'d6\'d1\'d1\f0\ltrch\lang1033\par
-\f1\rtlch\lang1065 0-1. \f0\ltrch\lang1033 Capital\par
 \f1\rtlch\lang1065\'e3\'de\'cf\'c7\'d1 \'da\'cf\'cf\u1740? \'d3\'d1\'e3\'c7\u1740?\'e5 \'c7\'e6\'e1\u1740?\'e5 \'c8\'cf\'e6\'e4 \'d3\'e6\'cf \u1740?\'c7 \'d6\'d1\'d1\f0\ltrch\lang1033\par
+\f1\rtlch\lang1065 0-1. \f0\ltrch\lang1033 Capital\par
+\f1\rtlch\lang1065\'e3\'de\'cf\'c7\'d1 \'da\'cf\'cf\u1740? \'d3\'d1\'e3\'c7\u1740?\'e5 \'c7\'e6\'e1\u1740?\'e5 \'c8\'e5 \'da\'e1\'c7\'e6\'e5 \'d3\'e6\'cf \u1740?\'c7 \'d6\'d1\'d1\f0\ltrch\lang1033\par
 \f1\rtlch\lang1065 1. \f0\ltrch\lang1033 Lot\f1\rtlch\lang1065\par
 \'cd\'cc\'e3\u1740? \'98\'e5 \'c8\'d1\'c7\u1740? \'e3\'da\'c7\'e3\'e1\'e5 \'cf\'d1 \'d3\'dd\'c7\'d1\'d4 \'c7\'d3\'ca\'dd\'c7\'cf\'e5 \'e3\u1740?\'d4\'e6\'cf\f0\ltrch\lang1033\par
 \f1\rtlch\lang1065 2.\f0\ltrch\lang1033 MinLot\par
@@ -589,7 +589,9 @@ div = entry - FinalTP\par
 5.\f0\ltrch\lang1033 crt\f1\rtlch\lang1065\par
 \'cf\'d1 \'d4\'d1\'c7\u1740?\'d8 \'cd\'d3\'c7\'d3 \'c7\'90\'d1 \'98\'81\u1740?\'ca\'c7\'e1 \'c7\'d2 \u1740?\'98 \'e3\'de\'cf\'c7\'d1 \'e3\'d4\'ce\'d5 \'98\'e3\'ca\'d1 \'d4\'cf \'e6\'d1\'e6\'cf\u1740? \'e5\'c7\u1740? \'cd\'cc\'e3 \'d1\'c7 \f0\ltrch\lang1033 crt\f1\rtlch\lang1065  \'e3\'cd\'c7\'d3\'c8\'e5 \'e3\u1740?\'98\'e4\'cf\par
 \'81\u1740?\'d4\'dd\'d1\'d6 = 10 \'cf\'d1\'d5\'cf \'98\'e1 \f0\ltrch\lang1033 capital\f1\rtlch\lang1065  \par
-\f0\ltrch\lang1033 crt = (capital*10)/100\f1\rtlch\lang1065\par
+\f0\ltrch\lang1033 if lost > (capital*10)/100\f1\rtlch\lang1065\par
+\f0\ltrch\lang1033 crt = true\par
+lot = (lost/div)\f1\rtlch\lang1065\par
 6.\f0\ltrch\lang1033 cmsn\par
 \f1\rtlch\lang1065\'c7\'d3\'81\'d1\'cf \'98\'e3\u1740?\'d3\u1740?\'e6\'e4 \'ca\'cd\'e3\u1740?\'e1\u1740? \'c8\'e5 \'e5\'d1 \'e3\'da\'c7\'e3\'e1\'e5\par
 \'81\u1740?\'d4\'dd\'d1\'d6 \'c7\'d3\'81\'d1\'cf \'c8\'d1\'e6\'98\'d1\par
@@ -690,7 +692,7 @@ Final TP = 1920\par
 Final SL = 1897\par
 \f1\rtlch\lang1065\par
 \f0\ltrch\lang1033 ============================\f1\rtlch\lang1065\par
-\par
+\f0\ltrch\lang1033 crt:\f1\rtlch\lang1065  \'cf\'d1 \'e3\'e6\'cf \f0\ltrch\lang1033 ManageAllLost \f1\rtlch\lang1065\'dd\'de\'d8 \'dd\'da\'c7\'e1 \'c7\'d3\'ca\par
 \f0\ltrch\lang1033 ============================\par
 \f1\rtlch\lang1065 20-2) \'e3\'e6\'cf \f0\ltrch\lang1033 Mixed\par
 \f1\rtlch\lang1065\'81\u1740?\'d4 \'dd\'d1\'d6:\par
@@ -772,7 +774,22 @@ cmsn = 5.3\f1\rtlch\lang1065\par
 13.\'cf\'d1 \'d5\'e6\'d1\'ca \'e6\'cc\'e6\'cf \'d3\'dd\'c7\'d1\'d4 \'c8\'c7\'d2 \f0\ltrch\lang1033 ,\f1\rtlch\lang1065  \'c7\'e3\'98\'c7\'e4 \'e3\'d3\'e1\'cd \'98\'d1\'cf\'e4 \'d3\'dd\'c7\'d1\'d4 \'e6\'cc\'e6\'cf \'cf\'c7\'d1\'cf.\par
  14.\'c8\'c7\'d8\'e1 \'d4\'cf\'e4 \'e4\'c7\'cd\u1740?\'e5 \'d3\'c7\'ce\'ca\'c7\'d1 \'e3\'d5\'d1\'dd \'d4\'cf\'e5(\'c8\'d3\u1740?\'c7\'d1 \'e3\'e5\'e3) : \'c7\'90\'d1 \u1740?\'98 \'e4\'c7\'cd\u1740?\'e5 \'d3\'c7\'ce\'ca\'c7\'d1 \'e1\'e3\'d3 \'d4\'cf \f0\ltrch\lang1033 ,\f1\rtlch\lang1065  \'e6 \'c8\'da\'cf \'c7\'d2 \'e1\'e3\'d3 \u1740?\'98 \'98\'e4\'cf\'e1 \'d3\'c7\'ce\'ca\'c7\'d1 \'c8\'c7\'d2 \'e6 \'c8\'d3\'ca\'e5 \'d4\'cf \f0\ltrch\lang1033 ,\f1\rtlch\lang1065  \'c2\'e4 \'e4\'c7\'cd\u1740?\'e5 \'d3\'c7\'ce\'ca\'c7\'d1 \'c8\'c7\'d8\'e1 \'d4\'cf\'e5 . \'e6\'e1\u1740? \'ca\'c7 \'d2\'e3\'c7\'e4\u1740? \'98\'e5 \'ca\'c7\u1740?\u1740?\'cf \'e3\u1740?\'c7\'e4\u1740? \'c8\'c7\'d8\'e1 \'e4\'d4\'cf\'e5 \f0\ltrch\lang1033 ,\f1\rtlch\lang1065\'d3\'ca\'c7\'81 \'dd\'da\'c7\'e1 \'c7\'d3\'ca. \'c8\'da\'cf \'c7\'d2 \'c8\'c7\'d8\'e1 \'d4\'cf\'e4 \'ca\'c7\u1740?\u1740?\'cf \'e3\u1740?\'c7\'e4\u1740? \'d3\'ca\'c7\'81 \'e5\'e3 \'c8\'c7\'d8\'e1 \'e3\u1740?\'d4\'e6\'cf \'e6 \'ca\'c7 \'e1\'e3\'d3 \'e4\'c7\'cd\u1740?\'e5 \'d3\'c7\'ce\'ca\'c7\'d1 \'c8\'da\'cf\u1740? \'db\u1740?\'d1\'dd\'da\'c7\'e1 \'e3\u1740?\'d4\'e6\'cf. \par
 15. \'e4\'c7\'cd\u1740?\'e5 \'e5\'c7\u1740? \'d3\'c7\'ce\'ca\'c7\'d1 \'dd\'de\'d8 \'e6 \'dd\'de\'d8 \'d1\'e6\u1740? \'98\'e4\'cf\'e1 \'e5\'c7\u1740? \'c8\'d3\'ca\'e5 \'d4\'cf\'e5 \'d3\'c7\'ce\'ca\'c7\'d1 \'c7\u1740?\'cc\'c7\'cf \'e3\u1740?\'d4\'e6\'e4\'cf.\par
+16.\'e4\'98\'ca\'e5 \'cf\'d1 \'ca\'da\u1740?\u1740?\'e4 \'e4\'c7\'cd\u1740?\'e5 \f0\ltrch\lang1033 LV \f1\rtlch\lang1065 : (\'c7\'e6\'e1\u1740?\'e4)\par
+\'cf\'d1 \'d1\'e6\'e4\'cf \'d5\'da\'e6\'cf\u1740? : \par
+\'c7\'d2 \'98\'dd \'ca\'c7\u1740?\u1740?\'cf \'e3\u1740?\'c7\'e4\u1740? \'ca\'c7 \'cc\'c7\u1740?\u1740? \'98\'e5 \'de\u1740?\'e3\'ca \'e5\'d3\'ca \f0\ltrch\lang1033 ,\f1\rtlch\lang1065  \'c7\'e6\'e1\u1740?\'e4 \'98\'e4\'cf\'e1 \'c8\'d3\'ca\'e5 \'d4\'cf\'e5 \'c7\u1740? \'98\'e5 \'e6\'e1\'e6\'e3 \'98\'e3\'ca\'d1\u1740? \'e4\'d3\'c8\'ca \'c8\'e5 \'e6\'e1\'e6\'e3 \'98\'e4\'cf\'e1 \'c8\'d3\'ca\'e5 \'d4\'cf\'e5 \'de\'c8\'e1\u1740? \'cf\'c7\'d1\'cf \'e6 \'c8\'c7\'d8\'e1 \'e4\'d4\'cf\'e5 \'c7\'d3\'ca. \'cf\'d1 \'d5\'e6\'d1\'ca \'81\u1740?\'cf\'c7 \'e4\'d4\'cf\'e4 \f0\ltrch\lang1033 ,\f1\rtlch\lang1065  \'c7\'d3\'98\'e4 \'c8\'d1\'c7\u1740? \'e4\'c7\'cd\u1740?\'e5 \'cc\'cf\u1740?\'cf \'e1\'e4\'cc\'c7\'e3 \'e3\u1740?\'d4\'e6\'cf\par
+\'cf\'d1 \'d1\'e6\'e4\'cf \'e4\'d2\'e6\'e1\u1740? : \par
+\'c7\'d2 \'d3\'de\'dd \'ca\'c7\u1740?\u1740?\'cf \'e3\u1740?\'c7\'e4\u1740? \'ca\'c7 \'cc\'c7\u1740?\u1740? \'98\'e5 \'de\u1740?\'e3\'ca \'e5\'d3\'ca \f0\ltrch\lang1033 ,\f1\rtlch\lang1065  \'c7\'e6\'e1\u1740?\'e4 \'98\'e4\'cf\'e1 \'c8\'d3\'ca\'e5 \'d4\'cf\'e5 \'c7\u1740? \'98\'e5 \'e6\'e1\'e6\'e3 \'98\'e3\'ca\'d1\u1740? \'e4\'d3\'c8\'ca \'c8\'e5 \'e6\'e1\'e6\'e3 \'98\'e4\'cf\'e1 \'c8\'d3\'ca\'e5 \'d4\'cf\'e5 \'de\'c8\'e1\u1740? \'cf\'c7\'d1\'cf \'e6 \'c8\'c7\'d8\'e1 \'e4\'d4\'cf\'e5 \'c7\'d3\'ca\f0\ltrch\lang1033 ,\f1\rtlch\lang1065  \'cf\'d1 \'d5\'e6\'d1\'ca \'81\u1740?\'cf\'c7 \'e4\'d4\'cf\'e4 \f0\ltrch\lang1033 ,\f1\rtlch\lang1065  \'c7\'d3\'98\'e4 \'c8\'d1\'c7\u1740? \'e4\'c7\'cd\u1740?\'e5 \'cc\'cf\u1740?\'cf \'e1\'e4\'cc\'c7\'e3 \'e3\u1740?\'d4\'e6\'cf\par
 \par
+17. \'e4\'98\'ca\'e5 \'cf\'d1 \'ca\'da\u1740?\u1740?\'e4 \'e4\'c7\'cd\u1740?\'e5 \f0\ltrch\lang1033 HV\f1\rtlch\lang1065  : (\'c7\'e6\'e1\u1740?\'e4)\par
+\'cf\'d1 \'d1\'e6\'e4\'cf \'d5\'da\'e6\'cf\u1740? : \par
+\'c7\'d2 \'98\'dd \'e4\'c7\'cd\u1740?\u1740?\'e5 \'ca\'c7\u1740?\u1740?\'cf \'d4\'cf\'e5 \f0\ltrch\lang1033 LV\f1\rtlch\lang1065  \'ca\'c7 \'cc\'c7\u1740?\u1740? \'98\'e5 \'de\u1740?\'e3\'ca \'e5\'d3\'ca\f0\ltrch\lang1033 ,\f1\rtlch\lang1065  \'c7\'e6\'e1\u1740?\'e4 \'98\'e4\'cf\'e1 \'c8\'d3\'ca\'e5 \'d4\'cf\'e5 \'c7\u1740? \'98\'e5 \'e6\'e1\'e6\'e3 \'c8\u1740?\'d4\'ca\'d1\u1740? \'e4\'d3\'c8\'ca \'c8\'e5 \'e6\'e1\'e6\'e3 \'98\'e4\'cf\'e1 \'c8\'d3\'ca\'e5 \'d4\'cf\'e5 \'de\'c8\'e1\u1740? \'cf\'c7\'d1\'cf \'e6 \'c8\'c7\'d8\'e1 \'e4\'d4\'cf\'e5 \'e6 \'e1\'e3\'d3 \'e4\'d4\'cf\'e5 \'c7\'d3\'ca(\'ca\'e3\'c7\'e3 \'de\'e6\'c7\'e4\u1740?\'e4) \f0\ltrch\lang1033 ,\f1\rtlch\lang1065\'cf\'d1 \'d5\'e6\'d1\'ca \'81\u1740?\'cf\'c7 \'e4\'d4\'cf\'e4 \f0\ltrch\lang1033 ,\f1\rtlch\lang1065  \'c7\'d3\'98\'e4 \'c8\'d1\'c7\u1740? \'e4\'c7\'cd\u1740?\'e5 \'cc\'cf\u1740?\'cf \'e1\'e4\'cc\'c7\'e3 \'e3\u1740?\'d4\'e6\'cf . \'cf\'d1 \'d5\'e6\'d1\'ca \'81\u1740?\'cf\'c7 \'d4\'cf\'e4 \'e3\'d3\'e1\'cd \'e3\u1740?\'d4\'e6\'cf\par
+\'cf\'d1 \'d1\'e6\'e4\'cf \'e4\'d2\'e6\'e1\u1740? : \par
+\'c7\'d2 \'d3\'de\'dd \'e4\'c7\'cd\u1740?\u1740?\'e5 \'ca\'c7\u1740?\u1740?\'cf \'d4\'cf\'e5 \f0\ltrch\lang1033 LV\f1\rtlch\lang1065  \'ca\'c7 \'cc\'c7\u1740?\u1740? \'98\'e5 \'de\u1740?\'e3\'ca \'e5\'d3\'ca\f0\ltrch\lang1033 ,\f1\rtlch\lang1065  \'c7\'e6\'e1\u1740?\'e4 \'98\'e4\'cf\'e1 \'c8\'d3\'ca\'e5 \'d4\'cf\'e5 \'c7\u1740? \'98\'e5 \'e6\'e1\'e6\'e3 \'c8\u1740?\'d4\'ca\'d1\u1740? \'e4\'d3\'c8\'ca \'c8\'e5 \'e6\'e1\'e6\'e3 \'98\'e4\'cf\'e1 \'c8\'d3\'ca\'e5 \'d4\'cf\'e5 \'de\'c8\'e1\u1740? \'cf\'c7\'d1\'cf \'e6 \'c8\'c7\'d8\'e1 \'e4\'d4\'cf\'e5 \'e6 \'e1\'e3\'d3 \'e4\'d4\'cf\'e5 \'c7\'d3\'ca(\'ca\'e3\'c7\'e3 \'de\'e6\'c7\'e4\u1740?\'e4)\f0\ltrch\lang1033 ,\f1\rtlch\lang1065\'cf\'d1 \'d5\'e6\'d1\'ca \'81\u1740?\'cf\'c7 \'e4\'d4\'cf\'e4 \f0\ltrch\lang1033 ,\f1\rtlch\lang1065  \'c7\'d3\'98\'e4 \'c8\'d1\'c7\u1740? \'e4\'c7\'cd\u1740?\'e5 \'cc\'cf\u1740?\'cf \'e1\'e4\'cc\'c7\'e3 \'e3\u1740?\'d4\'e6\'cf . \'cf\'d1 \'d5\'e6\'d1\'ca \'81\u1740?\'cf\'c7 \'d4\'cf\'e4 \'e3\'d3\'e1\'cd \'e3\u1740?\'d4\'e6\'cf\par
+18.\u1740?\'98 \'c7\'d3\'ca\'d1\'c7\'ca\'8e\u1740? \'c8\'cf\'e6\'e4 \'d1\'e6\'e4\'cf \'cf\'d1 \'d3\u1740?\'d3\'ca\'e3 \'c7\u1740?\'cc\'c7\'cf \'d4\'cf. \'c8\'e5 \'c7\u1740?\'e4 \'ca\'d1\'ca\u1740?\'c8:\par
+\'98\'c7\'e3\'e1\'c7 \'98\'81\u1740? \'c7\'d3\'ca\'d1\'c7\'ca\'8e\u1740? \'c7\'d5\'e1\u1740? \'dd\'de\'d8 \'c8\'c7 \'c7\u1740?\'e4 \'ca\'db\u1740?\u1740?\'d1\'c7\'ca:\par
+\'d1\'e6\'e4\'cf \'e6\'cc\'e6\'cf \'e4\'cf\'c7\'d1\'cf. \'ca\'e3\'c7\'e3 \'98\'e4\'cf\'e1 \'e5\'c7\u1740? \'e4\'d2\'e6\'e1\u1740? \'d3\'c7\'ce\'ca\'c7 2 \'e4\'c7\'cd\u1740?\'e5 \'e6 \'ca\'e3\'c7\'e3 \'98\'e4\'cf\'e1 \'e5\'c7\u1740? \'d5\'da\'e6\'cf\u1740? \'d3\'c7\'ce\'ca\'c7\'d1 2 \'e4\'c7\'cd\u1740?\'e5 \'e3\u1740?\'90\u1740?\'d1\'e4\'cf. \'cd\'cf \'d3\'e6\'cf \'c8\'d1 \'c7\'d3\'c7\'d3 \'da\'cf\'cf \'e6\'c7\'cd\'cf \'ca\'da\u1740?\u1740?\'e4 \'e3\u1740?\'d4\'e6\'cf \'e6 \'cf\'d1 \'c7\u1740?\'e4 \'c7\'d3\'ca\'d1\'c7\'ca\'8e\u1740? \'e5\u1740?\'8d \'90\'e6\'e4\'e5 \'dd\u1740?\'c8\'e6\'e4\'c7\'8d\u1740? \'c8\'e5 \'98\'c7\'d1 \'90\'d1\'dd\'ca\'e5 \'e4\'e3\u1740?\'d4\'e6\'cf. \par
+\'ca\'da\u1740?\u1740?\'e4 \'c7\'d3\'ca\'d1\'c7\'ca\'8e\u1740? \'e5\'c7 \'c8\'c7 \'98\'c7\'d1\'c8\'d1 \'c7\'d3\'ca . \'cf\'d1 \'e1\'cd\'d9\'e5 \'e5\'e3 \'e3\u1740?\'ca\'e6\'c7\'e4\'cf \u1740?\'98 \'d3\'dd\'c7\'d1\'d4 \'ce\'d1\u1740?\'cf \'e3\'d3\'e1\'cd \u1740?\'c7 \'c8\'c7\'d2 \'cf\'c7\'d4\'ca\'e5 \'c8\'c7\'d4\'cf \'e5\'e3 \'e3\u1740?\'ca\'e6\'c7\'e4\'cf \u1740?\'98 \'d3\'dd\'c7\'d1\'d4 \'dd\'d1\'e6\'d4 \'e3\'d3\'e1\'cd \u1740?\'c7 \'c8\'c7\'d2 \'cf\'c7\'d4\'ca\'e5 \'c8\'c7\'d4\'cf . \'e5\'d1\'90\'d2 2 \'e3\'da\'c7\'e3\'e1\'e5 \'c8\'c7\'d2 \'ce\'d1\u1740?\'cf \u1740?\'c7 2 \'e3\'da\'c7\'e3\'e1\'e5 \'c8\'c7\'d2 \'dd\'d1\'e6\'d4 \'e6\'cc\'e6\'cf \'e4\'cf\'c7\'d1\'cf\par
+\'c8\'c7\'de\u1740? \'de\'e6\'c7\'e4\u1740?\'e4 \'e6 \'ca\'c7\u1740?\'e3 \'dd\'d1\u1740?\'e3\'e5\'c7 \'e6 \'da\'e6\'c7\'e3\'e1 \'cf\'ce\u1740?\'e1 \'c8\'cf\'e6\'e4 \'ca\'db\u1740?\u1740?\'d1 \'c7\'cc\'d1\'c7 \'e3\u1740?\'d4\'e6\'e4\'cf \par
 \par
 \par
 \par
