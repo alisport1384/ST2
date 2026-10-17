@@ -72,9 +72,9 @@ class Settings {
     var equityPct: Double = 100.0
     /**
      * سقف اهرم — **تنها** متغیر اهرم، برای همهٔ مودها (§۵ و §۲۰).
-     * تصمیم مالک (۱٫۴٫۲۰): پیش‌فرض ۵۰۰ و حجم را سیستم مدیریت مالی تعیین می‌کند. (پیش‌تر §۵: ۱۰ و برای §۲۰ متغیر جدا بود.)
+     * §۵ سند: «اهرم پیش‌فرض: **۱۰** — کاربر می‌تواند تغییر دهد.» (یک متغیر برای همهٔ مودها.)
      */
-    var maxLeverage: Double = 500.0
+    var maxLeverage: Double = 10.0
     var roundQty: Boolean = false
     // §4-8/§۱۴ سند نهایی: انقضای سفارش معلق با عبور باز/کلوز از آخرین pinBE/pinBU
     // (سطح هنگام مسلح‌شدن ذخیره می‌شود) یا گذشت یک کندل ساختار کامل بعد از مسلح‌شدن.
@@ -101,6 +101,14 @@ class Settings {
     /** آخرین اسپرد دریافت‌شده از بروکر (۰ = هنوز دریافت نشده ⇒ cmsnManual) و زمان دریافت (میلی‌ثانیه). */
     var cmsnAutoValue: Double = 0.0
     var cmsnAutoAt: Long = 0L
+    /**
+     * §۲۰ بند ۵ (crt): «در شرایط حساس اگر کپیتال از یک مقدار مشخص کمتر شد ورودی‌های حجم را crt
+     * محاسبه می‌کند — پیش‌فرض ۱۰ درصد کل capital» و «crt در مود ManageAllLost فقط فعال است».
+     * مقدار آستانه (درصد از Capital) و کلید روشن/خاموش در تنظیمات قابل تغییرند.
+     */
+    var crtEnabled: Boolean = true
+    var crtPct: Double = 10.0
+
     /** Mixed: M = NakedCapital × (1 + mixedGrowthPct/100). سند: ۲۰٪. */
     var mixedGrowthPct: Double = 20.0
     /** گام حجم در مودهای §۲۰ — مثال‌های سند به ۰٫۰۱ کف شده‌اند. ۰ = بدون گرد کردن. */
@@ -125,6 +133,7 @@ class Settings {
         it.divAuto = divAuto; it.divManual = divManual
         it.cmsnAuto = cmsnAuto; it.cmsnManual = cmsnManual
         it.cmsnAutoValue = cmsnAutoValue; it.cmsnAutoAt = cmsnAutoAt
+        it.crtEnabled = crtEnabled; it.crtPct = crtPct
         it.mixedGrowthPct = mixedGrowthPct
         it.lotStep = lotStep; it.lostResetAtFinalTp = lostResetAtFinalTp
     }
@@ -835,14 +844,16 @@ class Engine(val cfg: Settings) {
         lastProfBars = microS.size
         if (cfg.showPocVA && !prof.poc.isNaN()) lastPocPx = prof.poc
         if (dirOK && !prof.step.isNaN() && prof.step > 0) {
-            val rej = VolumeProfile.zones(prof, cfg.vpRows, bullC, sb.c, cfg.minZoneRows, wantRejected = true)
-            cnt.zoneRejected += rej.size
-            if (cfg.showRejectedZones) for (rz in rej) {
+            // §4-5: یک پیمایش برای هر کندل ساختار؛ حداکثر ۲ ناحیه در کل و نامزدهای ردشده هم
+            // سهمیه را مصرف می‌کنند (شمارهٔ Z1/Z2 بین پذیرفته‌ها و ردشده‌ها مشترک است).
+            val cand = VolumeProfile.zoneCandidates(prof, cfg.vpRows, bullC, sb.c, cfg.minZoneRows)
+            cnt.zoneRejected += cand.rejected.size
+            if (cfg.showRejectedZones) for (rz in cand.rejected) {
                 addZoneBox(zoneDir, rz, sb, ZoneStatus.REJECTED)
                 lg("ZONE", "ناحیهٔ ردشده (کلوز داخل محدوده بود)",
                     "dir=${if (bullC) "BULL" else "BEAR"} top=${f2(rz.top)} bot=${f2(rz.bot)} rows=${rz.loIdx}-${rz.hiIdx} bar=${sb.bi}")
             }
-            val zs = VolumeProfile.zones(prof, cfg.vpRows, bullC, sb.c, cfg.minZoneRows)
+            val zs = cand.accepted
             for (z in zs) {
                 if (z.top > z.bot) {
                     addZoneBox(zoneDir, z, sb, ZoneStatus.ACTIVE)
@@ -1153,8 +1164,9 @@ class Engine(val cfg: Settings) {
                     continue
                 }
                 if (inside && !s.lvTouched) {
+                    // §۱۸-۷: این لمس فقط برای «مصرف» باکس است؛ شروع اسکن HV روی تریگر۲
+                    // سنجیده می‌شود و شاخصش در همان موتور (③-الف) ثبت می‌شود.
                     s.lvTouched = true
-                    if (s.hvScanBi < 0 && cfg.hvScanFirstTouch) s.hvScanBi = q1.bi
                 }
                 if (s.lvTouched) {
                     // سند: خروج با کلوز آن‌سوی لبهٔ نزدیک باکس سنجیده می‌شود (لمس و کلوز می‌توانند در یک کندل باشند).
@@ -1370,7 +1382,10 @@ class Engine(val cfg: Settings) {
             // ③-ب ناحیهٔ ولوم زیاد (تریگر ۲)
             // §4-8 سند نهایی: کندل تایید ناحیه پرحجم صرفاً باید بالای سقف (خرید) یا زیر کف (فروش)
             // کندل پرحجم بسته شود و شرط افزایش مجدد حجم روی کندل تایید وجود ندارد.
-            if (s.stage in 4..5 && s.lvBi >= 0 && s.lvReEntered) {
+            // پیش‌فرض سند: از اولین برگشت/برخورد قیمت به باکس LV. اگر گزینه خاموش باشد،
+            // اسکن از «لحظهٔ تایید ناحیهٔ ولوم کم» (کندل بعد از تایید) شروع می‌شود.
+            val scanReady = s.lvReEntered || (!cfg.hvScanFirstTouch && curBi > s.lvConfBi)
+            if (s.stage in 4..5 && s.lvBi >= 0 && scanReady) {
                 val scanOK = if (s.hvScanBi < 0) true else curBi >= s.hvScanBi
                 if (scanOK) {
                     val marked = s.hvBi >= 0
@@ -1512,6 +1527,17 @@ class Engine(val cfg: Settings) {
     /** §4-8 سند: سطح سفارش خرید = سقف باکس HV + ۲ تیک؛ سطح سفارش فروش = کف باکس HV − ۲ تیک (همیشه مثبت). */
     fun entryLevel(s: Setup, bull: Boolean): Double = cfg.entryLevel(bull, s.hvH, s.hvL)
 
+    /**
+     * §۴-۸ سند: «بعد از باطل شدن [مارک]، جست‌وجو از نو شروع می‌شود.»
+     * هر جا مارک HV پاک می‌شود ولی سفارشی مسلح نشده، ستاپ باید به مرحلهٔ «اسکن ولوم زیاد» (۴)
+     * برگردد؛ ماندن روی مرحلهٔ ۵ باعث می‌شود چارت خط‌های مارکِ پاک‌شده را نگه دارد و
+     * پنل هم «مارک شد» را نشان دهد، در حالی که hvBi منفی است.
+     */
+    private fun clearHvMark(s: Setup) {
+        s.hvBi = -1; s.hvT = 0L; s.runMax = Double.NaN
+        if (s.stage == 5) s.stage = 4
+    }
+
     /** لحظهٔ مسلح شدن (تایید ناحیهٔ ولوم زیاد) → محاسبهٔ SL/TP و ثبت سفارش ورود. */
     private fun armSetup(s: Setup, cd: Candle, bull: Boolean) {
         // §4-8 سند: سطح سفارش = سقف باکس + ۲ تیک بافر (خرید) / کف باکس − ۲ تیک بافر (فروش)
@@ -1531,15 +1557,23 @@ class Engine(val cfg: Settings) {
         // ورود جدید نیز باید بهتر از قبلی باشد (خرید پایین‌تر، فروش بالاتر).
         val isRearm = !s.prevEntry.isNaN()
         if (isRearm) {
+            // §۴-۸: شرط «هنوز کندل ساختار جدیدی باز و بسته نشده باشد» — پس از گذشت یک بازهٔ
+            // ساختار کامل از آخرین مسلح‌شدن، مسلح‌شدن دوباره هرگز مجاز نیست (مستقل از مرحلهٔ ستاپ).
+            if (fullStructureElapsed(s.armBi, curBi, cfg.tfS, cfg.tf2)) {
+                clearHvMark(s)
+                lg("ENGINE", "مسلح‌مجدد ستاپ #${s.id} رد شد (یک کندل ساختار کامل از آخرین مسلح‌شدن گذشته)",
+                    "armBi=${s.armBi} curBi=$curBi n=${cfg.tfS / maxOf(1, cfg.tf2)}")
+                return
+            }
             if (!s.rearmAllowed || !rearmPrerequisitesValid(s)) {
-                s.hvBi = -1; s.hvT = 0L; s.runMax = Double.NaN
+                clearHvMark(s)
                 lg("ENGINE", "مسلح‌مجدد ستاپ #${s.id} رد شد (پیش‌نیازهای ساختار/میانی/تریگر۱ برقرار نیست)",
                     "rearmAllowed=${s.rearmAllowed} zGone=${s.zGone} midValid=${!s.midRef.isNaN()} lvBi=${s.lvBi} lvReEntered=${s.lvReEntered} lvUsed=${s.lvUsed} bar=$curBi")
                 return
             }
             val better = if (bull) eRef < s.prevEntry else eRef > s.prevEntry
             if (!better) {
-                s.hvBi = -1; s.hvT = 0L; s.runMax = Double.NaN
+                clearHvMark(s)
                 lg("ENGINE", "مسلح مجدد برای ستاپ #${s.id} رد شد (ورود جدید بهتر از قبلی نیست)",
                     "prev=${f2(s.prevEntry)} new=${f2(eRef)} bar=$curBi")
                 return
@@ -1553,7 +1587,7 @@ class Engine(val cfg: Settings) {
                 broker?.hasActiveOrder(s.dir) == true
         else setups.any { it.id != s.id && it.stage == 6 }
         if (hasPendingSetupOrder) {
-            s.hvBi = -1; s.hvT = 0L; s.runMax = Double.NaN
+            clearHvMark(s)
             lg("ENGINE", if (cfg.strategy == Strategy.NO_TREND)
                 "مسلح‌شدن ستاپ #${s.id} رد شد — از هر جهت فقط یک سفارش (معلق یا باز) مجاز است"
             else "مسلح‌شدن ستاپ #${s.id} رد شد — سفارش معلق دیگری در چارت وجود دارد",
@@ -1564,7 +1598,7 @@ class Engine(val cfg: Settings) {
         s.entry = eRef   // سطح سفارش (§4-8) — کارگزار همین سطح را ثبت می‌کند
         val registered = broker?.registerLimit(s, cd) ?: true
         if (!registered) {
-            s.hvBi = -1; s.hvT = 0L; s.runMax = Double.NaN
+            clearHvMark(s)
             lg("ENGINE", "ثبت سفارش برای ستاپ #${s.id} رد شد (${broker?.lastError}) — کندل HV ریست شد",
                 "bar=$curBi")
             return

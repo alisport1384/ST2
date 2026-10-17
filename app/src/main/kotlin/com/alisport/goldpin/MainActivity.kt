@@ -1148,7 +1148,7 @@ class MainActivity : Activity() {
         // ── پروفایل حجم ──
         v.addView(Ui.section(this, "④ پروفایل حجم و ناحیه‌ها (الگوریتم v2)"))
         v.addView(numRow("تعداد ردیف‌ها", s.cfg.vpRows.toDouble()) { s.cfg.vpRows = it.toInt(); s.rebuildAsync() })
-        v.addView(numRow("هموارسازی (۰-۳)", s.cfg.vpSmooth.toDouble()) { s.cfg.vpSmooth = it.toInt(); s.rebuildAsync() })
+        v.addView(numRow("هموارسازی (۰-۳)", s.cfg.vpSmooth.toDouble()) { s.cfg.vpSmooth = it.toInt().coerceIn(0, 3); s.rebuildAsync() })
         v.addView(numRow("حداقل ردیف یک ناحیه", s.cfg.minZoneRows.toDouble()) { s.cfg.minZoneRows = it.toInt(); s.rebuildAsync() })
         // §v1.4.9: باکس‌ها با «کلوز از سمت دور» پاک می‌شوند؛ محدودیت تعداد غیرفعال (نامحدود).
         v.addView(Ui.tv(this, "حداکثر باکس روی چارت: نامحدود (پاک‌سازی با کلوز از سمت دور)", 11f, Palette.dim))
@@ -1265,7 +1265,8 @@ class MainActivity : Activity() {
         v.addView(Ui.tv(this,
             "خاموش = حجم ریسک ثابت §۵ (پیش‌فرض، بدون کارمزد).  ManageAllLost: Lot = Lost/div + MinLot.  " +
                 "Mixed: تا رشد ۲۰٪ سرمایه Lot = MinLot؛ بعد از آن Lot = cmsnLost/div + MinLot.  " +
-                "تغییر مود یا هر عدد، موتور را از صفر روی داده اجرا می‌کند. crt هنوز در سند تعریف نشده و پیاده نشده است.", 10.5f, d))
+                "crt (§۲۰ بند ۵، فقط در ManageAllLost): اگر Lost از درصد آستانهٔ Capital بیشتر شود، Lot = Lost/div (بدون MinLot).  " +
+                "تغییر مود یا هر عدد، موتور را از صفر روی داده اجرا می‌کند.", 10.5f, d))
         val modes = listOf(
             MoneyMode.NONE to "خاموش (حجم §۵)",
             MoneyMode.MANAGE_ALL_LOST to "ManageAllLost (تهاجمی)",
@@ -1316,6 +1317,11 @@ class MainActivity : Activity() {
                 setOnClickListener { s.fetchBrokerSpread { m -> toast(m) } }
             })
         }
+        v.addView(switchRow("crt (فقط ManageAllLost) — Lot = Lost/div وقتی Lost از آستانه بگذرد", s.cfg.crtEnabled) {
+            s.cfg.crtEnabled = it; s.rebuildAsync()
+        })
+        if (s.cfg.crtEnabled)
+            v.addView(numRow("آستانهٔ crt (٪ از Capital)", s.cfg.crtPct) { s.cfg.crtPct = it; s.rebuildAsync() })
         v.addView(numRow("آستانهٔ رشد Mixed (٪) ⇒ M = NakedCapital × (۱+٪)", s.cfg.mixedGrowthPct) { s.cfg.mixedGrowthPct = it; s.rebuildAsync() })
         v.addView(numRow("گام حجم (۰ = بدون گرد کردن؛ مثال‌های سند ۰٫۰۱)", s.cfg.lotStep) { s.cfg.lotStep = it; s.rebuildAsync() })
         v.addView(switchRow("با رسیدن به حد سود نهایی، Lost صفر شود", s.cfg.lostResetAtFinalTp) {
@@ -1349,6 +1355,14 @@ class MainActivity : Activity() {
             else -> " (دستی)"
         }
         box.addView(Ui.label(this, "اسپرد مؤثر (cmsn)", Fa.n(mm.spread(), 3) + spreadSrc))
+        val crtLimit = cap * s.cfg.crtPct / 100.0
+        val crtActive = s.cfg.crtEnabled && s.cfg.mmMode == MoneyMode.MANAGE_ALL_LOST && cap > 0.0 && mm.lost > crtLimit
+        val crtText = when {
+            s.cfg.mmMode != MoneyMode.MANAGE_ALL_LOST -> "غیرفعال (فقط ManageAllLost)"
+            !s.cfg.crtEnabled -> "خاموش"
+            else -> (if (crtActive) "فعال" else "غیرفعال") + " · آستانه " + Fa.n(crtLimit, 2)
+        }
+        box.addView(Ui.label(this, "crt", crtText))
     }
 
     private fun pickAlertKinds() {

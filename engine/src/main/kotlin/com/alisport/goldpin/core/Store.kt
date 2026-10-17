@@ -68,6 +68,7 @@ object Store {
         "divAuto" to c.divAuto, "divManual" to c.divManual,
         "cmsnAuto" to c.cmsnAuto, "cmsnManual" to c.cmsnManual,
         "cmsnAutoValue" to c.cmsnAutoValue, "cmsnAutoAt" to c.cmsnAutoAt,
+        "crtEnabled" to c.crtEnabled, "crtPct" to c.crtPct,
         "mixedGrowthPct" to c.mixedGrowthPct,
         "lotStep" to c.lotStep, "lostResetAtFinalTp" to c.lostResetAtFinalTp
     )
@@ -104,12 +105,14 @@ object Store {
         if (m.containsKey("cmsnManual")) c.cmsnManual = m["cmsnManual"].asD()
         if (m.containsKey("cmsnAutoValue")) c.cmsnAutoValue = m["cmsnAutoValue"].asD()
         if (m.containsKey("cmsnAutoAt")) c.cmsnAutoAt = m["cmsnAutoAt"].asL()
+        if (m.containsKey("crtEnabled")) c.crtEnabled = m["crtEnabled"].asB()
+        if (m.containsKey("crtPct")) c.crtPct = m["crtPct"].asD()
         if (m.containsKey("mixedGrowthPct")) c.mixedGrowthPct = m["mixedGrowthPct"].asD()
-        // مهاجرت اهرم: پیش‌تر دو متغیر بود (§۵ = ۱۰ و §۲۰ = mmMaxLeverage). حالا یکی است (پیش‌فرض ۵۰۰).
-        // اگر فایل هنوز مقدار پیش‌فرض قدیمی ۱۰ را دارد (کاربر دستش نزده)، به مقدار جدید می‌رود
-        // (mmMaxLeverage فایل نسخهٔ ۱٫۴٫۱۹ اگر بود، همان)؛ اگر عدد دلخواه کاربر بود، دست‌نخورده می‌ماند.
-        if (!m.containsKey("levModel") && c.maxLeverage == 10.0)
-            c.maxLeverage = if (m.containsKey("mmMaxLeverage")) m["mmMaxLeverage"].asD() else 500.0
+        // مهاجرت اهرم: پیش‌تر دو متغیر بود (§۵ = ۱۰ و §۲۰ = mmMaxLeverage). حالا یکی است و طبق §۵
+        // پیش‌فرض ۱۰ است. فایل‌های قدیمیِ بدون نشانهٔ levModel که مقدار §۲۰ جدا داشتند، همان مقدار
+        // کاربر (mmMaxLeverage) را می‌گیرند؛ بقیه دقیقاً همان عددِ ذخیره‌شده را نگه می‌دارند.
+        if (!m.containsKey("levModel") && m.containsKey("mmMaxLeverage"))
+            c.maxLeverage = m["mmMaxLeverage"].asD()
         if (m.containsKey("lotStep")) c.lotStep = m["lotStep"].asD()
         if (m.containsKey("lostResetAtFinalTp")) c.lostResetAtFinalTp = m["lostResetAtFinalTp"].asB()
         return c

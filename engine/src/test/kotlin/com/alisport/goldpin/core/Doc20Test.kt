@@ -340,8 +340,8 @@ class Doc20Test {
 
     // ═══ اهرم: فقط یک متغیر ═══════════════════════════════════════════════════
     @Test
-    fun `there is one leverage variable and its default is 500 in every mode`() {
-        assertEquals(500.0, Settings().maxLeverage, "تصمیم مالک: پیش‌فرض ۵۰۰")
+    fun `there is one leverage variable and its default is 10 in every mode`() {
+        assertEquals(10.0, Settings().maxLeverage, "§۵ سند: اهرم پیش‌فرض ۱۰ (کاربر می‌تواند تغییر دهد)")
         // همان maxLeverage هم §۵ (مود خاموش) را محدود می‌کند و هم §۲۰ را
         for (mode in listOf(MoneyMode.NONE, MoneyMode.MANAGE_ALL_LOST)) {
             val c = cfg(mode, 10_000.0).apply { minLotAuto = false; minLotManual = 1_000.0; maxLeverage = 5.0 }
@@ -362,10 +362,38 @@ class Doc20Test {
             if (mm != null) j = j.replace("\"maxLeverage\"", "\"mmMaxLeverage\":$mm,\"maxLeverage\"")
             return j
         }
-        assertEquals(500.0, Store.load(jsonWith(10.0, marker = false, mm = null)).cfg.maxLeverage, "فایل ۱٫۴٫۱۸ با پیش‌فرض قدیمی ۱۰ ⇒ ۵۰۰")
+        assertEquals(10.0, Store.load(jsonWith(10.0, marker = false, mm = null)).cfg.maxLeverage, "فایل قدیمی: همان عدد ذخیره‌شده می‌ماند")
         assertEquals(250.0, Store.load(jsonWith(10.0, marker = false, mm = 250.0)).cfg.maxLeverage, "فایل ۱٫۴٫۱۹: مقدار §۲۰ کاربر حفظ می‌شود")
         assertEquals(3.0, Store.load(jsonWith(3.0, marker = false, mm = null)).cfg.maxLeverage, "عدد دلخواه کاربر دست‌نخورده می‌ماند")
         assertEquals(10.0, Store.load(jsonWith(10.0, marker = true, mm = null)).cfg.maxLeverage, "فایل جدید: ۱۰ انتخاب خود کاربر است")
+    }
+
+    // ═══ §۲۰ بند ۵ — crt فقط در ManageAllLost ══════════════════════════════════
+    @Test
+    fun `crt switches the lot to Lost over div once Lost passes the threshold of Capital`() {
+        val c = cfg(MoneyMode.MANAGE_ALL_LOST, 10_000.0).apply { minLotAuto = false; minLotManual = 10.0 }
+        val r = Rig(c)
+        r.b.balance = 1_000.0                  // Capital کوچک ⇒ آستانهٔ ۱۰٪ = ۱۰۰
+        r.b.mm.lost = 500.0                    // Lost > آستانه ⇒ crt فعال
+        val (_, o) = r.armBuy(2000.0, 1995.0, 2015.0)
+        near(500.0 / 15.0, o.qty, 0.01, "crt: Lot = Lost ÷ div بدون MinLot")
+        assertTrue(o.mmNote.contains("crt"), "توضیح حجم باید crt را نشان دهد: ${o.mmNote}")
+
+        // زیر آستانه، فرمول عادی ManageAllLost برمی‌گردد
+        val c2 = cfg(MoneyMode.MANAGE_ALL_LOST, 10_000.0).apply { minLotAuto = false; minLotManual = 10.0 }
+        val r2 = Rig(c2)
+        r2.b.balance = 10_000.0
+        r2.b.mm.lost = 100.0                   // ۱۰۰ < ۱۰٪ از ۱۰٬۰۰۰
+        val (_, o2) = r2.armBuy(2000.0, 1995.0, 2015.0)
+        near(100.0 / 15.0 + 10.0, o2.qty, 0.01, "زیر آستانه: Lot = Lost/div + MinLot")
+
+        // crt در Mixed اعمال نمی‌شود
+        val c3 = cfg(MoneyMode.MIXED, 10_000.0).apply { minLotAuto = false; minLotManual = 10.0 }
+        val r3 = Rig(c3)
+        r3.b.balance = 1_000.0
+        r3.b.mm.lost = 500.0
+        val (_, o3) = r3.armBuy(2000.0, 1995.0, 2015.0)
+        near(10.0, o3.qty, 0.01, "Mixed: crt نقشی ندارد؛ Capital ≤ M ⇒ Lot = MinLot")
     }
 
     // ═══ حسابداری: هر مفهوم یک متغیر، یک جای به‌روزرسانی ═══════════════════════

@@ -47,9 +47,13 @@ class Strategy2Test {
         assertEquals(10.0, c.tpUnits, 0.0)
         val (e, b) = run(c, sample())
         val sm = Reports.summary(b.trades)
-        assertEquals(103, sm.trades)
-        assertEquals(12, sm.wins); assertEquals(48, sm.losses); assertEquals(43, sm.breakeven)
-        assertEquals(9592.28, sm.net, 0.01)
+        // ۱٫۴٫۲۳ (بازبینی HV): پنج «مسلح‌شدن دوباره» که بیش از یک کندل ساختار کامل پس از
+        // آخرین مسلح‌شدن رخ می‌دادند حذف شدند (§۴-۸: «هنوز کندل ساختار جدیدی باز و بسته نشده باشد»)
+        // و مارکِ رد‌شده دیگر ستاپ را روی مرحلهٔ «مارک‌شده» نگه نمی‌دارد.
+        assertEquals(98, sm.trades)
+        assertEquals(12, sm.wins); assertEquals(47, sm.losses); assertEquals(39, sm.breakeven)
+        // اهرم پیش‌فرض طبق §۵ سند ۱۰ است ⇒ حجم‌ها ۱/۵۰ حجمِ حالت اهرم ۵۰۰ ⇒ سود/زیان خالص کوچک‌تر
+        assertEquals(2056.02, sm.net, 0.01)
         assertTrue(e.markers.any { it.kind == MarkerKind.TREND_UP || it.kind == MarkerKind.TREND_DOWN }, "استراتژی ۱ روند می‌سازد")
         assertTrue(b.orders.any { !it.tp1.isNaN() }, "استراتژی ۱ فیبو دارد")
     }
