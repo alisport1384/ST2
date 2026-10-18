@@ -705,24 +705,30 @@ class Engine(val cfg: Settings) {
                         "کلوز ${f2(sb.c)} زیر کف HL ${f2(oldHL)} بسته شد")
                 } else {
                     // ۲) ادامهٔ روند صعودی: بسته شدن بالای HH ⇒ برگشت HH به pinBE و HL به pinBU
+                    //    (§روند سند: «HH به pinBE برمی‌گردد و HL به pinBU برمی‌گردد» — پین‌ها پاک نمی‌شوند،
+                    //     فقط برچسب ساختاری برداشته می‌شود و توالی با pinBU بعدی ادامه می‌یابد.)
+                    var hhBroke = false
                     if (!HH.isNaN() && sb.c > HH) {
+                        hhBroke = true
+                        removeStructLabel("HH", HH); removeStructLabel("HL", HL)
+                        HH = Double.NaN; HL = Double.NaN
                         if (buSeq < beSeq) {
-                            clearBEpin()
-                            removeStructLabel("HH", HH); removeStructLabel("HL", HL)
-                            HH = Double.NaN; HL = Double.NaN
+                            // pinBE هنوز آخرین پین است: همان به‌عنوان pinBE می‌ماند و HL به pinBU قبلی برمی‌گردد؛
+                            // پین بعدی طبق توالی pinBU است.
                             if (!hlPinLo.isNaN()) {
                                 lastBUpin = hlPinLo; lastBUpinRef = hlPinRef; lastBUpinHi = hlPinHi
                                 buActive = true; buSeq = hlPinSeq
                             }
-                            expectedReady = -1
+                            beActive = true
+                            expectedReady = 1
                         } else {
-                            removeStructLabel("HH", HH); removeStructLabel("HL", HL)
-                            HH = Double.NaN; HL = Double.NaN
+                            // pinBU بعد از HH ثبت شده است: هر دو پین سر جای خود می‌مانند و پین بعدی pinBE است.
                             expectedReady = -1
                         }
                     }
                     // ۳) ابطال pinBE بدون ثبت pinBU بعد از آن: HH و HL پاک می‌شوند و HL به pinBU برمی‌گردد
-                    if (!readyBeNow && beActive && !lastBEpinRef.isNaN() && buSeq <= beSeq) {
+                    //    (در کندل شکست HH ابطال پین سنجیده نمی‌شود؛ آن رویداد تابع قاعدهٔ ادامهٔ روند است.)
+                    if (!hhBroke && !readyBeNow && beActive && !lastBEpinRef.isNaN() && buSeq <= beSeq) {
                         val crossedRef = sb.o > lastBEpinRef || sb.c > lastBEpinRef
                         val crossedHigh = !lastBEpin.isNaN() && (sb.o > lastBEpin || sb.c > lastBEpin)
                         if (crossedRef || crossedHigh) {
@@ -784,24 +790,29 @@ class Engine(val cfg: Settings) {
                         "کلوز ${f2(sb.c)} بالای سقف LH ${f2(oldLH)} بسته شد")
                 } else {
                     // ۲) ادامهٔ روند نزولی: بسته شدن زیر LL ⇒ برگشت LL به pinBU و LH به pinBE
+                    //    (§روند سند: «LL به pinBU برمی‌گردد و LH به pinBE برمی‌گردد» — پین‌ها پاک نمی‌شوند.)
+                    var llBroke = false
                     if (!LL.isNaN() && sb.c < LL) {
+                        llBroke = true
+                        removeStructLabel("LL", LL); removeStructLabel("LH", LH)
+                        LL = Double.NaN; LH = Double.NaN
                         if (beSeq < buSeq) {
-                            clearBUpin()
-                            removeStructLabel("LL", LL); removeStructLabel("LH", LH)
-                            LL = Double.NaN; LH = Double.NaN
+                            // pinBU هنوز آخرین پین است: همان به‌عنوان pinBU می‌ماند و LH به pinBE قبلی برمی‌گردد؛
+                            // پین بعدی طبق توالی pinBE است.
                             if (!lhPinHi.isNaN()) {
                                 lastBEpin = lhPinHi; lastBEpinRef = lhPinRef; lastBEpinLo = lhPinLo
                                 beActive = true; beSeq = lhPinSeq
                             }
-                            expectedReady = 1
+                            buActive = true
+                            expectedReady = -1
                         } else {
-                            removeStructLabel("LL", LL); removeStructLabel("LH", LH)
-                            LL = Double.NaN; LH = Double.NaN
+                            // pinBE بعد از LL ثبت شده است: هر دو پین سر جای خود می‌مانند و پین بعدی pinBU است.
                             expectedReady = 1
                         }
                     }
                     // ۳) ابطال pinBU بدون ثبت pinBE بعد از آن: LL و LH پاک می‌شوند و LH به pinBE برمی‌گردد
-                    if (!readyBuNow && buActive && !lastBUpinRef.isNaN() && beSeq <= buSeq) {
+                    //    (در کندل شکست LL ابطال پین سنجیده نمی‌شود؛ آن رویداد تابع قاعدهٔ ادامهٔ روند است.)
+                    if (!llBroke && !readyBuNow && buActive && !lastBUpinRef.isNaN() && beSeq <= buSeq) {
                         val crossedRef = sb.o < lastBUpinRef || sb.c < lastBUpinRef
                         val crossedLow = !lastBUpin.isNaN() && (sb.o < lastBUpin || sb.c < lastBUpin)
                         if (crossedRef || crossedLow) {
@@ -823,8 +834,8 @@ class Engine(val cfg: Settings) {
                                 "ref=${f2(oldRef)} lo=${f2(oldPin)} o=${f2(sb.o)} c=${f2(sb.c)}")
                         }
                     }
-                    // ۴) ابطال pinBE بدون ثبت pinBU بعد از آن
-                    if (!readyBeNow && beActive && !lastBEpinRef.isNaN() && buSeq <= beSeq) {
+                    // ۴) ابطال pinBE بدون ثبت pinBU بعد از آن (در کندل شکست LL سنجیده نمی‌شود)
+                    if (!llBroke && !readyBeNow && beActive && !lastBEpinRef.isNaN() && buSeq <= beSeq) {
                         val crossedRef = sb.o > lastBEpinRef || sb.c > lastBEpinRef
                         val crossedHigh = !lastBEpin.isNaN() && (sb.o > lastBEpin || sb.c > lastBEpin)
                         val closedAbovePin = !lastBEpin.isNaN() && sb.c > lastBEpin

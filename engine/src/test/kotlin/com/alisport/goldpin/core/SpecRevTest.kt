@@ -439,4 +439,49 @@ class SpecRevTest {
         assertEquals("خروج سر‌به‌سر", tr.reason)
         assertEquals(0.0, tr.grossPnl(), 1e-9)
     }
+
+    @Test
+    fun `trend HH break keeps pinBE and HL reverts to pinBU, LL break keeps pinBU and LH reverts to pinBE`() {
+        fun cfg() = Settings().apply { tfS = Tf.M1; tfM = Tf.M1; tf1 = Tf.M1; tf2 = Tf.M1 }
+        // ـ روند صعودی: کلوز بالای HH ⇒ HH→pinBE (حذف نمی‌شود)، HL→pinBU، پین بعدی pinBU است
+        val up = Engine(cfg())
+        up.trend = 1; up.HH = 110.0; up.HL = 100.0
+        up.hhPinHi = 110.0; up.hhPinRef = 104.0; up.hhPinLo = 102.0; up.hhPinSeq = 2
+        up.hlPinLo = 100.0; up.hlPinRef = 96.0; up.hlPinHi = 103.0; up.hlPinSeq = 1
+        up.lastBEpin = 110.0; up.lastBEpinRef = 104.0; up.lastBEpinLo = 102.0
+        up.beActive = true; up.beSeq = 2
+        up.lastBUpin = 100.0; up.lastBUpinRef = 96.0; up.lastBUpinHi = 103.0
+        up.buActive = true; up.buSeq = 1
+        up.expectedReady = -1
+        val t0 = 1_700_000_040_000L
+        up.feed(listOf(
+            Candle(0, t0, 108.0, 112.0, 107.0, 111.0, 100.0),            // کندل ساختارِ شکست HH (کلوز 111 > 110)
+            Candle(1, t0 + 60_000L, 111.0, 111.5, 110.5, 111.2, 100.0),  // شروع کندل بعد ⇒ بستن کندل شکست
+            Candle(2, t0 + 120_000L, 111.2, 111.4, 111.0, 111.3, 100.0)  // کندل زنده (بسته نمی‌شود)
+        ), lastIsClosed = false)
+        assertTrue(up.HH.isNaN() && up.HL.isNaN(), "برچسب HH/HL باید برداشته شود")
+        assertTrue(up.beActive && up.lastBEpin == 110.0, "HH باید به pinBE برگردد، نه اینکه پین حذف شود")
+        assertTrue(up.buActive && up.lastBUpin == 100.0, "HL باید به pinBU برگردد")
+        assertEquals(1, up.expectedReady, "بعد از pinBE طبق توالی پین بعدی pinBU است")
+
+        // ـ روند نزولی (قرینه): کلوز زیر LL ⇒ LL→pinBU (حذف نمی‌شود)، LH→pinBE، پین بعدی pinBE است
+        val dn = Engine(cfg())
+        dn.trend = -1; dn.LL = 90.0; dn.LH = 100.0
+        dn.llPinLo = 90.0; dn.llPinRef = 96.0; dn.llPinHi = 98.0; dn.llPinSeq = 2
+        dn.lhPinHi = 100.0; dn.lhPinRef = 104.0; dn.lhPinLo = 97.0; dn.lhPinSeq = 1
+        dn.lastBUpin = 90.0; dn.lastBUpinRef = 96.0; dn.lastBUpinHi = 98.0
+        dn.buActive = true; dn.buSeq = 2
+        dn.lastBEpin = 100.0; dn.lastBEpinRef = 104.0; dn.lastBEpinLo = 97.0
+        dn.beActive = true; dn.beSeq = 1
+        dn.expectedReady = 1
+        dn.feed(listOf(
+            Candle(0, t0, 92.0, 93.0, 88.0, 89.0, 100.0),              // کندل ساختارِ شکست LL (کلوز 89 < 90)
+            Candle(1, t0 + 60_000L, 89.0, 89.5, 88.5, 89.2, 100.0),    // شروع کندل بعد ⇒ بستن کندل شکست
+            Candle(2, t0 + 120_000L, 89.2, 89.4, 89.0, 89.3, 100.0)    // کندل زنده (بسته نمی‌شود)
+        ), lastIsClosed = false)
+        assertTrue(dn.LL.isNaN() && dn.LH.isNaN(), "برچسب LL/LH باید برداشته شود")
+        assertTrue(dn.buActive && dn.lastBUpin == 90.0, "LL باید به pinBU برگردد، نه اینکه پین حذف شود")
+        assertTrue(dn.beActive && dn.lastBEpin == 100.0, "LH باید به pinBE برگردد")
+        assertEquals(-1, dn.expectedReady, "بعد از pinBU طبق توالی پین بعدی pinBE است")
+    }
 }
