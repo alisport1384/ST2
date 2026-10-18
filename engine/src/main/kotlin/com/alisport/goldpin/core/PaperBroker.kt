@@ -251,6 +251,8 @@ class PaperBroker(private val cfg: Settings) {
                 val ref = st.priceExpiryRef
                 if (!ref.isNaN() && (if (p.dir == 1) forming.o > ref else forming.o < ref)) continue
                 if (fullStructureElapsed(st.armBi, forming.bi, cfg.tfS, cfg.tf2)) continue
+                if (!st.lvUsed && st.lvBi >= 0 && st.lvConfBi >= 0 && st.lvUses >= 2 &&
+                    forming.l <= st.lvH && forming.h >= st.lvL) continue
             }
             val touched = if (p.dir == 1) forming.l <= p.price else forming.h >= p.price
             if (touched) { fillEntry(p, forming, live = true); n++ }
@@ -290,10 +292,11 @@ class PaperBroker(private val cfg: Settings) {
         val sameEntryBar = cd.bi == t.entryBi
         val slLvl = if (t.be) t.entry else if (!t.slAdj.isNaN()) t.slAdj else t.sl0
 
-        // §4-9 ترتیب ثابت: حد ضرر، حد سود نهایی، TP1.
-        // حد ضرر در کندلی که SL و TP لمس شوند برنده است.
+        // §4-9 ترتیب ثابت: حد ضرر → حد سود نهایی → حد سود اول → حد سود دوم.
+        // اگر در یک کندل هم حد ضرر و هم حد سود لمس شود، حد ضرر برنده است.
         val hitStop = if (bull) cd.l <= slLvl else cd.h >= slLvl
         if (hitStop) {
+            if (t.be || !t.slAdj.isNaN()) t.commission = 0.0
             closeAll(t, slLvl, cd.t, cd.bi, if (t.be || !t.slAdj.isNaN()) "خروج سر‌به‌سر" else "حد ضرر")
             return
         }
@@ -303,31 +306,51 @@ class PaperBroker(private val cfg: Settings) {
             return
         }
 
-        // §18-20: در صورت رسیدن قیمت به حد سود اول یعنی ناحیه 0.382 فیبوناچی (یا 0.5 در صورت باز شدن سفارش بعد از 0.382)
-        // حد ضرر به قیمت باز شدن سفارش منتقل میشود و در صورت برگشت قیمت نتیجه ضرر صفر میشود (بدون کارمزد).
-        if (!t.be && !t.tp1.isNaN()) {
+        // §4-9 «حد سود اول و قیمت ورود در یک کندل»:
+        // اگر در کندل ورود هم قیمت ورود و هم حد سود اول (۰.۳۸۲ فیبو) لمس شود،
+        // ورود ثبت می‌شود، حد سود اول ناحیهٔ ۰.۵ فیبو و حد سود نهایی ۱.۲۷۲ فیبو محاسبه می‌شود
+        // و ۵۰٪ معامله در ۰.۵ فیبو (با انتقال حد ضرر به نقطهٔ ورود پس از لمس ۰.۵) و ۵۰٪ باقی در ۱.۲۷۲ بسته می‌شود.
+        if (sameEntryBar && !t.tp1.isNaN() && !t.tp2.isNaN()) {
+            val touched382OnEntry = if (bull) cd.h >= t.tp1 else cd.l <= t.tp1
+            if (touched382OnEntry) {
+                t.tp1 = t.tp2
+                t.tp2 = Double.NaN
+                lg("TRADE", "لمس هم‌زمان ورود و ۰.۳۸۲ فیبو در یک کندل → حد سود اول به ۰.۵ فیبو (۵۰٪/۵۰٪) منتقل شد · معامله #${t.id}",
+                    "tp1=${fmt(t.tp1)} tpX=${fmt(t.tpX)} bar=${cd.bi}")
+            }
+        }
+
+        // §4-9 و §18-20 و §18-24:
+        // • حالت سه‌پله‌ای (ورود قبل از ۰.۳۸۲ فیبو): ۳۳٪ در ۰.۳۸۲ (همراه با سر‌به‌سر بدون کمیسیون)، ۳۳٪ در ۰.۵، ۳۴٪ در ۱.۲۷۲.
+        // • حالت دوپله‌ای (ورود بعد از ۰.۳۸۲ فیبو یا لمس هم‌زمان ورود و ۰.۳۸۲ در یک کندل ⇒ tp2=NaN):
+        //   ۵۰٪ در ۰.۵ فیبو (همراه با سر‌به‌سر بدون کمیسیون) و ۵۰٪ باقی در ۱.۲۷۲ فیبو.
+        val isTwoStep = t.tp2.isNaN()
+        val q1 = t.qty * (if (isTwoStep) 0.50 else 0.33)
+        val q2 = t.qty * 0.33
+        val tp1Done = t.fills.any { it.kind == "TP1" }
+        val remaining = t.qty - t.fills.filter { it.kind != "ENTRY" }.sumOf { it.qty }
+        if (!tp1Done && !t.tp1.isNaN()) {
             val hit = if (bull) cd.h >= t.tp1 else cd.l <= t.tp1
             if (hit) {
                 t.be = true
-                lg("TRADE", "حد سود اول لمس شد → انتقال حد ضرر به نقطهٔ ورود (سر‌به‌سر) · معامله #${t.id}",
-                    "tp1=${fmt(t.tp1)} sl=${fmt(t.entry)} bar=${cd.bi}")
-                alarm(AlertKind.TP1, "انتقال به سر‌به‌سر (TP1)",
-                    "معامله #${t.id} · لمس ${fmt(t.tp1)} · حدضرر به ورود (${fmt(t.entry)}) منتقل شد")
+                t.commission = 0.0
+                addExit(t, cd, t.tp1, min(q1, remaining), "TP1")
             }
         }
 
-        if (t.open && !t.tp2.isNaN()) {
-            val hit2 = if (bull) cd.h >= t.tp2 else cd.l <= t.tp2
-            if (hit2) {
-                lg("TRADE", "سطح ۰.۵ فیبو (TP2) لمس شد · معامله #${t.id}", "tp2=${fmt(t.tp2)} bar=${cd.bi}")
-            }
+        val remainingNow = t.qty - t.fills.filter { it.kind != "ENTRY" }.sumOf { it.qty }
+        val tp2Done = t.fills.any { it.kind == "TP2" }
+        if (t.open && t.be && !tp2Done && !t.tp2.isNaN() && remainingNow > 1e-9) {
+            val hit = if (bull) cd.h >= t.tp2 else cd.l <= t.tp2
+            if (hit) addExit(t, cd, t.tp2, min(q2, remainingNow), "TP2")
         }
 
-        // اگر TP1 همین کندل حد ضرر را به ورود برد و قیمت به ورود برگشت،
-        // کل معامله در همین کندل در نقطهٔ ورود با نتیجهٔ صفر (بدون کارمزد) بسته می‌شود.
+        // اگر در کندلی پس از کندل ورود، TP1 حد ضرر را به ورود برد و قیمت در همان کندل به ورود برگشت،
+        // باقی‌ماندهٔ حجم در نقطهٔ ورود بدون کمیسیون بسته می‌شود.
         val returnedToEntry = if (bull) cd.l <= t.entry else cd.h >= t.entry
-        if (t.open && t.be && returnedToEntry) {
-            closeAll(t, t.entry, cd.t, cd.bi, if (sameEntryBar) "خروج سر‌به‌سر (TP1 و ورود یک کندل)" else "خروج سر‌به‌سر")
+        if (!sameEntryBar && t.open && t.be && returnedToEntry) {
+            t.commission = 0.0
+            closeAll(t, t.entry, cd.t, cd.bi, "خروج سر‌به‌سر")
         }
     }
 
@@ -353,6 +376,10 @@ class PaperBroker(private val cfg: Settings) {
             reason.startsWith("حد ضرر") -> "SL"
             reason.contains("1.272") -> "TPX"
             else -> "CLOSE"
+        }
+        if (kind == "BE") {
+            // §18-20 و §18-24: سر به سر باید به شکلی منتقل شود که کارمزد کمیسیون معامله صفر شود! یعنی دقیقا به نقطه ورود بدون کمیسیون.
+            t.commission = 0.0
         }
         if (remaining > 1e-9) {
             val pnl = if (t.dir == 1) (px - t.entry) * remaining * t.contractSize else (t.entry - px) * remaining * t.contractSize

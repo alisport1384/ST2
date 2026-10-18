@@ -1239,14 +1239,16 @@ if array.size(setups) > 0
                 string expRsn = barExpire ? "گذشت یک کندل ساختار" : "عبور باز/کلوز از پین مخالف"
                 s.hvBi := na
                 s.runMax := volume
-                s.stage := (s.lvUsed or barExpire) ? 8 : 4
+                s.lvUsed := true
+                s.stage := 8
                 s.note := "سفارش منقضی · " + expRsn
-                s.rearmAllowed := s.stage == 4
-                f_delLine(s.l6); f_delLine(s.l7); f_delLine(s.l8); f_delLine(s.l9); f_delLine(s.l10)
-                s.l6 := na; s.l7 := na; s.l8 := na; s.l9 := na; s.l10 := na
+                s.rearmAllowed := false
+                f_delLine(s.l4); f_delLine(s.l5); f_delLine(s.l6); f_delLine(s.l7); f_delLine(s.l8); f_delLine(s.l9); f_delLine(s.l10)
+                s.l4 := na; s.l5 := na; s.l6 := na; s.l7 := na; s.l8 := na; s.l9 := na; s.l10 := na
                 label.new(bar_index, close, "انقضا · " + expRsn, xloc.bar_index, yloc.price, color.new(color.orange, 30), label.style_label_left, color.white, size.tiny)
             else if entryTouched
                 s.entry := bull ? s.hvH : s.hvL
+                s.rearmAllowed := false
                 s.stage := 7
                 s.entryBi := bar_index
                 cEntry += 1
@@ -1259,13 +1261,13 @@ if array.size(setups) > 0
             else if hvViol
                 s.hvBi := na
                 s.runMax := volume
-                s.stage := s.lvUsed ? 8 : 4
-                s.note := "نقض HV؛ جست‌وجوی دوباره"
-                s.prevEntry := na
+                s.lvUsed := true
+                s.stage := 8
+                s.note := "نقض HV پس از مسلح‌شدن — سفارش باطل"
                 s.rearmAllowed := false
-                f_delLine(s.l6); f_delLine(s.l7); f_delLine(s.l8); f_delLine(s.l9); f_delLine(s.l10)
-                s.l6 := na; s.l7 := na; s.l8 := na; s.l9 := na; s.l10 := na
-                label.new(bar_index, close, "نقض HV · اسکن از نو", xloc.bar_index, yloc.price, color.new(color.orange, 30), label.style_label_left, color.white, size.tiny)
+                f_delLine(s.l4); f_delLine(s.l5); f_delLine(s.l6); f_delLine(s.l7); f_delLine(s.l8); f_delLine(s.l9); f_delLine(s.l10)
+                s.l4 := na; s.l5 := na; s.l6 := na; s.l7 := na; s.l8 := na; s.l9 := na; s.l10 := na
+                label.new(bar_index, close, "نقض HV · سفارش باطل", xloc.bar_index, yloc.price, color.new(color.orange, 30), label.style_label_left, color.white, size.tiny)
 
         // هنگام معامله باز، نقض ساختار/میانی فقط مسلح‌مجدد را می‌بندد؛ خود معامله ادامه دارد.
         if s.stage == 7 and s.rearmAllowed and bar_index > s.zBi and (bull ? close < s.zBot : close > s.zTop)
@@ -1359,9 +1361,7 @@ if array.size(setups) > 0
                         if o.stage == 6 or o.stage == 7
                             hasActiveOrder := true
                 bool isRearm = not na(s.prevEntry)
-                bool betterEntry = bull ? s.hvH < s.prevEntry : s.hvL > s.prevEntry
-                bool rearmPrereqs = not s.zGone and not na(s.midRef) and not na(s.lvBi) and s.lvReEntered and not s.lvUsed
-                bool rearmOK = not hasActiveOrder and (not isRearm or (s.rearmAllowed and rearmPrereqs and betterEntry))
+                bool rearmOK = not hasActiveOrder and not isRearm
                 if viol
                     // ✖ نقض کندل مارک‌شده ← ناحیه حذف و کندل ولوم زیاد جدید جست‌وجو می‌شود
                     s.hvBi := na
@@ -1406,10 +1406,9 @@ if array.size(setups) > 0
                                 s.tp1 := eRef + tpXFallbackDistance * 0.382
                                 s.tp2 := eRef + tpXFallbackDistance * 0.5
                             else
-                                if na(s.tp1) or s.tp1 <= eRef
-                                    s.tp1 := eRef + (s.tpx - eRef) * 0.382
-                                if na(s.tp2) or s.tp2 <= eRef
-                                    s.tp2 := eRef + (s.tpx - eRef) * 0.5
+                                if not na(s.tp1) and eRef >= s.tp1
+                                    s.tp1 := s.tp2 > eRef ? s.tp2 : na
+                                    s.tp2 := na
                     else
                         tpXMovedToMinimum := eRef - s.tpx < minTPunits
                         if tpXMovedToMinimum
@@ -1420,10 +1419,9 @@ if array.size(setups) > 0
                                 s.tp1 := eRef - tpXFallbackDistance * 0.382
                                 s.tp2 := eRef - tpXFallbackDistance * 0.5
                             else
-                                if na(s.tp1) or s.tp1 >= eRef
-                                    s.tp1 := eRef - (eRef - s.tpx) * 0.382
-                                if na(s.tp2) or s.tp2 >= eRef
-                                    s.tp2 := eRef - (eRef - s.tpx) * 0.5
+                                if not na(s.tp1) and eRef <= s.tp1
+                                    s.tp1 := s.tp2 < eRef ? s.tp2 : na
+                                    s.tp2 := na
                     s.entry := eRef
                     s.be := false
                     s.tp2Hit := false
@@ -1434,7 +1432,7 @@ if array.size(setups) > 0
                     s.armsSinceS += 1
                     s.prevEntry := eRef
                     s.priceExpiryRef := bull ? lastBEpin : lastBUpin
-                    s.rearmAllowed := true
+                    s.rearmAllowed := false
                     evArmedB := bull
                     evArmedS := not bull
                     if showTrade
@@ -1476,12 +1474,10 @@ if array.size(setups) > 0
                     done := true
                     px := s.tpx
                     note := "حد سود نهایی (1.272)"
-                else if sameBar and not na(s.tp1) and high >= s.tp1 and low <= s.entry
-                    s.be := true
-                    done := true
-                    px := s.entry
-                    note := "خروج سر‌به‌سر (TP1 و ورود یک کندل)"
                 else
+                    if sameBar and not na(s.tp1) and not na(s.tp2) and high >= s.tp1
+                        s.tp1 := s.tp2
+                        s.tp2 := na
                     if not s.be and not na(s.tp1) and high >= s.tp1
                         s.be := true
                         s.sl := s.entry
@@ -1489,11 +1485,11 @@ if array.size(setups) > 0
                             line.set_xy1(s.l9, bar_index, s.entry)
                             line.set_xy2(s.l9, bar_index, s.entry)
                             line.set_color(s.l9, color.new(color.orange, 0))
-                        label.new(bar_index, s.entry, "TP1 (38%) ✔ · حدضرر = سر‌به‌سر", xloc.bar_index, yloc.price, color.new(color.orange, 20), label.style_label_down, color.white, size.tiny)
+                        label.new(bar_index, s.entry, (na(s.tp2) ? "TP1 (50%)" : "TP1 (38%)") + " ✔ · حدضرر = سر‌به‌سر", xloc.bar_index, yloc.price, color.new(color.orange, 20), label.style_label_down, color.white, size.tiny)
                     if s.be and not s.tp2Hit and not na(s.tp2) and high >= s.tp2
                         s.tp2Hit := true
                         label.new(bar_index, s.tp2, "TP2 (50%) ✔", xloc.bar_index, yloc.price, color.new(color.orange, 10), label.style_label_down, color.white, size.tiny)
-                    if s.be and low <= s.entry
+                    if not sameBar and s.be and low <= s.entry
                         done := true
                         px := s.entry
                         note := "خروج سر‌به‌سر"
@@ -1506,12 +1502,10 @@ if array.size(setups) > 0
                     done := true
                     px := s.tpx
                     note := "حد سود نهایی (1.272)"
-                else if sameBar and not na(s.tp1) and low <= s.tp1 and high >= s.entry
-                    s.be := true
-                    done := true
-                    px := s.entry
-                    note := "خروج سر‌به‌سر (TP1 و ورود یک کندل)"
                 else
+                    if sameBar and not na(s.tp1) and not na(s.tp2) and low <= s.tp1
+                        s.tp1 := s.tp2
+                        s.tp2 := na
                     if not s.be and not na(s.tp1) and low <= s.tp1
                         s.be := true
                         s.sl := s.entry
@@ -1519,30 +1513,20 @@ if array.size(setups) > 0
                             line.set_xy1(s.l9, bar_index, s.entry)
                             line.set_xy2(s.l9, bar_index, s.entry)
                             line.set_color(s.l9, color.new(color.orange, 0))
-                        label.new(bar_index, s.entry, "TP1 (38%) ✔ · حدضرر = سر‌به‌سر", xloc.bar_index, yloc.price, color.new(color.orange, 20), label.style_label_up, color.white, size.tiny)
+                        label.new(bar_index, s.entry, (na(s.tp2) ? "TP1 (50%)" : "TP1 (38%)") + " ✔ · حدضرر = سر‌به‌سر", xloc.bar_index, yloc.price, color.new(color.orange, 20), label.style_label_up, color.white, size.tiny)
                     if s.be and not s.tp2Hit and not na(s.tp2) and low <= s.tp2
                         s.tp2Hit := true
                         label.new(bar_index, s.tp2, "TP2 (50%) ✔", xloc.bar_index, yloc.price, color.new(color.orange, 10), label.style_label_up, color.white, size.tiny)
-                    if s.be and high >= s.entry
+                    if not sameBar and s.be and high >= s.entry
                         done := true
                         px := s.entry
                         note := "خروج سر‌به‌سر"
             if done
                 lastResult := note
                 s.note := note
-                bool finalWin = str.contains(note, "1.272")
-                bool rearmPrereqsAfterTrade = s.rearmAllowed and not s.zGone and not na(s.midRef) and not na(s.lvBi) and s.lvReEntered and not s.lvUsed
-                if not finalWin and rearmPrereqsAfterTrade
-                    s.stage := 4
-                    s.hvBi := na
-                    s.runMax := volume
-                    // lvReEntered حفظ می‌شود: برگشت اول تریگر۱ انجام شده و برگشت دوم مجاز نیست.
-                    s.be := false
-                    s.tp2Hit := false
-                else
-                    s.stage := 8
-                    s.rearmAllowed := false
-                    cDone += 1
+                s.stage := 8
+                s.rearmAllowed := false
+                cDone += 1
                 f_delLine(s.l6)
                 f_delLine(s.l7)
                 f_delLine(s.l8)

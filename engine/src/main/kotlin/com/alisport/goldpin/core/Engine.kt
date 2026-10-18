@@ -1144,12 +1144,14 @@ class Engine(val cfg: Settings) {
                 }
             }
             if (confirmed) {
+                val lastT1CloseBi = allFromExt.lastOrNull()?.closeBi ?: confBi
                 for (idx in t2History.indices) {
                     val b = t2History[idx].bar
                     if (b.bi <= confBi) continue
                     if (b.bi > mcCloseBi) break
                     val violBar = if (bull) b.l < cand.bar.l else b.h > cand.bar.h
                     if (violBar) return false
+                    if (b.bi > lastT1CloseBi && uses >= 2 && b.l <= cand.bar.h && b.h >= cand.bar.l) return false
                 }
             }
             s.lvBi = cand.bar.bi
@@ -1403,12 +1405,12 @@ class Engine(val cfg: Settings) {
                             "bar=${q1.bi}")
                         continue
                     } else if (s.stage == 6) {
-                        // §18-10: بعد از مسلح شدن، ابطال LV سفارش مسلح‌شده را لغو می‌کند؛ جست‌وجوی LV از نو.
+                        // §4-8 و §18-10: بعد از مسلح شدن، ابطال LV سفارش مسلح‌شده را لغو می‌کند و چون برای هر LV فقط یک سفارش مجاز است، ستاپ غیرفعال می‌شود.
                         cancelArmedForLv(s, "ابطال ناحیهٔ ولوم کم پس از مسلح‌شدن")
-                        s.lvBi = -1; s.lvT = 0L; s.lvConfBi = -1; s.lvConfT = 0L; s.lvH = Double.NaN; s.lvL = Double.NaN
-                        s.lvTouched = false; s.lvReEntered = false; s.lvUses = 0
-                        s.stage = 3
-                        s.note = "نقض ناحیهٔ ولوم کم (تریگر۱) — سفارش لغو شد"
+                        s.lvUsed = true
+                        if (s.touchT > 0L) markStructureZoneStatus(s, ZoneStatus.CONSUMED, curBi, curT)
+                        s.stage = 8
+                        s.note = "نقض ناحیهٔ ولوم کم (تریگر۱) پس از مسلح‌شدن — سفارش لغو و ستاپ غیرفعال شد"
                         addMarker(q1.bi, if (bullL) q1.l else q1.h, 10, "ابطال ناحیهٔ ولوم کم · سفارش لغو")
                         continue
                     }
@@ -1423,26 +1425,31 @@ class Engine(val cfg: Settings) {
                 val inside = q1.l <= s.lvH && q1.h >= s.lvL
                 if (s.lvUses >= 2 && inside) {
                     s.lvUsed = true
+                    s.rearmAllowed = false
                     closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
                     addMarker(q1.bi, if (bullL) s.lvH else s.lvL, 11, "لمس سوم باکس ولوم کم → باطل ✖")
                     lg("ZONE", "باکس ولوم کم پس از دو مصرف برای بار سوم لمس شد → باطل · ستاپ #${s.id}",
                         "box=${f2(s.lvL)}-${f2(s.lvH)} bar=${q1.bi}")
-                    // §4-7 «مصرف باکس حجم کم»: ستاپ تمام می‌شود؛ تا زمان اعتبار ناحیهٔ ساختار و تایید
-                    // میانی، با تایید LV جدید ستاپ دوباره فعال می‌شود ⇒ بازگشت به مرحلهٔ جست‌وجوی LV.
                     if (s.stage == 6) {
-                        // §4-7 و §18-10: مصرف باکس ولوم کم سفارش معلق را می‌کُشد.
+                        // §4-7 و §4-8 و §18-10: مصرف باکس ولوم کم سفارش معلق را می‌کُشد و ستاپ مسلح‌شده معتبر نیست.
                         cancelArmedForLv(s, "مصرف باکس ولوم کم پس از مسلح‌شدن")
-                        events.add("[${s.id}] باکس ولوم کم بعد از مسلح مصرف شد — سفارش معلق لغو شد")
+                        if (s.touchT > 0L) markStructureZoneStatus(s, ZoneStatus.CONSUMED, curBi, curT)
+                        s.stage = 8
+                        s.note = "باکس ولوم کم مصرف شد (لمس سوم پس از مسلح‌شدن) — ستاپ غیرفعال"
+                        events.add("[${s.id}] باکس ولوم کم بعد از مسلح مصرف شد — سفارش معلق لغو و ستاپ غیرفعال شد")
                     } else {
+                        // §4-7: اگر ستاپ هنوز مسلح نشده باشد، وقتی باکس مصرف شود ستاپ تمام می‌شود و تا زمان اعتبار
+                        // ناحیهٔ ساختار و تایید میانی، اگر محدودهٔ LV جدیدی تایید شد ستاپ دوباره فعال می‌شود.
                         closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
                         broker?.onSetupInvalidated(s, curT, curBi)
+                        s.lvBi = -1; s.lvT = 0L; s.lvConfBi = -1; s.lvConfT = 0L; s.lvH = Double.NaN; s.lvL = Double.NaN
+                        s.lvTouched = false; s.lvUsed = false; s.lvReEntered = false; s.lvUses = 0
+                        s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.hvScanBi = -1; s.runMax = Double.NaN
+                        s.prevEntry = Double.NaN
+                        s.stage = if (!s.zGone && !s.midRef.isNaN()) 3 else 8
+                        s.note = "باکس ولوم کم مصرف شد (لمس سوم) — جست‌وجوی LV جدید"
                         events.add("[${s.id}] باکس ولوم کم قبل از مسلح مصرف شد — جست‌وجوی LV جدید")
                     }
-                    s.lvBi = -1; s.lvT = 0L; s.lvConfBi = -1; s.lvConfT = 0L; s.lvH = Double.NaN; s.lvL = Double.NaN
-                    s.lvTouched = false; s.lvUsed = false; s.lvReEntered = false; s.lvUses = 0
-                    s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.hvScanBi = -1; s.runMax = Double.NaN
-                    s.stage = 3
-                    s.note = "باکس ولوم کم مصرف شد (لمس سوم) — جست‌وجوی LV جدید"
                     continue
                 }
                 if (inside && !s.lvTouched) {
@@ -1474,10 +1481,7 @@ class Engine(val cfg: Settings) {
             val bull = s.dir == 1
 
             // ④ انقضا / ورود بعد از مسلح‌شدن (§4-8 و §4-9 سند نهایی):
-            //    اگر سفارش در کندل قبلی مسلح شده باشد (curBi > s.hvConfBi)، پیش از بررسی شکست
-            //    میانی/ساختار در این کندل، بررسی می‌کنیم که آیا در ابتدای کندل منقضی شده یا با
-            //    رسیدن قیمت به لبهٔ نزدیکِ HV سفارش پر شده است (چون لبهٔ ورود بالاتر از میانی/ساختار
-            //    در خرید و پایین‌تر از آن‌ها در فروش است و قیمت اول سفارش را پر می‌کند).
+            //    فقط و فقط یک سفارش برای هر LV امکان‌پذیر است چه سفارش پر شود چه فعال نشود چه باطل شود.
             if (s.stage == 6 && curBi > s.hvConfBi) {
                 if (s.priceExpiryRef.isNaN()) {
                     s.priceExpiryRef = if (bull) HH else LL
@@ -1490,8 +1494,20 @@ class Engine(val cfg: Settings) {
                 val entryLvl = entryLevel(s, bull)
                 val entryTouched = if (bull) low <= entryLvl else high >= entryLvl
                 val hvViol = if (bull) low < s.hvL else high > s.hvH
+                val lvThirdTouch = !s.lvUsed && s.lvBi >= 0 && s.lvConfBi >= 0 &&
+                        s.lvUses >= 2 && low <= s.lvH && high >= s.lvL
 
-                if (barExpire || openBreak || (!entryTouched && closeBreak)) {
+                if (lvThirdTouch) {
+                    // §4-7: در صورتی که برای بار سوم قیمت حتی یک تیک باکس LV را لمس کرد باکس باطل می‌شود، سفارش معلق لغو و ستاپ غیرفعال می‌شود.
+                    s.lvUsed = true
+                    s.rearmAllowed = false
+                    cancelArmedForLv(s, "مصرف باکس ولوم کم (لمس سوم) پس از مسلح‌شدن")
+                    if (s.touchT > 0L) markStructureZoneStatus(s, ZoneStatus.CONSUMED, curBi, curT)
+                    s.stage = 8
+                    s.note = "باکس ولوم کم مصرف شد (لمس سوم پس از مسلح‌شدن) — ستاپ غیرفعال"
+                    addMarker(curBi, if (bull) s.lvH else s.lvL, 11, "لمس سوم باکس ولوم کم → باطل ✖")
+                    continue
+                } else if (barExpire || openBreak || (!entryTouched && closeBreak)) {
                     val expReason = if (barExpire) {
                         "گذشت یک کندل ساختار کامل (${nBars} کندل تریگر۲)"
                     } else if (bull) {
@@ -1500,22 +1516,25 @@ class Engine(val cfg: Settings) {
                         "باز/کلوز از زیر LL هنگام مسلح‌شدن (${f2(s.priceExpiryRef)}) عبور کرد"
                     }
                     closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
-                    s.stage = if (s.lvUsed || barExpire) 8 else 4
-                    if (s.stage == 8) closeT1Box(s, ZoneStatus.CONSUMED, curBi, curT)
+                    closeT1Box(s, ZoneStatus.CONSUMED, curBi, curT)
+                    if (s.touchT > 0L) markStructureZoneStatus(s, ZoneStatus.CONSUMED, curBi, curT)
+                    s.lvUsed = true
+                    s.rearmAllowed = false
+                    s.stage = 8
                     s.note = "سفارش منقضی"
                     events.add("[${s.id}] سفارش منقضی شد — $expReason")
                     broker?.onSetupExpired(s, curT, curBi, expReason)
                     s.orderId = -1
-                    s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.runMax = volume
-                    if (s.stage == 4) s.rearmAllowed = true
-                    lg("ENGINE", "سفارش معلق منقضی شد · ستاپ #${s.id}",
+                    s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.runMax = Double.NaN
+                    lg("ENGINE", "سفارش معلق منقضی شد (فقط یک سفارش برای هر LV مجاز است، §4-8) · ستاپ #${s.id}",
                         "reason=$expReason stage=${s.stage} bar=$curBi")
-                    if (s.stage == 8) continue
+                    continue
                 } else if (entryTouched) {
                     s.entry = entryLvl
                     s.slMidDone = false
+                    s.rearmAllowed = false
                     s.stage = 7
-                    s.entryBi = curBi   // کندل پرشدن — برای قاعده §۶-۲۱
+                    s.entryBi = curBi   // کندل پرشدن — برای قاعده §4-9
                     s.entryT = curT
                     cnt.entry++
                     lastEntryPx = s.entry; lastSlPx = s.sl; lastTpPx = s.tpx
@@ -1524,18 +1543,18 @@ class Engine(val cfg: Settings) {
                         "ورود=${f2(s.entry)} bar=$curBi")
                 } else if (hvViol) {
                     closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
-                    s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.runMax = volume
-                    s.stage = if (s.lvUsed) 8 else 4
-                    if (s.stage == 8) closeT1Box(s, ZoneStatus.CONSUMED, curBi, curT)
+                    closeT1Box(s, ZoneStatus.CONSUMED, curBi, curT)
+                    if (s.touchT > 0L) markStructureZoneStatus(s, ZoneStatus.CONSUMED, curBi, curT)
+                    s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.runMax = Double.NaN
+                    s.lvUsed = true
+                    s.rearmAllowed = false
+                    s.stage = 8
+                    s.note = "نقض باکس ولوم زیاد پس از مسلح‌شدن — سفارش باطل"
                     broker?.onSetupInvalidated(s, curT, curBi)
                     s.orderId = -1
-                    if (s.stage == 4) {
-                        s.prevEntry = Double.NaN
-                        s.rearmAllowed = false
-                    }
-                    lg("ENGINE", "ناحیهٔ HV نقض شد (یک تیک از سمت دور) → سفارش لغو و اسکن از نو · ستاپ #${s.id}",
+                    lg("ENGINE", "ناحیهٔ HV پس از مسلح‌شدن نقض شد → سفارش لغو و ستاپ غیرفعال (فقط یک سفارش برای هر LV، §4-8) · ستاپ #${s.id}",
                         "hvL=${f2(s.hvL)} hvH=${f2(s.hvH)} stage=${s.stage} bar=$curBi")
-                    if (s.stage == 8) continue
+                    continue
                 }
             }
 
@@ -1615,30 +1634,32 @@ class Engine(val cfg: Settings) {
                 }
             }
 
-            // ②-ب ابطال باکس ولوم کم پس از تایید با عبور ۱ تیک از سمت مخالف (§4-7 سند نهایی)
+            // ②-ب ابطال باکس ولوم کم پس از تایید با عبور ۱ تیک از سمت مخالف یا لمس سوم (§4-7 سند نهایی)
             if (!s.lvUsed && s.lvBi >= 0 && s.lvConfBi >= 0 && curBi > s.lvConfBi) {
                 val lvViol = if (bull) low < s.lvL else high > s.lvH
-                if (lvViol) {
+                val lvThirdTouch = !lvViol && s.lvUses >= 2 && low <= s.lvH && high >= s.lvL
+                if (lvViol || lvThirdTouch) {
                     if (s.stage in 4..5) {
                         closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
                         closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
+                        broker?.onSetupInvalidated(s, curT, curBi)
                         s.lvBi = -1; s.lvT = 0L; s.lvConfBi = -1; s.lvConfT = 0L; s.lvH = Double.NaN; s.lvL = Double.NaN
-                        s.lvTouched = false; s.lvReEntered = false; s.lvUses = 0
+                        s.lvTouched = false; s.lvUsed = false; s.lvReEntered = false; s.lvUses = 0
                         s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.hvScanBi = -1; s.runMax = Double.NaN
-                        s.stage = 3
-                        s.note = "نقض ناحیهٔ ولوم کم (تریگر۱)"
-                        addMarker(curBi, if (bull) low else high, 10, "ابطال ناحیهٔ ولوم کم")
-                        lg("ENGINE", "ناحیهٔ ولوم کم با عبور از سمت مخالف باطل شد · ستاپ #${s.id}",
-                            "bar=$curBi")
+                        s.prevEntry = Double.NaN
+                        s.stage = if (!s.zGone && !s.midRef.isNaN()) 3 else 8
+                        s.note = if (lvThirdTouch) "باکس ولوم کم مصرف شد (لمس سوم) — جست‌وجوی LV جدید" else "نقض ناحیهٔ ولوم کم (تریگر۱)"
+                        addMarker(curBi, if (bull) low else high, 10, if (lvThirdTouch) "لمس سوم باکس ولوم کم → باطل ✖" else "ابطال ناحیهٔ ولوم کم")
+                        lg("ENGINE", "ناحیهٔ ولوم کم باطل شد · ستاپ #${s.id}", "bar=$curBi")
                     } else if (s.stage == 6) {
-                        // §18-10: ابطال LV پس از مسلح‌شدن ⇒ لغو سفارش معلق و جست‌وجوی LV از نو
-                        cancelArmedForLv(s, "ابطال ناحیهٔ ولوم کم پس از مسلح‌شدن")
-                        s.lvBi = -1; s.lvT = 0L; s.lvConfBi = -1; s.lvConfT = 0L; s.lvH = Double.NaN; s.lvL = Double.NaN
-                        s.lvTouched = false; s.lvReEntered = false; s.lvUses = 0
-                        s.stage = 3
-                        s.note = "نقض ناحیهٔ ولوم کم (تریگر۱) — سفارش لغو شد"
+                        // §4-7، §4-8 و §18-10: ابطال/مصرف LV پس از مسلح‌شدن ⇒ لغو سفارش معلق و غیرفعال‌شدن ستاپ
+                        cancelArmedForLv(s, if (lvThirdTouch) "مصرف باکس ولوم کم (لمس سوم) پس از مسلح‌شدن" else "ابطال ناحیهٔ ولوم کم پس از مسلح‌شدن")
+                        s.lvUsed = true
+                        if (s.touchT > 0L) markStructureZoneStatus(s, ZoneStatus.CONSUMED, curBi, curT)
+                        s.stage = 8
+                        s.note = "نقض/مصرف ناحیهٔ ولوم کم پس از مسلح‌شدن — سفارش لغو و ستاپ غیرفعال شد"
                         addMarker(curBi, if (bull) low else high, 10, "ابطال ناحیهٔ ولوم کم · سفارش لغو")
-                        lg("ENGINE", "ناحیهٔ ولوم کم پس از مسلح‌شدن باطل شد → سفارش لغو · ستاپ #${s.id}", "bar=$curBi")
+                        lg("ENGINE", "ناحیهٔ ولوم کم پس از مسلح‌شدن باطل شد → سفارش لغو و ستاپ غیرفعال · ستاپ #${s.id}", "bar=$curBi")
                         continue
                     } else if (s.stage == 7) {
                         // §18-11: معاملهٔ باز تغییری نمی‌کند؛ فقط مسلح‌مجدد بسته می‌شود.
@@ -1697,12 +1718,8 @@ class Engine(val cfg: Settings) {
             }
 
             // ⑤ مدیریت معامله : حدضرر / سر‌به‌سر / حدسود (بررسی موتور)
-            //   ترتیب محافظه‌کارانه، مطابق §۲-۹ و PaperBroker.manageBar:
-            //   SL/TPX بررسی اول می‌شوند و در یک کندل پایان می‌دهند.
-            //   TP1 و TP2 پله‌های میانی‌اند و در یک کندل می‌توانند هر دو لمس شوند
-            //   (مثلاً اسپایک قوی) — قبلاً به‌خاطر else-if فقط TP1 ثبت می‌شد و TP2
-            //   در همان کندل نادیده می‌ماند. حالا TP2 با if مستقل چک می‌شود.
-            //   توجه: stage فقط در پایان واقعی (SL/TPX/BE) به ۸ می‌رود.
+            //   ترتیب محافظه‌کارانه، مطابق §۴-۹ و PaperBroker.manageBar:
+            //   حد ضرر → حد سود نهایی → حد سود اول → حد سود دوم.
             if (s.stage == 7 && !s.sl.isNaN() && !s.tpx.isNaN()) {
                 var done = false
                 var px = Double.NaN
@@ -1712,58 +1729,58 @@ class Engine(val cfg: Settings) {
                     if (low <= s.sl) { done = true; px = s.sl; note = if (s.be || s.slMidDone) "خروج سر‌به‌سر" else "حد ضرر" }
                     else if (high >= s.tpx) { done = true; px = s.tpx; note = "حد سود نهایی (1.272)" }
                     else {
-                        // §۶-۲۱: ورود و TP1 در یک کندل → خروج سر‌به‌سر خالص (نتیجه صفر)
-                        val sameBarNetZero = entrySameBar && !s.tp1.isNaN()
-                                && high >= s.tp1 && low <= s.entry
-                        if (sameBarNetZero) {
-                            s.be = true; s.sl = s.entry
-                            done = true; px = s.entry; note = "خروج سر‌به‌سر (TP1 و ورود یک کندل)"
-                        } else {
-                            if (!s.be && !s.tp1.isNaN() && high >= s.tp1) {
-                                s.be = true; s.sl = s.entry
-                                val tp1Lbl = if (s.tp2.isNaN()) "TP1 (50%)" else "TP1 (38%)"
-                                val tp1Fa = if (s.tp2.isNaN()) "TP1 (۵۰٪)" else "TP1 (۳۸٪)"
-                                addMarker(curBi, s.entry, 8, "$tp1Lbl ✔ · حدضرر = سر‌به‌سر")
-                                lg("TRADE", "$tp1Fa لمس شد → حدضرر به سر‌به‌سر منتقل شد · ستاپ #${s.id}",
-                                    "tp1=${f2(s.tp1)} bar=$curBi")
-                                alarm(AlertKind.TP1, "$tp1Fa لمس شد", "ستاپ #${s.id} · حدضرر به سر‌به‌سر منتقل شد · ${f2(s.tp1)}")
-                            }
-                            if (s.be && !s.tp2Hit && !s.tp2.isNaN() && high >= s.tp2) {
-                                s.tp2Hit = true
-                                addMarker(curBi, s.tp2, 8, "TP2 (50%) ✔")
-                                lg("TRADE", "TP2 (۵۰٪) لمس شد · ستاپ #${s.id}", "tp2=${f2(s.tp2)} bar=$curBi")
-                                alarm(AlertKind.TP2, "TP2 (۵۰٪) لمس شد", "ستاپ #${s.id} · قیمت ${f2(s.tp2)}")
-                            }
-                            if (s.be && low <= s.entry) { done = true; px = s.entry; note = "خروج سر‌به‌سر" }
+                        // §4-9: اگر در کندل ورود هم حد سود اول (۰.۳۸۲ فیبو) و هم قیمت ورود لمس شود،
+                        // ورود ثبت می‌شود، حد سود اول ۰.۵ فیبو و حد سود نهایی ۱.۲۷۲ فیبو محاسبه می‌شود (۵۰٪/۵۰٪)
+                        // و حد ضرر بعد از لمس ۰.۵ فیبو به نقطهٔ ورود منتقل می‌شود.
+                        if (entrySameBar && !s.tp1.isNaN() && !s.tp2.isNaN() && high >= s.tp1) {
+                            s.tp1 = s.tp2
+                            s.tp2 = Double.NaN
+                            lg("TRADE", "لمس هم‌زمان ورود و ۰.۳۸۲ فیبو در یک کندل → حد سود اول به ۰.۵ فیبو منتقل شد · ستاپ #${s.id}",
+                                "tp1=${f2(s.tp1)} bar=$curBi")
                         }
+                        if (!s.be && !s.tp1.isNaN() && high >= s.tp1) {
+                            s.be = true; s.sl = s.entry
+                            val tp1Lbl = if (s.tp2.isNaN()) "TP1 (50%)" else "TP1 (38%)"
+                            val tp1Fa = if (s.tp2.isNaN()) "TP1 (۵۰٪)" else "TP1 (۳۸٪)"
+                            addMarker(curBi, s.entry, 8, "$tp1Lbl ✔ · حدضرر = سر‌به‌سر")
+                            lg("TRADE", "$tp1Fa لمس شد → حدضرر به سر‌به‌سر منتقل شد · ستاپ #${s.id}",
+                                "tp1=${f2(s.tp1)} bar=$curBi")
+                            alarm(AlertKind.TP1, "$tp1Fa لمس شد", "ستاپ #${s.id} · حدضرر به سر‌به‌سر منتقل شد · ${f2(s.tp1)}")
+                        }
+                        if (s.be && !s.tp2Hit && !s.tp2.isNaN() && high >= s.tp2) {
+                            s.tp2Hit = true
+                            addMarker(curBi, s.tp2, 8, "TP2 (50%) ✔")
+                            lg("TRADE", "TP2 (۵۰٪) لمس شد · ستاپ #${s.id}", "tp2=${f2(s.tp2)} bar=$curBi")
+                            alarm(AlertKind.TP2, "TP2 (۵۰٪) لمس شد", "ستاپ #${s.id} · قیمت ${f2(s.tp2)}")
+                        }
+                        if (!entrySameBar && s.be && low <= s.entry) { done = true; px = s.entry; note = "خروج سر‌به‌سر" }
                     }
                 } else {
                     if (high >= s.sl) { done = true; px = s.sl; note = if (s.be || s.slMidDone) "خروج سر‌به‌سر" else "حد ضرر" }
                     else if (low <= s.tpx) { done = true; px = s.tpx; note = "حد سود نهایی (1.272)" }
                     else {
-                        val sameBarNetZero = entrySameBar && !s.tp1.isNaN()
-                                && low <= s.tp1 && high >= s.entry
-                        if (sameBarNetZero) {
-                            s.be = true; s.sl = s.entry
-                            done = true; px = s.entry; note = "خروج سر‌به‌سر (TP1 و ورود یک کندل)"
-                        } else {
-                            if (!s.be && !s.tp1.isNaN() && low <= s.tp1) {
-                                s.be = true; s.sl = s.entry
-                                val tp1Lbl = if (s.tp2.isNaN()) "TP1 (50%)" else "TP1 (38%)"
-                                val tp1Fa = if (s.tp2.isNaN()) "TP1 (۵۰٪)" else "TP1 (۳۸٪)"
-                                addMarker(curBi, s.entry, 8, "$tp1Lbl ✔ · حدضرر = سر‌به‌سر")
-                                lg("TRADE", "$tp1Fa لمس شد → حدضرر به سر‌به‌سر منتقل شد · ستاپ #${s.id}",
-                                    "tp1=${f2(s.tp1)} bar=$curBi")
-                                alarm(AlertKind.TP1, "$tp1Fa لمس شد", "ستاپ #${s.id} · حدضرر به سر‌به‌سر منتقل شد · ${f2(s.tp1)}")
-                            }
-                            if (s.be && !s.tp2Hit && !s.tp2.isNaN() && low <= s.tp2) {
-                                s.tp2Hit = true
-                                addMarker(curBi, s.tp2, 8, "TP2 (50%) ✔")
-                                lg("TRADE", "TP2 (۵۰٪) لمس شد · ستاپ #${s.id}", "tp2=${f2(s.tp2)} bar=$curBi")
-                                alarm(AlertKind.TP2, "TP2 (۵۰٪) لمس شد", "ستاپ #${s.id} · قیمت ${f2(s.tp2)}")
-                            }
-                            if (s.be && high >= s.entry) { done = true; px = s.entry; note = "خروج سر‌به‌سر" }
+                        if (entrySameBar && !s.tp1.isNaN() && !s.tp2.isNaN() && low <= s.tp1) {
+                            s.tp1 = s.tp2
+                            s.tp2 = Double.NaN
+                            lg("TRADE", "لمس هم‌زمان ورود و ۰.۳۸۲ فیبو در یک کندل → حد سود اول به ۰.۵ فیبو منتقل شد · ستاپ #${s.id}",
+                                "tp1=${f2(s.tp1)} bar=$curBi")
                         }
+                        if (!s.be && !s.tp1.isNaN() && low <= s.tp1) {
+                            s.be = true; s.sl = s.entry
+                            val tp1Lbl = if (s.tp2.isNaN()) "TP1 (50%)" else "TP1 (38%)"
+                            val tp1Fa = if (s.tp2.isNaN()) "TP1 (۵۰٪)" else "TP1 (۳۸٪)"
+                            addMarker(curBi, s.entry, 8, "$tp1Lbl ✔ · حدضرر = سر‌به‌سر")
+                            lg("TRADE", "$tp1Fa لمس شد → حدضرر به سر‌به‌سر منتقل شد · ستاپ #${s.id}",
+                                "tp1=${f2(s.tp1)} bar=$curBi")
+                            alarm(AlertKind.TP1, "$tp1Fa لمس شد", "ستاپ #${s.id} · حدضرر به سر‌به‌سر منتقل شد · ${f2(s.tp1)}")
+                        }
+                        if (s.be && !s.tp2Hit && !s.tp2.isNaN() && low <= s.tp2) {
+                            s.tp2Hit = true
+                            addMarker(curBi, s.tp2, 8, "TP2 (50%) ✔")
+                            lg("TRADE", "TP2 (۵۰٪) لمس شد · ستاپ #${s.id}", "tp2=${f2(s.tp2)} bar=$curBi")
+                            alarm(AlertKind.TP2, "TP2 (۵۰٪) لمس شد", "ستاپ #${s.id} · قیمت ${f2(s.tp2)}")
+                        }
+                        if (!entrySameBar && s.be && high >= s.entry) { done = true; px = s.entry; note = "خروج سر‌به‌سر" }
                     }
                 }
                 if (done) {
@@ -1773,24 +1790,12 @@ class Engine(val cfg: Settings) {
                     lg("TRADE", "پایان معامله · ستاپ #${s.id} → $note",
                         "خروج=${f2(px)} bar=$curBi")
                     closeT2Box(s, ZoneStatus.CONSUMED, curBi, curT)
-                    // §4-8: پس از SL/سر‌به‌سر (نه TPX)، فقط اگر ساختار، میانی و تریگر۱
-                    // هنوز معتبر باشند، همان ستاپ برای HV جدید می‌ماند؛ معاملهٔ باز در صورت نقض بسته نمی‌شود.
-                    val finalWin = note.contains("1.272")
-                    if (!finalWin && s.rearmAllowed && rearmPrerequisitesValid(s)) {
-                        s.stage = 4
-                        s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.runMax = volume
-                        // lvReEntered حفظ می‌شود: بازگشت اول تریگر۱ قبلاً رخ داده؛ برگشت دوم مجاز نیست.
-                        s.be = false; s.tp2Hit = false
-                        s.orderId = -1
-                        lg("ENGINE", "معامله بسته شد؛ مسلح‌مجدد مجاز ماند (پیش‌نیازهای ستاپ برقرارند) · ستاپ #${s.id}",
-                            "reason=$note bar=$curBi")
-                    } else {
-                        closeT1Box(s, ZoneStatus.CONSUMED, curBi, curT)
-                        if (s.touchT > 0L) markStructureZoneStatus(s, ZoneStatus.CONSUMED, curBi, curT)
-                        s.stage = 8
-                        s.rearmAllowed = false
-                        cnt.done++
-                    }
+                    // §4-8: فقط و فقط یک سفارش برای هر LV امکان‌پذیر است چه سفارش پر شود چه فعال نشود چه باطل شود.
+                    closeT1Box(s, ZoneStatus.CONSUMED, curBi, curT)
+                    if (s.touchT > 0L) markStructureZoneStatus(s, ZoneStatus.CONSUMED, curBi, curT)
+                    s.stage = 8
+                    s.rearmAllowed = false
+                    cnt.done++
                 }
             }
         }
@@ -1827,31 +1832,12 @@ class Engine(val cfg: Settings) {
         s.tp1 = targets.tp1
         s.tp2 = targets.tp2
         s.tpx = targets.tpx
-        // §4-8: پنجرهٔ مسلح‌مجدد پس از گذشت یک بازهٔ ساختار کامل بسته می‌شود؛
-        // ورود جدید نیز باید بهتر از قبلی باشد (خرید پایین‌تر، فروش بالاتر).
-        val isRearm = !s.prevEntry.isNaN()
-        if (isRearm) {
-            // §۴-۸: شرط «هنوز کندل ساختار جدیدی باز و بسته نشده باشد» — پس از گذشت یک بازهٔ
-            // ساختار کامل از آخرین مسلح‌شدن، مسلح‌شدن دوباره هرگز مجاز نیست (مستقل از مرحلهٔ ستاپ).
-            if (fullStructureElapsed(s.armBi, curBi, cfg.tfS, cfg.tf2)) {
-                clearHvMark(s)
-                lg("ENGINE", "مسلح‌مجدد ستاپ #${s.id} رد شد (یک کندل ساختار کامل از آخرین مسلح‌شدن گذشته)",
-                    "armBi=${s.armBi} curBi=$curBi n=${cfg.tfS / maxOf(1, cfg.tf2)}")
-                return
-            }
-            if (!s.rearmAllowed || !rearmPrerequisitesValid(s)) {
-                clearHvMark(s)
-                lg("ENGINE", "مسلح‌مجدد ستاپ #${s.id} رد شد (پیش‌نیازهای ساختار/میانی/تریگر۱ برقرار نیست)",
-                    "rearmAllowed=${s.rearmAllowed} zGone=${s.zGone} midValid=${!s.midRef.isNaN()} lvBi=${s.lvBi} lvReEntered=${s.lvReEntered} lvUsed=${s.lvUsed} bar=$curBi")
-                return
-            }
-            val better = if (bull) eRef < s.prevEntry else eRef > s.prevEntry
-            if (!better) {
-                clearHvMark(s)
-                lg("ENGINE", "مسلح مجدد برای ستاپ #${s.id} رد شد (ورود جدید بهتر از قبلی نیست)",
-                    "prev=${f2(s.prevEntry)} new=${f2(eRef)} bar=$curBi")
-                return
-            }
+        // §4-8: فقط و فقط یک سفارش برای هر LV امکان‌پذیر است چه سفارش پر شود چه فعال نشود چه باطل شود.
+        if (!s.prevEntry.isNaN()) {
+            clearHvMark(s)
+            lg("ENGINE", "مسلح‌مجدد ستاپ #${s.id} رد شد — فقط یک سفارش برای هر LV مجاز است (§4-8)",
+                "prev=${f2(s.prevEntry)} new=${f2(eRef)} bar=$curBi")
+            return
         }
         // §4-8 و §10 سند نهایی: ما فقط مجاز به گذاشتن ۱ سفارش در چارت هستیم (حداکثر ۱ سفارش معلق یا ۱ معامله باز).
         // §4-8 و §18-12/§18-13: در هر لحظه فقط یک سفارش (معلق یا باز) مجاز است؛ وجود معاملهٔ باز مانع مسلح شدن است.
@@ -1886,7 +1872,7 @@ class Engine(val cfg: Settings) {
         s.prevEntry = eRef
         // §4-8: انقضای سفارش معلق با عبور باز/کلوز از HH (خرید) / LL (فروش) در لحظهٔ مسلح‌شدن
         s.priceExpiryRef = if (bull) HH else LL
-        s.rearmAllowed = true
+        s.rearmAllowed = false
         s.stage = 6
         cnt.hv++
         s.hvConfBi = curBi

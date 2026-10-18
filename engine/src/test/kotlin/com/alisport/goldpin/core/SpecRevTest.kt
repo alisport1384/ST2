@@ -41,7 +41,7 @@ class SpecRevTest {
     }
 
     @Test
-    fun `doc 18-20 target levels before and after 0_382 fib and breakeven zero loss without commission`() {
+    fun `doc 4-9 18-20 and 18-24 target levels 3-step vs 2-step 50-50 and breakeven zero commission`() {
         // لنگر 100% = 150 (midRef) ، لنگر 0% = 200 (HH) ⇒ دامنه = 50
         // fib 0.382 = 169.10 ، fib 0.5 = 175.00 ، fib 1.272 = 213.60
         val before382 = calculateTargetLevels(
@@ -68,21 +68,21 @@ class SpecRevTest {
         assertTrue(after382Sell.tp2.isNaN())
         assertEquals(186.4, after382Sell.tpx, 1e-9)
 
-        // بررسی کارگزار در §18-20:
-        // ۱) کلوز کندل بالای ورود بدون رسیدن به TP1 حد ضرر را جابه‌جا نمی‌کند (حذف تبصرهٔ «خیلی مهم» قبلی).
-        // ۲) با رسیدن قیمت به TP1 (0.382 یا 0.5)، حد ضرر به قیمت ورود منتقل می‌شود و در صورت برگشت قیمت، نتیجهٔ ضرر بدون کارمزد صفر است.
+        // ۱) سفارش بعد از 0.382 فیبو باز شده (§18-20 و §18-24):
+        // ۵۰٪ حجم در 0.5 فیبو بسته می‌شود + سر‌به‌سر شدن بدون کمیسیون (commission = 0)؛
+        // در صورت برگشت به نقطهٔ ورود، ۵۰٪ باقی‌مانده دقیقاً در نقطهٔ ورود بدون کمیسیون بسته می‌شود.
         val cfg = Settings().apply {
             mmMode = MoneyMode.MIXED
             initialEquity = 1000.0
             cmsnAuto = false
-            cmsnManual = 0.50 // اسپرد/کمیسیون تحمیلی
+            cmsnManual = 0.50
         }
         val b = PaperBroker(cfg)
         b.balance = 1300.0 // بالاتر از M = 1200 ⇒ فاز ManageCM فعال
         val s = Setup(1L, 1, 5, 165.0, 155.0, 1, 0).apply {
             hvH = 169.99; hvL = 165.0; sl = 164.98
             tp1 = after382Buy.tp1 // 175.0 (ناحیه 0.5 فیبو چون ورود 170 بعد از 169.1 است)
-            tp2 = after382Buy.tp2
+            tp2 = after382Buy.tp2 // NaN
             tpx = after382Buy.tpx // 213.6
         }
         val t0 = 1_700_000_000_000L
@@ -92,25 +92,107 @@ class SpecRevTest {
         assertEquals(1, b.openTrades.size)
         val tr = b.openTrades[0]
         assertEquals(170.0, tr.entry, 1e-9)
+        val totalQty = tr.qty
 
         // کندل کاملاً بالای ورود (171..174) ولی قبل از 175.0 ⇒ حد ضرر نباید به ورود منتقل شود
         b.onBar(Candle(3, t0 + 120_000L, 171.0, 174.0, 171.0, 173.5, 100.0))
         assertFalse(tr.be, "قبل از رسیدن به حد سود اول، معامله نباید سر‌به‌سر شود")
-        assertTrue(tr.slAdj.isNaN(), "قانون حذف‌شدهٔ کلوز بالای سطح سفارش نباید اجرا شود")
 
-        // رسیدن به 175.0 (ناحیه 0.5 فیبو) ⇒ انتقال حد ضرر به قیمت باز شدن سفارش
+        // رسیدن به 175.0 (ناحیه 0.5 فیبو) ⇒ ۵۰٪ معامله بسته می‌شود و حد ضرر بدون کمیسیون به ورود منتقل می‌شود
         b.onBar(Candle(4, t0 + 180_000L, 173.5, 175.2, 173.0, 174.5, 100.0))
         assertTrue(tr.be, "با لمس ناحیه 0.5 فیبو معامله باید سر‌به‌سر شود")
-        assertTrue(tr.open, "در حد سود اول معامله بسته نمی‌شود بلکه فقط حد ضرر به ورود منتقل می‌شود")
+        assertTrue(tr.open, "۵۰٪ باقی‌مانده تا ۱.۲۷۲ یا سر‌به‌سر باز می‌ماند")
+        assertEquals(0.0, tr.commission, 1e-9, "با سر‌به‌سر شدن معامله کارمزد کمیسیون باید صفر شود (§18-20 و §18-24)")
+        val tp1Fill = tr.fills.first { it.kind == "TP1" }
+        assertEquals(totalQty * 0.50, tp1Fill.qty, 1e-9, "در حالت بعد از ۰.۳۸۲ باید ۵۰٪ حجم در ۰.۵ فیبو بسته شود (§18-20)")
 
-        // برگشت قیمت به قیمت باز شدن سفارش (170.0) ⇒ بسته شدن با نتیجهٔ ضرر صفر (بدون کارمزد)
+        // برگشت قیمت به نقطهٔ ورود (170.0) ⇒ بسته شدن ۵۰٪ باقی‌مانده دقیقاً در نقطهٔ ورود با ضرر صفر و بدون کمیسیون
         b.onBar(Candle(5, t0 + 240_000L, 174.0, 174.2, 169.9, 170.2, 100.0))
         assertFalse(tr.open)
-        assertEquals(0.0, tr.grossPnl(), 1e-9, "نتیجهٔ ضرر بدون کارمزد باید دقیقاً صفر باشد (§18-20)")
-        assertEquals(0, tr.outcome(), "خروجی معامله باید سر‌به‌سر (0) باشد")
-        assertTrue(tr.commission > 0.0)
-        assertEquals(-tr.commission, tr.pnl(), 1e-9, "نتیجهٔ خالص فقط شامل کسر کارمزد است")
-        assertEquals(tr.commission, b.mm.cmsnLost, 1e-9, "در فاز ManageCM کارمزد معاملهٔ سر‌به‌سر در cmsnLost انباشته می‌شود")
+        val beFill = tr.fills.first { it.kind == "BE" }
+        assertEquals(totalQty * 0.50, beFill.qty, 1e-9)
+        assertEquals(0.0, beFill.pnl, 1e-9, "خروج سر‌به‌سر روی ۵۰٪ باقی‌مانده دقیقاً در نقطهٔ ورود با نتیجهٔ صفر است")
+        assertEquals(0.0, tr.commission, 1e-9, "کارمزد کمیسیون در سر‌به‌سر صفر است (§18-24)")
+        assertEquals(0.0, b.mm.cmsnLost, 1e-9, "هیچ کمیسیونی نباید در cmsnLost انباشته شود")
+
+        // ۲) §4-9 «حد سود اول و قیمت ورود در یک کندل»:
+        // اگر در یک کندل هم قیمت ورود (160) و هم 0.382 فیبو (169.1) لمس شود،
+        // ورود ثبت می‌شود، حد سود اول به 0.5 فیبو (175) منتقل می‌شود و ۵۰٪ در 0.5 و ۵۰٪ در 1.272 بسته می‌شود.
+        val sSame = Setup(2L, 1, 5, 160.0, 155.0, 1, 0).apply {
+            hvH = 159.99; hvL = 155.0; sl = 154.98
+            tp1 = before382.tp1 // 169.1 (0.382)
+            tp2 = before382.tp2 // 175.0 (0.5)
+            tpx = before382.tpx // 213.6 (1.272)
+        }
+        assertTrue(b.registerLimit(sSame, Candle(6, t0 + 300_000L, 161.0, 162.0, 160.5, 161.5, 100.0)))
+        // کندل ۷: هم ورود (160.0) و هم 0.382 فیبو (169.1) لمس می‌شود (تا 170.0)، ولی هنوز به 0.5 فیبو (175.0) نرسیده است
+        b.onBar(Candle(7, t0 + 360_000L, 161.0, 170.0, 159.5, 169.5, 100.0))
+        assertEquals(1, b.openTrades.size, "معامله نباید در کندل ورود سر‌به‌سر بسته شود (§4-9)")
+        val trSame = b.openTrades[0]
+        assertEquals(175.0, trSame.tp1, 1e-9, "حد سود اول باید به ۰.۵ فیبو منتقل شده باشد (§4-9)")
+        assertTrue(trSame.tp2.isNaN(), "معامله به حالت دوپله‌ای ۵۰٪/۵۰٪ تبدیل می‌شود")
+        assertFalse(trSame.be, "حد ضرر فقط بعد از لمس ۰.۵ فیبو به نقطهٔ ورود منتقل می‌شود (§4-9)")
+
+        // کندل ۸: لمس 0.5 فیبو (175.0) ⇒ ۵۰٪ بسته می‌شود و حد ضرر به نقطهٔ ورود منتقل می‌شود
+        b.onBar(Candle(8, t0 + 420_000L, 169.5, 176.0, 169.0, 175.5, 100.0))
+        assertTrue(trSame.be, "پس از لمس ۰.۵ فیبو حد ضرر به نقطهٔ ورود منتقل می‌شود")
+        assertEquals(0.0, trSame.commission, 1e-9)
+        assertEquals(trSame.qty * 0.50, trSame.fills.first { it.kind == "TP1" }.qty, 1e-9)
+
+        // کندل ۹: لمس 1.272 فیبو (213.6) ⇒ ۵۰٪ باقی‌مانده در حد سود نهایی بسته می‌شود
+        b.onBar(Candle(9, t0 + 480_000L, 175.5, 215.0, 175.0, 214.0, 100.0))
+        assertFalse(trSame.open)
+        assertEquals(trSame.qty * 0.50, trSame.fills.first { it.kind == "TPX" }.qty, 1e-9)
+    }
+
+    @Test
+    fun `doc 4-7 and 4-8 strictly one order per LV whether filled expired or invalidated and 3rd LV touch`() {
+        val cfg = Settings().apply {
+            tfS = Tf.H1; tfM = Tf.M15; tf1 = Tf.M1; tf2 = Tf.M1
+            hvMarkFirstIncrease = true
+        }
+        val e = Engine(cfg)
+        val b = PaperBroker(cfg)
+        e.broker = b; b.engine = e
+        e.HH = 2050.0; e.HL = 1980.0; e.trend = 1
+
+        // الف) انقضای سفارش معلق با عبور از HH ⇒ ستاپ به مرحلهٔ ۸ می‌رود و سفارش دومی برای همان LV مسلح نمی‌شود (§4-8)
+        val sExp = Setup(1L, 1, 6, 2010.0, 2000.0, 1, 0).apply {
+            midRef = 2001.0; midConfirmBi = -1
+            lvBi = 0; lvConfBi = 0; lvH = 2008.0; lvL = 2004.0; lvReEntered = true
+            hvBi = 0; hvConfBi = 0; hvH = 2012.0; hvL = 2009.0
+            armBi = 0; prevEntry = 2012.01; priceExpiryRef = 2050.0
+            entry = 2012.01; sl = 2008.98; tp1 = 2020.0; tp2 = 2025.0; tpx = 2060.0
+        }
+        e.setups.add(sExp)
+        val c0 = Candle(0, 0L, 2010.0, 2013.0, 2010.0, 2012.5, 100.0)
+        assertTrue(b.registerLimit(sExp, c0))
+        // بار ۱: کلوز بالای HH (2051 > 2050) بدون لمس ورود ⇒ انقضای سفارش
+        val c1 = Candle(1, 60_000L, 2040.0, 2052.0, 2039.0, 2051.0, 100.0)
+        val bars = mutableListOf(c0, c1)
+        e.processed = 1
+        e.feed(bars, lastIsClosed = true)
+        b.onBar(c1)
+        assertEquals(8, sExp.stage, "پس از انقضای سفارش، برای همان LV سفارش دومی مجاز نیست و ستاپ غیرفعال می‌شود (§4-8)")
+        assertFalse(sExp.rearmAllowed)
+        assertEquals(0, b.pendingOrders.size)
+
+        // ب) لمس سوم باکس LV پس از ۲ بار مصرف ⇒ سفارش معلق لغو و ستاپ غیرفعال می‌شود (§4-7)
+        val sLv3 = Setup(2L, -1, 6, 2040.0, 2030.0, 1, 0).apply {
+            midRef = 2039.0; midConfirmBi = -1
+            lvBi = 0; lvConfBi = 0; lvH = 2036.0; lvL = 2032.0; lvReEntered = true; lvUses = 2
+            hvBi = 0; hvConfBi = 1; hvH = 2031.0; hvL = 2028.0
+            armBi = 1; prevEntry = 2027.99; priceExpiryRef = 1980.0
+            entry = 2027.99; sl = 2031.02; tp1 = 2015.0; tp2 = 2010.0; tpx = 1970.0
+        }
+        e.setups.add(sLv3)
+        assertTrue(b.registerLimit(sLv3, c1))
+        val c2 = Candle(2, 120_000L, 2031.5, 2032.5, 2031.0, 2031.8, 100.0) // لمس کف باکس LV (2032.0..2036.0) برای بار سوم!
+        bars.add(c2)
+        e.feed(bars, lastIsClosed = true)
+        b.onBar(c2)
+        assertEquals(8, sLv3.stage, "با لمس سوم باکس LV سفارش معلق لغو و ستاپ غیرفعال می‌شود (§4-7)")
+        assertEquals(0, b.pendingOrders.size)
     }
 
     @Test
