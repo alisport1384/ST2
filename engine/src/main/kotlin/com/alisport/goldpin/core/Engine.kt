@@ -206,6 +206,22 @@ class Engine(val cfg: Settings) {
     var curVol = 0.0
     var prevChartVol = Double.NaN
 
+    internal data class T2Bar(val bar: Candle, val prevVol: Double)
+    internal data class T1Bar(
+        val bar: Candle,
+        val prevVol: Double,
+        val startBi: Int,
+        val closeBi: Int,
+        val lowBi: Int,
+        val highBi: Int
+    )
+    internal val t2History = ArrayList<T2Bar>()
+    internal val t1History = ArrayList<T1Bar>()
+
+    /** §18-22: سقف و کف کندل ساختار مرجع Y برای ابطال نواحی کندل‌های درونی X و X+n */
+    var zoneRefH = Double.NaN
+    var zoneRefL = Double.NaN
+
     // پیش‌نمایش زنده (کندل باز) — فقط برای نمایش، بدون تغییر وضعیت
     val livePreview = ArrayList<String>()
     var liveCandle: Candle? = null
@@ -256,6 +272,8 @@ class Engine(val cfg: Settings) {
         lastResult = "-"; stageFa = "-"
         prevT1Vol = Double.NaN; zoneSeq = 0; setupSeq = 0
         processed = 0; curBi = -1; curT = 0; curVol = 0.0; prevChartVol = Double.NaN
+        t2History.clear(); t1History.clear()
+        zoneRefH = Double.NaN; zoneRefL = Double.NaN
         livePreview.clear(); liveCandle = null
         times.clear()
     }
@@ -381,35 +399,57 @@ class Engine(val cfg: Settings) {
         aggStep(aggM, i, cd, isNewM)
         aggStep(agg1, i, cd, isNew1)
 
+        if (agg1.closedNow && agg1.cl != null) {
+            val q1 = agg1.cl!!
+            val endBi = maxOf(q1.bi, i - 1)
+            var lowBi = q1.bi
+            var lowV = Double.POSITIVE_INFINITY
+            var highBi = q1.bi
+            var highV = Double.NEGATIVE_INFINITY
+            for (idx in t2History.size - 1 downTo 0) {
+                val b = t2History[idx].bar
+                if (b.bi < q1.bi) break
+                if (b.bi <= endBi) {
+                    if (b.l < lowV) { lowV = b.l; lowBi = b.bi }
+                    if (b.h > highV) { highV = b.h; highBi = b.bi }
+                }
+            }
+            t1History.add(T1Bar(q1, prevT1Vol, q1.bi, endBi, lowBi, highBi))
+            while (t1History.size > 1000) t1History.removeAt(0)
+        }
+
         // ترتیب دقیقاً مثل Pine: ساختار → میانی → تریگر۱ → تریگر۲
         if (aggS.closedNow) {
             aggS.cl?.let { structureEngine(it) }
-            // §4-8: فقط پس از گذشت یک کندل ساختار کامل از زمان آخرین مسلح‌شدن،
-            // مسلح‌مجدد بسته می‌شود. اگر معامله باز باشد، خود معامله ادامه پیدا می‌کند.
+        }
+        if (aggM.closedNow) middleEngine(aggM.cl!!)
+        if (aggS.closedNow) {
+            // §4-8 / §18-14 / §18-21: پس از بسته شدن کندل ساختار (و پس از بررسی آخرین کندل میانی آن در middleEngine):
+            //  • هر ناحیهٔ ساختاری که توسط کندلی دیگر در تایم‌فریم ساختار لمس شده باشد باطل (CONSUMED) می‌شود (§18-21)؛
+            //  • ستاپ آن تا زمانی که تایید میانی باطل نشده فعال می‌ماند (§18-14).
             val it2 = setups.iterator()
             while (it2.hasNext()) {
                 val s = it2.next()
-                // §18-14: پس از لمس ناحیهٔ ساختار، اولین کندل ساختاری که بعد از لمس باز و بسته شود
-                // ناحیه را باطل (مصرف‌شده) می‌کند؛ ستاپ تا زمان اعتبار تایید میانی فعال می‌ماند.
-                if (!s.zUsed && !s.zGone && s.stage in 1..7 && s.touchT > 0L) {
+                if (!s.zUsed && s.touchT > 0L) {
                     val sbT = aggS.cl?.t ?: 0L
-                    if (sbT > Tf.bucket(cfg.tfS, s.touchT)) {
+                    if (sbT >= Tf.bucket(cfg.tfS, s.touchT)) {
                         s.zUsed = true
-                        zones.firstOrNull { it.dir == s.dir && it.idx == s.zIdx && it.createdBi == s.zBi && it.status == ZoneStatus.ACTIVE }
-                            ?.let { it.status = ZoneStatus.CONSUMED; it.endBi = i; it.endT = cd.t }
-                        if (s.stage == 1 || s.midRef.isNaN()) {
-                            // بدون تایید میانی معتبر چیزی برای ادامه نیست ⇒ ستاپ غیرفعال تا لمس ناحیهٔ بعدی
-                            s.zGone = true
-                            s.stage = 8
-                            s.note = "ناحیهٔ ساختار مصرف شد (یک کندل ساختار پس از لمس) — بدون تایید میانی"
-                            events.add("[${s.id}] ناحیهٔ ساختار مصرف شد — ستاپ غیرفعال")
-                        } else {
-                            s.note = "ناحیهٔ ساختار مصرف شد — ستاپ تا ابطال تایید میانی فعال است"
-                            events.add("[${s.id}] ناحیهٔ ساختار مصرف شد؛ ستاپ تا ابطال تایید میانی فعال می‌ماند")
+                        markStructureZoneStatus(s, ZoneStatus.CONSUMED, i, cd.t)
+                        if (!s.zGone && s.stage in 1..7) {
+                            if (s.stage == 1 || s.midRef.isNaN()) {
+                                // بدون تایید میانی معتبر چیزی برای ادامه نیست ⇒ ستاپ غیرفعال تا لمس ناحیهٔ بعدی
+                                s.zGone = true
+                                s.stage = 8
+                                s.note = "ناحیهٔ ساختار مصرف شد (یک کندل ساختار پس از لمس) — بدون تایید میانی"
+                                events.add("[${s.id}] ناحیهٔ ساختار مصرف شد — ستاپ غیرفعال")
+                            } else {
+                                s.note = "ناحیهٔ ساختار مصرف شد — ستاپ تا ابطال تایید میانی فعال است"
+                                events.add("[${s.id}] ناحیهٔ ساختار مصرف شد؛ ستاپ تا ابطال تایید میانی فعال می‌ماند")
+                            }
+                            addMarker(i, if (s.dir == 1) s.zBot else s.zTop, 10, "ناحیهٔ ساختار مصرف شد (§18-14)")
+                            lg("ZONE", "ناحیهٔ ساختار پس از لمس و گذشت یک کندل ساختار کامل باطل شد · ستاپ #${s.id}",
+                                "zone=${f2(s.zBot)}-${f2(s.zTop)} stage=${s.stage} bar=$i")
                         }
-                        addMarker(i, if (s.dir == 1) s.zBot else s.zTop, 10, "ناحیهٔ ساختار مصرف شد (§18-14)")
-                        lg("ZONE", "ناحیهٔ ساختار پس از لمس و گذشت یک کندل ساختار کامل باطل شد · ستاپ #${s.id}",
-                            "zone=${f2(s.zBot)}-${f2(s.zTop)} stage=${s.stage} bar=$i")
                     }
                 }
                 val structureElapsed = fullStructureElapsed(s.armBi, i, cfg.tfS, cfg.tf2)
@@ -429,8 +469,9 @@ class Engine(val cfg: Settings) {
                 }
             }
         }
-        if (aggM.closedNow) middleEngine(aggM.cl!!)
         if (agg1.closedNow) trigger1Engine(agg1.cl!!)
+        t2History.add(T2Bar(cd, prevChartVol))
+        while (t2History.size > 4000) t2History.removeAt(0)
         trigger2Engine(cd)
 
         // ریزکندل‌های تریگر۲ داخل کندل ساختار جاری
@@ -464,17 +505,30 @@ class Engine(val cfg: Settings) {
     // ═══════════════════════════════════════════════════════════════════════════
     //  ⑩ موتور ساختار (کندل مهم · Ready · pin · روند · ناحیه فیکس‌رنج)
     // ═══════════════════════════════════════════════════════════════════════════
+    private fun updateStructureZoneRef(sb: Candle): Boolean {
+        val insideRef = !zoneRefH.isNaN() && !zoneRefL.isNaN() &&
+            sb.h <= zoneRefH && sb.l >= zoneRefL &&
+            sb.o >= zoneRefL && sb.o <= zoneRefH &&
+            sb.c >= zoneRefL && sb.c <= zoneRefH
+        if (!insideRef) {
+            zoneRefH = sb.h
+            zoneRefL = sb.l
+        }
+        return insideRef
+    }
+
     private fun structureEngine(sb: Candle) = structureEngine(sb, buildZones = true)
 
     private fun structureEngine(sb: Candle, buildZones: Boolean) {
         structBars.add(sb)
         while (structBars.size > 400) structBars.removeAt(0)
         val nS = structBars.size
+        val insideRef = updateStructureZoneRef(sb)
 
         // استراتژی ۲: تعیین روند (کندل مهم · Ready · پین · HH/HL/LL/LH) حذف است؛ مستقیم ناحیه‌ها ثبت می‌شوند.
         if (cfg.strategy == Strategy.NO_TREND) {
             // در پیش‌بارگذاری تاریخچهٔ ساختار (buildZones=false) دیتای تریگر۲ نداریم ⇒ هیچ کاری لازم نیست.
-            if (buildZones) registerZones(sb)
+            if (buildZones) registerZones(sb, insideRef)
             return
         }
 
@@ -827,14 +881,14 @@ class Engine(val cfg: Settings) {
         // توالی/روند ثبت می‌شود و هیچ باکس پروفایل حدسی ساخته نمی‌شود.
         if (!buildZones) return
 
-        registerZones(sb)
+        registerZones(sb, insideRef)
     }
 
     /**
      * پروفایل حجم فیکس‌رنج روی کندل ساختار بستهٔ [sb] + ثبت ناحیه‌ها و ستاپ‌هایشان (حداکثر ۲ ناحیه در هر کندل، §۴-۵ سند).
      * فقط روی کندل بستهٔ ساختار صدا زده می‌شود (§۱۸-۱۵).
      */
-    private fun registerZones(sb: Candle) {
+    private fun registerZones(sb: Candle, insideRef: Boolean) {
         // ── پروفایل حجم فیکس‌رنج + ثبت ناحیه‌ها ──
         val bullC = sb.c > sb.o
         val bearC = sb.c < sb.o
@@ -847,6 +901,13 @@ class Engine(val cfg: Settings) {
         profileOnLastS = prof
         lastProfBars = microS.size
         if (cfg.showPocVA && !prof.poc.isNaN()) lastPocPx = prof.poc
+        if (insideRef) {
+            if (dirOK) {
+                lg("ZONE", "نواحی کندل ساختار درونی باطل شد (§18-22)",
+                    "bar=${sb.bi} o=${f2(sb.o)} h=${f2(sb.h)} l=${f2(sb.l)} c=${f2(sb.c)} ref=[${f2(zoneRefL)}..${f2(zoneRefH)}]")
+            }
+            return
+        }
         if (dirOK && !prof.step.isNaN() && prof.step > 0) {
             // §4-5: یک پیمایش برای هر کندل ساختار؛ حداکثر ۲ ناحیه در کل و نامزدهای ردشده هم
             // سهمیه را مصرف می‌کنند (شمارهٔ Z1/Z2 بین پذیرفته‌ها و ردشده‌ها مشترک است).
@@ -878,26 +939,20 @@ class Engine(val cfg: Settings) {
         }
     }
 
+    private fun markStructureZoneStatus(s: Setup, status: Int, endBi: Int = curBi, endT: Long = curT) {
+        zones.firstOrNull { it.dir == s.dir && it.idx == s.zIdx && it.createdBi == s.zBi && it.status == ZoneStatus.ACTIVE }
+            ?.let { it.status = status; it.endBi = endBi; it.endT = endT }
+    }
+
     private fun pruneSetups() {
-        //  ⚠ ستاپ‌های در حال معامله (stage=7) هرگز حذف نمی‌شوند — §۷-۲ و قانون
-        //  «معاملهٔ باز هرگز به‌زور بسته نمی‌شود». اول ستاپ‌های پایان‌یافته (stage=8)،
-        //  سپس ستاپ‌های دست‌نخورده (stage=0) و مراحل اولیه حذف می‌شوند تا ستاپ‌های دارای
-        //  محدودهٔ فعال تریگر ۱ و ۲ محفوظ بمانند.
+        // §4-5 و §18-19: تعداد ناحیه‌های ساختار نامحدود است و هر ناحیه تا زمانی که طبق قواعد
+        // باطل/مصرف نشود باقی می‌ماند؛ بنابراین فقط پروندهٔ ستاپ‌های پایان‌یافته (stage=8) برای
+        // جلوگیری از رشد بی‌نهایت حافظه پاک‌سازی می‌شود.
         val trackedCap = max(TRACKED_SETUPS_MIN, cfg.maxSetups)
         while (setups.size > trackedCap) {
-            var pick = setups.indexOfFirst { it.stage == 8 }
-            if (pick < 0) pick = setups.indexOfFirst { it.stage == 0 }
-            if (pick < 0) pick = setups.indexOfFirst { it.stage in 1..3 }
-            if (pick < 0) pick = setups.indexOfFirst { it.stage in 4..5 }
-            if (pick < 0) pick = setups.indexOfFirst { it.stage == 6 }
-            if (pick < 0) break   // همه ستاپ‌ها در معامله‌اند — بیش از این حذف نمی‌کنیم
-            val s = setups.removeAt(pick)
-            if (s.stage < 7) {
-                closeT1Box(s, ZoneStatus.CAP, curBi, curT)
-                closeT2Box(s, ZoneStatus.CAP, curBi, curT)
-                events.add("[${s.id}] پروندهٔ ستاپ بسته شد (سقف ستاپ‌های هم‌زمان)")
-                broker?.onSetupInvalidated(s, curT, curBi)
-            }
+            val pick = setups.indexOfFirst { it.stage == 8 }
+            if (pick < 0) break
+            setups.removeAt(pick)
         }
     }
 
@@ -951,6 +1006,7 @@ class Engine(val cfg: Settings) {
     //  ⑪ موتور میانی (تایید میانی · کندل مارک‌شده · ابطال)
     // ═══════════════════════════════════════════════════════════════════════════
     private fun middleEngine(mc: Candle) {
+        val mcCloseBi = maxOf(mc.bi, curBi - 1)
         for (s in setups) {
             if (s.stage < 1 || s.stage >= 7) continue
             if (s.midRef.isNaN() && (s.touchMidStart <= 0L || mc.t >= s.touchMidStart)) {
@@ -958,7 +1014,7 @@ class Engine(val cfg: Settings) {
                 s.midRef = if (s.dir == 1) mc.l else mc.h
                 s.midBi = mc.bi
                 s.midT = mc.t
-                s.midConfirmBi = curBi
+                s.midConfirmBi = mcCloseBi
                 s.markBi = -1; s.markH = Double.NaN; s.markL = Double.NaN
                 s.stage = 2
                 cnt.mid++
@@ -966,6 +1022,9 @@ class Engine(val cfg: Settings) {
                 lg("ENGINE", "تایید میانی انجام شد · ستاپ #${s.id}",
                     if (s.dir == 1) "کف تایید=${f2(s.midRef)} bar=${mc.bi}" else "سقف تایید=${f2(s.midRef)} bar=${mc.bi}")
                 addMarker(mc.bi, s.midRef, 3, if (s.dir == 1) "کف تایید میانی" else "سقف تایید میانی")
+                if (cfg.tf1 < cfg.tfM) {
+                    scanLvFromMidExtreme(s, mc, mcCloseBi, s.dir == 1)
+                }
             } else if (!s.midRef.isNaN()) {
                 // ✖ ابطال تایید میانی — قبل از مارک چک می‌شود، چون کندل مارک هم
                 //   می‌تواند (حتی در همان کندل پس از تایید، در پاس‌های بعدی) سطح را بشکند.
@@ -998,6 +1057,7 @@ class Engine(val cfg: Settings) {
                         // §18-14: ناحیهٔ ساختار مصرف شده بود ⇒ با ابطال تایید میانی ستاپ هم باطل می‌شود
                         s.zGone = true
                         s.stage = 8
+                        markStructureZoneStatus(s, ZoneStatus.CONSUMED, curBi, curT)
                         s.note = "ابطال تایید میانی پس از مصرف ناحیهٔ ساختار — ستاپ باطل"
                         events.add("[${s.id}] تایید میانی باطل شد و ناحیهٔ ساختار مصرف شده بود — ستاپ باطل")
                         lg("ENGINE", "ستاپ #${s.id} باطل شد (ابطال میانی پس از مصرف ناحیهٔ ساختار، §18-14)", "bar=${mc.bi}")
@@ -1005,13 +1065,16 @@ class Engine(val cfg: Settings) {
                         s.midRef = if (s.dir == 1) mc.l else mc.h
                         s.midBi = mc.bi
                         s.midT = mc.t
-                        s.midConfirmBi = curBi
+                        s.midConfirmBi = mcCloseBi
                         s.touchMidStart = mc.t
                         s.stage = 2
                         cnt.mid++
                         lg("ENGINE", "تایید میانی انجام شد (کندل باطل‌کننده، §18-8) · ستاپ #${s.id}",
                             if (s.dir == 1) "کف تایید=${f2(s.midRef)} bar=${mc.bi}" else "سقف تایید=${f2(s.midRef)} bar=${mc.bi}")
                         addMarker(mc.bi, s.midRef, 3, if (s.dir == 1) "کف تایید میانی" else "سقف تایید میانی")
+                        if (cfg.tf1 < cfg.tfM) {
+                            scanLvFromMidExtreme(s, mc, mcCloseBi, s.dir == 1)
+                        }
                     } else {
                         s.touchMidStart = aggM.cur?.t ?: mc.t
                         s.stage = 1
@@ -1021,6 +1084,218 @@ class Engine(val cfg: Settings) {
                     s.markH = mc.h; s.markL = mc.l; s.markBi = mc.bi
                     if (s.stage == 2) s.stage = 3
                 }
+            }
+        }
+    }
+
+    /**
+     * §18-16 و §18-23: اسکن کندل‌های بستهٔ تریگر۱ از کف/سقف تایید میانی تا جایی که قیمت هست ([mcCloseBi])
+     * برای یافتن اولین کندل بسته با حجم کمتر از کندل بستهٔ قبلی که باطل نشده است.
+     * در صورت پیدا نشدن، اسکن برای ناحیهٔ جدید روی کندل‌های بعدی ادامه می‌یابد.
+     */
+    private fun scanLvFromMidExtreme(s: Setup, mc: Candle, mcCloseBi: Int, bull: Boolean) {
+        if (t1History.isEmpty()) return
+        var extT = mc.t
+        var bestPrice = if (bull) Double.POSITIVE_INFINITY else Double.NEGATIVE_INFINITY
+        for (idx in t2History.indices) {
+            val b = t2History[idx].bar
+            if (b.bi < mc.bi) continue
+            if (b.bi > mcCloseBi) break
+            if (bull) {
+                if (b.l < bestPrice) { bestPrice = b.l; extT = b.t }
+            } else {
+                if (b.h > bestPrice) { bestPrice = b.h; extT = b.t }
+            }
+        }
+        val extBucketT = Tf.bucket(cfg.tf1, extT)
+        val allFromExt = t1History.filter { it.bar.t >= extBucketT && it.closeBi <= mcCloseBi }
+        if (allFromExt.isEmpty()) return
+
+        fun evaluateCandidate(cIdx: Int): Boolean {
+            val cand = allFromExt[cIdx]
+            if (cand.prevVol.isNaN() || cand.bar.v >= cand.prevVol) return false
+            var confirmed = false
+            var confBi = -1
+            var confT = 0L
+            var uses = 0
+            var touched = false
+            for (j in (cIdx + 1) until allFromExt.size) {
+                val r = allFromExt[j]
+                val q = r.bar
+                if (!confirmed) {
+                    val viol = if (bull) q.l < cand.bar.l else q.h > cand.bar.h
+                    val conf = if (bull) q.c > cand.bar.h else q.c < cand.bar.l
+                    if (viol) return false
+                    if (conf) {
+                        confirmed = true
+                        confBi = r.closeBi
+                        confT = q.t
+                    }
+                } else {
+                    val violAfter = if (bull) q.l < cand.bar.l else q.h > cand.bar.h
+                    if (violAfter) return false
+                    val inside = q.l <= cand.bar.h && q.h >= cand.bar.l
+                    if (uses >= 2 && inside) return false
+                    if (inside && !touched) touched = true
+                    if (touched && (if (bull) q.c > cand.bar.h else q.c < cand.bar.l)) {
+                        uses++
+                        touched = false
+                    }
+                }
+            }
+            if (confirmed) {
+                for (idx in t2History.indices) {
+                    val b = t2History[idx].bar
+                    if (b.bi <= confBi) continue
+                    if (b.bi > mcCloseBi) break
+                    val violBar = if (bull) b.l < cand.bar.l else b.h > cand.bar.h
+                    if (violBar) return false
+                }
+            }
+            s.lvBi = cand.bar.bi
+            s.lvT = cand.bar.t
+            s.lvH = cand.bar.h
+            s.lvL = cand.bar.l
+            s.lvUses = uses
+            s.lvTouched = touched
+            s.lvUsed = false
+            if (confirmed) {
+                s.lvConfBi = confBi
+                s.lvConfT = confT
+                s.stage = 4
+                cnt.lv++
+                closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
+                val zb1 = ZoneBox(zoneSeq++, s.dir, 1, s.lvH, s.lvL, s.lvBi, s.lvT, 0, 0, confBi, curT, ZoneStatus.ACTIVE)
+                t1Zones.add(zb1)
+                s.lvZoneId = zb1.id
+                addMarker(s.lvBi, if (bull) s.lvH else s.lvL, 5, "ناحیهٔ ولوم کم ✔ (تریگر۱)")
+                lg("ENGINE", "ناحیهٔ ولوم کم تایید شد (§18-16) · ستاپ #${s.id}",
+                    "box=${f2(s.lvL)}-${f2(s.lvH)} bar=${s.lvBi} مرحله=${s.stage}")
+                alarm(AlertKind.LV, "ناحیهٔ ولوم کم تایید شد",
+                    "ستاپ #${s.id} · باکس ${f2(s.lvL)} تا ${f2(s.lvH)} · منتظر کندل ولوم زیاد (تریگر ۲)")
+                scanHvFromLvExtreme(s, mcCloseBi, bull)
+            } else {
+                s.lvConfBi = -1
+                s.lvConfT = 0L
+                s.stage = 3
+                addMarker(s.lvBi, if (bull) s.lvL else s.lvH, 4, "کندل ولوم کم (تریگر۱)")
+                lg("ENGINE", "کندل ولوم کم مارک شد (§18-16) · ستاپ #${s.id}",
+                    "vol=${f2(cand.bar.v)} < prev=${f2(cand.prevVol)} hi=${f2(s.lvH)} lo=${f2(s.lvL)} bar=${s.lvBi}")
+            }
+            return true
+        }
+
+        // ابتدا کندل‌های پس از باکتِ کف/سقف (یا همان باکت اگر هم‌جهت با حرکت برگشتی بسته شده باشد)
+        for (i in allFromExt.indices) {
+            val r = allFromExt[i]
+            val dirMatch = if (bull) r.bar.c >= r.bar.o else r.bar.c <= r.bar.o
+            if (r.bar.t > extBucketT || dirMatch) {
+                if (evaluateCandidate(i)) return
+            }
+        }
+        for (i in allFromExt.indices) {
+            if (allFromExt[i].bar.t == extBucketT) {
+                if (evaluateCandidate(i)) return
+            }
+        }
+    }
+
+    /**
+     * §18-17: اسکن کندل‌های بستهٔ تریگر۲ از کف/سقف ناحیهٔ تاییدشدهٔ LV تا جایی که قیمت هست ([upToBi])
+     * برای یافتن اولین کندل بسته با حجم بیشتر از کندل بستهٔ قبلی که باطل نشده و لمس نشده است.
+     * در صورت پیدا شدن (و تایید شدن)، مسلح می‌شود؛ در صورت پیدا نشدن، اسکن برای ناحیهٔ جدید ادامه می‌یابد.
+     */
+    private fun scanHvFromLvExtreme(s: Setup, upToBi: Int, bull: Boolean) {
+        s.lvReEntered = true
+        s.hvScanBi = curBi
+        if (t2History.isEmpty()) return
+        if (cfg.tf2 >= cfg.tf1 && (s.lvConfBi < 0 || upToBi <= s.lvConfBi)) return
+
+        val lvRec = t1History.lastOrNull { it.bar.t == s.lvT && it.bar.bi == s.lvBi }
+            ?: t1History.lastOrNull { it.bar.t == s.lvT }
+        val lvExtBi = if (cfg.tf2 >= cfg.tf1) {
+            s.lvConfBi + 1
+        } else if (lvRec != null) {
+            if (bull) lvRec.lowBi else lvRec.highBi
+        } else {
+            var eb = s.lvBi
+            var best = if (bull) Double.POSITIVE_INFINITY else Double.NEGATIVE_INFINITY
+            for (idx in t2History.indices) {
+                val b = t2History[idx].bar
+                if (b.bi < s.lvBi) continue
+                if (b.bi > upToBi) break
+                if (Tf.bucket(cfg.tf1, b.t) != s.lvT) continue
+                if (bull) {
+                    if (b.l < best) { best = b.l; eb = b.bi }
+                } else {
+                    if (b.h > best) { best = b.h; eb = b.bi }
+                }
+            }
+            eb
+        }
+
+        val bars = t2History.filter { it.bar.bi >= lvExtBi && it.bar.bi <= upToBi }
+        if (bars.isEmpty()) return
+        val expRef = if (cfg.strategy == Strategy.NO_TREND) Double.NaN else if (bull) HH else LL
+
+        fun evaluateHvCandidate(cIdx: Int): Boolean {
+            val cand = bars[cIdx]
+            if (cand.prevVol.isNaN() || cand.bar.v <= cand.prevVol) return false
+            var confirmed = false
+            var confCandle: Candle? = null
+            var confBi = -1
+            val eLvl = cfg.entryLevel(bull, cand.bar.h, cand.bar.l)
+            for (j in (cIdx + 1) until bars.size) {
+                val b = bars[j].bar
+                if (!confirmed) {
+                    val viol = if (bull) b.l < cand.bar.l else b.h > cand.bar.h
+                    val conf = if (bull) b.c > cand.bar.h else b.c < cand.bar.l
+                    if (viol) return false
+                    if (conf) {
+                        confirmed = true
+                        confCandle = b
+                        confBi = b.bi
+                    }
+                } else {
+                    val hvViol = if (bull) b.l < cand.bar.l else b.h > cand.bar.h
+                    val touched = if (bull) b.l <= eLvl else b.h >= eLvl
+                    val priceExp = priceExpiryCrossed(bull, b.o, b.c, expRef)
+                    val timeExp = fullStructureElapsed(confBi, b.bi, cfg.tfS, cfg.tf2)
+                    if (hvViol || touched || priceExp || timeExp) return false
+                }
+            }
+            s.hvBi = cand.bar.bi
+            s.hvT = cand.bar.t
+            s.hvH = cand.bar.h
+            s.hvL = cand.bar.l
+            s.runMax = cand.bar.v
+            s.stage = 5
+            addMarker(s.hvBi, if (bull) s.hvL else s.hvH, 6, "کندل ولوم زیاد (مارک)")
+            lg("ENGINE", "کندل ولوم زیاد مارک شد (§18-17) · ستاپ #${s.id}",
+                "vol=${f2(cand.bar.v)} hi=${f2(s.hvH)} lo=${f2(s.hvL)} bar=${s.hvBi} مرحله=5")
+            if (confirmed && confCandle != null) {
+                val savedBi = curBi
+                val savedT = curT
+                curBi = upToBi
+                curT = confCandle.t
+                val orderBar = Candle(upToBi, confCandle.t, confCandle.o, confCandle.h, confCandle.l, confCandle.c, confCandle.v)
+                armSetup(s, orderBar, bull)
+                curBi = savedBi
+                curT = savedT
+            }
+            return true
+        }
+
+        for (i in bars.indices) {
+            val r = bars[i]
+            val dirMatch = if (bull) r.bar.c >= r.bar.o else r.bar.c <= r.bar.o
+            if (r.bar.bi > lvExtBi || dirMatch) {
+                if (evaluateHvCandidate(i)) return
+            }
+        }
+        for (i in bars.indices) {
+            if (bars[i].bar.bi == lvExtBi) {
+                if (evaluateHvCandidate(i)) return
             }
         }
     }
@@ -1087,7 +1362,8 @@ class Engine(val cfg: Settings) {
                     if (violL) {
                         s.lvBi = -1; s.lvT = 0L; s.lvH = Double.NaN; s.lvL = Double.NaN
                     } else if (confL) {
-                        s.lvConfBi = curBi; s.lvConfT = curT
+                        val lvCloseBi = maxOf(q1.bi, curBi - 1)
+                        s.lvConfBi = lvCloseBi; s.lvConfT = curT
                         lvConfirmedNow = true
                         s.stage = 4
                         cnt.lv++
@@ -1097,7 +1373,7 @@ class Engine(val cfg: Settings) {
                         s.hvBi = -1; s.hvT = 0L
                         if (!cfg.hvScanFirstTouch) s.hvScanBi = curBi
                         closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
-                        val zb1 = ZoneBox(zoneSeq++, s.dir, 1, s.lvH, s.lvL, s.lvBi, s.lvT, 0, 0, curBi, curT, ZoneStatus.ACTIVE)
+                        val zb1 = ZoneBox(zoneSeq++, s.dir, 1, s.lvH, s.lvL, s.lvBi, s.lvT, 0, 0, lvCloseBi, curT, ZoneStatus.ACTIVE)
                         t1Zones.add(zb1)
                         s.lvZoneId = zb1.id
                         addMarker(q1.bi, if (bullL) s.lvH else s.lvL, 5, "ناحیهٔ ولوم کم ✔ (تریگر۱)")
@@ -1105,6 +1381,7 @@ class Engine(val cfg: Settings) {
                             "box=${f2(s.lvL)}-${f2(s.lvH)} bar=${q1.bi} مرحله=${s.stage}")
                         alarm(AlertKind.LV, "ناحیهٔ ولوم کم تایید شد",
                             "ستاپ #${s.id} · باکس ${f2(s.lvL)} تا ${f2(s.lvH)} · منتظر کندل ولوم زیاد (تریگر ۲)")
+                        scanHvFromLvExtreme(s, lvCloseBi, bullL)
                     }
                 }
             }
@@ -1444,10 +1721,12 @@ class Engine(val cfg: Settings) {
                         } else {
                             if (!s.be && !s.tp1.isNaN() && high >= s.tp1) {
                                 s.be = true; s.sl = s.entry
-                                addMarker(curBi, s.entry, 8, "TP1 (38%) ✔ · حدضرر = سر‌به‌سر")
-                                lg("TRADE", "TP1 (۳۸٪) لمس شد → حدضرر به سر‌به‌سر منتقل شد · ستاپ #${s.id}",
+                                val tp1Lbl = if (s.tp2.isNaN()) "TP1 (50%)" else "TP1 (38%)"
+                                val tp1Fa = if (s.tp2.isNaN()) "TP1 (۵۰٪)" else "TP1 (۳۸٪)"
+                                addMarker(curBi, s.entry, 8, "$tp1Lbl ✔ · حدضرر = سر‌به‌سر")
+                                lg("TRADE", "$tp1Fa لمس شد → حدضرر به سر‌به‌سر منتقل شد · ستاپ #${s.id}",
                                     "tp1=${f2(s.tp1)} bar=$curBi")
-                                alarm(AlertKind.TP1, "TP1 (۳۸٪) لمس شد", "ستاپ #${s.id} · حدضرر به سر‌به‌سر منتقل شد · ${f2(s.tp1)}")
+                                alarm(AlertKind.TP1, "$tp1Fa لمس شد", "ستاپ #${s.id} · حدضرر به سر‌به‌سر منتقل شد · ${f2(s.tp1)}")
                             }
                             if (s.be && !s.tp2Hit && !s.tp2.isNaN() && high >= s.tp2) {
                                 s.tp2Hit = true
@@ -1470,10 +1749,12 @@ class Engine(val cfg: Settings) {
                         } else {
                             if (!s.be && !s.tp1.isNaN() && low <= s.tp1) {
                                 s.be = true; s.sl = s.entry
-                                addMarker(curBi, s.entry, 8, "TP1 (38%) ✔ · حدضرر = سر‌به‌سر")
-                                lg("TRADE", "TP1 (۳۸٪) لمس شد → حدضرر به سر‌به‌سر منتقل شد · ستاپ #${s.id}",
+                                val tp1Lbl = if (s.tp2.isNaN()) "TP1 (50%)" else "TP1 (38%)"
+                                val tp1Fa = if (s.tp2.isNaN()) "TP1 (۵۰٪)" else "TP1 (۳۸٪)"
+                                addMarker(curBi, s.entry, 8, "$tp1Lbl ✔ · حدضرر = سر‌به‌سر")
+                                lg("TRADE", "$tp1Fa لمس شد → حدضرر به سر‌به‌سر منتقل شد · ستاپ #${s.id}",
                                     "tp1=${f2(s.tp1)} bar=$curBi")
-                                alarm(AlertKind.TP1, "TP1 (۳۸٪) لمس شد", "ستاپ #${s.id} · حدضرر به سر‌به‌سر منتقل شد · ${f2(s.tp1)}")
+                                alarm(AlertKind.TP1, "$tp1Fa لمس شد", "ستاپ #${s.id} · حدضرر به سر‌به‌سر منتقل شد · ${f2(s.tp1)}")
                             }
                             if (s.be && !s.tp2Hit && !s.tp2.isNaN() && low <= s.tp2) {
                                 s.tp2Hit = true
@@ -1483,19 +1764,6 @@ class Engine(val cfg: Settings) {
                             }
                             if (s.be && high >= s.entry) { done = true; px = s.entry; note = "خروج سر‌به‌سر" }
                         }
-                    }
-                }
-                // §4-9 سند («خیلی مهم»): اگر پس از پر شدن، یک کندل تریگر۲ کاملاً آن‌سوی سطح سفارش
-                // بسته شود (O/H/L/C همگی بالاتر از سطح در خرید / پایین‌تر در فروش، بدون حتی یک تیک لمس)،
-                // حد ضرر یک‌بار به سطح سفارش منتقل می‌شود.
-                if (!done && !s.be && !s.slMidDone && !entrySameBar && !s.entry.isNaN()) {
-                    val clear = if (bull) low > s.entry else high < s.entry
-                    if (clear) {
-                        s.slMidDone = true
-                        s.sl = s.entry
-                        addMarker(curBi, s.entry, 8, "حدضرر → سطح سفارش")
-                        lg("TRADE", "کندل تریگر۲ کاملاً آن‌سوی سطح سفارش بسته شد → حدضرر به سطح سفارش منتقل شد · ستاپ #${s.id}",
-                            "sl=${f2(s.entry)} bar=$curBi")
                     }
                 }
                 if (done) {
@@ -1518,6 +1786,7 @@ class Engine(val cfg: Settings) {
                             "reason=$note bar=$curBi")
                     } else {
                         closeT1Box(s, ZoneStatus.CONSUMED, curBi, curT)
+                        if (s.touchT > 0L) markStructureZoneStatus(s, ZoneStatus.CONSUMED, curBi, curT)
                         s.stage = 8
                         s.rearmAllowed = false
                         cnt.done++
@@ -1698,6 +1967,9 @@ class Engine(val cfg: Settings) {
                 it.remove()
             }
         }
+        for (zb in zones) if (zb.dir == dir && zb.status == ZoneStatus.ACTIVE) {
+            zb.status = ZoneStatus.DELETED; zb.endBi = curBi; zb.endT = curT
+        }
         for (zb in t1Zones) if (zb.dir == dir && zb.status == ZoneStatus.ACTIVE) {
             zb.status = ZoneStatus.DELETED; zb.endBi = curBi; zb.endT = curT
         }
@@ -1773,7 +2045,7 @@ class Engine(val cfg: Settings) {
 
     companion object {
         /** حداقل تعداد ستاپ‌های در حال پیگیری (ناحیه‌های منتظر لمس تا معامله)؛ مستقل از «حداکثر ستاپ هم‌زمان». */
-        const val TRACKED_SETUPS_MIN = 6
+        const val TRACKED_SETUPS_MIN = 512
 
         fun fmtV(v: Double): String = if (v >= 1000) String.format("%.1fk", v / 1000) else String.format("%.0f", v)
         fun f2(v: Double): String = String.format("%.2f", v)
@@ -1847,45 +2119,43 @@ internal fun calculateTargetLevels(
 ): TargetLevels {
     val haveFib = !anchor0.isNaN() && !anchor1.isNaN() &&
             (if (bull) anchor0 > anchor1 else anchor0 < anchor1)
-    var tp1 = Double.NaN
-    var tp2 = Double.NaN
-    var tpx = if (bull) entry + minDistance else entry - minDistance
-
-    if (haveFib) {
-        val r = if (bull) anchor0 - anchor1 else anchor1 - anchor0
-        tp1 = if (bull) anchor1 + 0.382 * r else anchor1 - 0.382 * r
-        tp2 = if (bull) anchor1 + 0.5 * r else anchor1 - 0.5 * r
-        tpx = if (bull) anchor1 + 1.272 * r else anchor1 - 1.272 * r
+    if (!haveFib) {
+        val tpx = if (bull) entry + minDistance else entry - minDistance
+        return TargetLevels(Double.NaN, Double.NaN, tpx)
     }
 
-    if (bull) {
-        val movedToMinimum = tpx - entry < minDistance
-        if (movedToMinimum) tpx = entry + minDistance
-        if (haveFib) {
-            if (movedToMinimum) {
-                val distance = tpx - entry
-                tp1 = entry + distance * 0.382
-                tp2 = entry + distance * 0.5
-            } else {
-                if (tp1.isNaN() || tp1 <= entry) tp1 = entry + (tpx - entry) * 0.382
-                if (tp2.isNaN() || tp2 <= entry) tp2 = entry + (tpx - entry) * 0.5
-            }
+    val r = if (bull) anchor0 - anchor1 else anchor1 - anchor0
+    val fib0382 = if (bull) anchor1 + 0.382 * r else anchor1 - 0.382 * r
+    val fib0500 = if (bull) anchor1 + 0.5 * r else anchor1 - 0.5 * r
+    val fib1272 = if (bull) anchor1 + 1.272 * r else anchor1 - 1.272 * r
+
+    return if (bull) {
+        val movedToMinimum = fib1272 - entry < minDistance
+        if (movedToMinimum) {
+            val tpx = entry + minDistance
+            val distance = tpx - entry
+            TargetLevels(entry + distance * 0.382, entry + distance * 0.5, tpx)
+        } else if (entry >= fib0382) {
+            // §18-20: در صورتی که سفارش بعد از ناحیه 0.382 فیبو باز شده بود حد سود اول ناحیه 0.5 و حد سود نهایی 1.272 است و لحظه سر به سر شدن معامله در ناحیه 0.5 است
+            val tp1 = if (fib0500 > entry) fib0500 else Double.NaN
+            TargetLevels(tp1, Double.NaN, fib1272)
+        } else {
+            TargetLevels(fib0382, fib0500, fib1272)
         }
     } else {
-        val movedToMinimum = entry - tpx < minDistance
-        if (movedToMinimum) tpx = entry - minDistance
-        if (haveFib) {
-            if (movedToMinimum) {
-                val distance = entry - tpx
-                tp1 = entry - distance * 0.382
-                tp2 = entry - distance * 0.5
-            } else {
-                if (tp1.isNaN() || tp1 >= entry) tp1 = entry - (entry - tpx) * 0.382
-                if (tp2.isNaN() || tp2 >= entry) tp2 = entry - (entry - tpx) * 0.5
-            }
+        val movedToMinimum = entry - fib1272 < minDistance
+        if (movedToMinimum) {
+            val tpx = entry - minDistance
+            val distance = entry - tpx
+            TargetLevels(entry - distance * 0.382, entry - distance * 0.5, tpx)
+        } else if (entry <= fib0382) {
+            // §18-20: در صورتی که سفارش بعد از ناحیه 0.382 فیبو باز شده بود حد سود اول ناحیه 0.5 و حد سود نهایی 1.272 است و لحظه سر به سر شدن معامله در ناحیه 0.5 است
+            val tp1 = if (fib0500 < entry) fib0500 else Double.NaN
+            TargetLevels(tp1, Double.NaN, fib1272)
+        } else {
+            TargetLevels(fib0382, fib0500, fib1272)
         }
     }
-    return TargetLevels(tp1, tp2, tpx)
 }
 
 /** A full structure interval has elapsed when the trigger-2 bar delta reaches its configured bar count. */

@@ -842,6 +842,19 @@ class AppState {
                 // §6 سند: «اگر قیمت زنده نیامد، آخرین کندل بسته‌شده استفاده می‌شود» — آخرین عنصر دنباله
                 // کندل در حال تشکیل است (موتور هم همین را باز می‌داند)، پس کلوز کندل قبل از آن.
                 val last = (if (tail.size >= 2) tail[tail.size - 2] else tail.lastOrNull())?.c ?: Double.NaN
+                // §6 سند: «قیمت لحظه‌ای زنده به ترتیب از سه منبع مستقل گرفته می‌شود و به کندل آخر تزریق می‌شود»
+                if (spot != null && !spot.isNaN() && tail.isNotEmpty()) {
+                    val lc = tail.last()
+                    val updated = ArrayList(tail)
+                    updated[updated.lastIndex] = Candle(
+                        lc.bi, lc.t, lc.o,
+                        maxOf(lc.h, spot),
+                        minOf(lc.l, spot),
+                        spot,
+                        lc.v
+                    )
+                    tail = updated
+                }
                 Log.d(Log.CAT_LIVE, "به‌روزرسانی زنده",
                     "دنباله=${tail.size} قیمت=${if (spot != null) Fa.n(spot, 2) else "-"} منبع=$spotSrc مدت=${System.currentTimeMillis() - t0}ms")
                 // ۳) تغییر وضعیت روی نخ سریالی [io]
