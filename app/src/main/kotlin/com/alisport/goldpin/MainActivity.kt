@@ -1164,7 +1164,7 @@ class MainActivity : Activity() {
 
         // ── موتور ──
         v.addView(Ui.section(this, "⑤ موتور استراتژی"))
-        v.addView(numRow("حداکثر ستاپ هم‌زمان", s.cfg.maxSetups.toDouble()) { s.cfg.maxSetups = it.toInt(); s.rebuildAsync() })
+        v.addView(numRow("حداکثر ستاپ هم‌زمان (سفارش معلق/باز)", s.cfg.maxSetups.toDouble()) { s.cfg.maxSetups = it.toInt(); s.rebuildAsync() })
         v.addView(switchRow("شکست تایید میانی با کلوز (خاموش = سایه)", s.cfg.midInvalidClose) { s.cfg.midInvalidClose = it; s.rebuildAsync() })
         v.addView(switchRow("اسکن ولوم زیاد از اولین برگشت به باکس", s.cfg.hvScanFirstTouch) { s.cfg.hvScanFirstTouch = it; s.rebuildAsync() })
         v.addView(switchRow("کندل ولوم زیاد = اولین افزایش حجم", s.cfg.hvMarkFirstIncrease) { s.cfg.hvMarkFirstIncrease = it; s.rebuildAsync() })

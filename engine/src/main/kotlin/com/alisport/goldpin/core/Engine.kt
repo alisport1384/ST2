@@ -32,7 +32,11 @@ class Settings {
     var maxZoneBoxes: Int = Int.MAX_VALUE              // §7: نامحدود (از ۱٫۴٫۹)
     var showPocVA: Boolean = true
 
-    var maxSetups: Int = 6
+    /**
+     * سند §۱۸-۱۹ و §۴-۸: حداکثر ستاپ هم‌زمان = ۱ (پیش‌فرض) — یعنی حداکثر این تعداد سفارش (معلق یا باز) هم‌زمان؛
+     * (استراتژی ۲: به‌ازای هر جهت). ناحیه‌های در انتظار لمس با این عدد حذف نمی‌شوند؛ سقف پیگیری آن‌ها [TRACKED_SETUPS_MIN] است.
+     */
+    var maxSetups: Int = 1
     /**
      * `true`  ⇒ تایید میانی فقط با **بسته شدن** کندل میانی آن‌طرف سطح باطل می‌شود.
      * `false` ⇒ با **عبور شمع** باطل می‌شود، حتی یک تیک و حتی اگر برگردد و آن‌طرف بسته نشود.
@@ -46,8 +50,8 @@ class Settings {
 
     var mintick: Double = 0.01
     var slBufTicks: Double = 2.0
-    /** §4-8 سند: سطح سفارش = سقف باکس HV + ۲ تیک (خرید) / کف باکس − ۲ تیک (فروش). */
-    var entryBufTicks: Double = 2.0
+    /** §4-8 سند: سطح سفارش = سقف باکس HV + ۱ تیک بافر (خرید) / کف باکس HV − ۱ تیک بافر (فروش). */
+    var entryBufTicks: Double = 1.0
     /** سطح سفارش (§4-8): خرید = سقف باکس HV + بافر؛ فروش = کف باکس HV − بافر؛ همیشه عددی مثبت. */
     fun entryLevel(bull: Boolean, hvH: Double, hvL: Double): Double {
         val buf = entryBufTicks * mintick
@@ -72,9 +76,9 @@ class Settings {
     var equityPct: Double = 100.0
     /**
      * سقف اهرم — **تنها** متغیر اهرم، برای همهٔ مودها (§۵ و §۲۰).
-     * §۵ سند: «اهرم پیش‌فرض: **۱۰** — کاربر می‌تواند تغییر دهد.» (یک متغیر برای همهٔ مودها.)
+     * §۵ سند: «اهرم پیش‌فرض: **۵۰۰** — کاربر می‌تواند تغییر دهد.» (یک متغیر برای همهٔ مودها.)
      */
-    var maxLeverage: Double = 10.0
+    var maxLeverage: Double = 500.0
     var roundQty: Boolean = false
     // §4-8/§۱۴ سند نهایی: انقضای سفارش معلق با عبور باز/کلوز از آخرین pinBE/pinBU
     // (سطح هنگام مسلح‌شدن ذخیره می‌شود) یا گذشت یک کندل ساختار کامل بعد از مسلح‌شدن.
@@ -879,7 +883,8 @@ class Engine(val cfg: Settings) {
         //  «معاملهٔ باز هرگز به‌زور بسته نمی‌شود». اول ستاپ‌های پایان‌یافته (stage=8)،
         //  سپس ستاپ‌های دست‌نخورده (stage=0) و مراحل اولیه حذف می‌شوند تا ستاپ‌های دارای
         //  محدودهٔ فعال تریگر ۱ و ۲ محفوظ بمانند.
-        while (setups.size > cfg.maxSetups) {
+        val trackedCap = max(TRACKED_SETUPS_MIN, cfg.maxSetups)
+        while (setups.size > trackedCap) {
             var pick = setups.indexOfFirst { it.stage == 8 }
             if (pick < 0) pick = setups.indexOfFirst { it.stage == 0 }
             if (pick < 0) pick = setups.indexOfFirst { it.stage in 1..3 }
@@ -1524,7 +1529,7 @@ class Engine(val cfg: Settings) {
         stageFa = setups.minByOrNull { it.stage }?.let { stageFa(it.stage) } ?: "-"
     }
 
-    /** §4-8 سند: سطح سفارش خرید = سقف باکس HV + ۲ تیک؛ سطح سفارش فروش = کف باکس HV − ۲ تیک (همیشه مثبت). */
+    /** §4-8 سند: سطح سفارش خرید = سقف باکس HV + ۱ تیک بافر؛ سطح سفارش فروش = کف باکس HV − ۱ تیک بافر (همیشه مثبت). */
     fun entryLevel(s: Setup, bull: Boolean): Double = cfg.entryLevel(bull, s.hvH, s.hvL)
 
     /**
@@ -1540,7 +1545,7 @@ class Engine(val cfg: Settings) {
 
     /** لحظهٔ مسلح شدن (تایید ناحیهٔ ولوم زیاد) → محاسبهٔ SL/TP و ثبت سفارش ورود. */
     private fun armSetup(s: Setup, cd: Candle, bull: Boolean) {
-        // §4-8 سند: سطح سفارش = سقف باکس + ۲ تیک بافر (خرید) / کف باکس − ۲ تیک بافر (فروش)
+        // §4-8 سند: سطح سفارش = سقف باکس + ۱ تیک بافر (خرید) / کف باکس − ۱ تیک بافر (فروش)
         val eRef = entryLevel(s, bull)
         s.sl = if (bull) s.hvL - cfg.slBufTicks * cfg.mintick else s.hvH + cfg.slBufTicks * cfg.mintick
         // §4-8 / §18-5: لنگر صفر فیبوناچی = HH (خرید) / LL (فروش)؛ لنگر ۱۰۰٪ = سطح تایید میانی
@@ -1580,17 +1585,20 @@ class Engine(val cfg: Settings) {
             }
         }
         // §4-8 و §10 سند نهایی: ما فقط مجاز به گذاشتن ۱ سفارش در چارت هستیم (حداکثر ۱ سفارش معلق یا ۱ معامله باز).
-        // §4-8 و §18-12/§18-13: در هر لحظه فقط یک سفارش معلق مجاز است؛ وجود معاملهٔ باز مانع مسلح شدن نیست.
+        // §4-8 و §18-12/§18-13: در هر لحظه فقط یک سفارش (معلق یا باز) مجاز است؛ وجود معاملهٔ باز مانع مسلح شدن است.
         // استراتژی ۲: خرید و فروش هم‌زمان مجازند ولی از هر جهت فقط یک سفارش (معلق یا باز).
-        val hasPendingSetupOrder = if (cfg.strategy == Strategy.NO_TREND)
-            setups.any { it.id != s.id && it.dir == s.dir && (it.stage == 6 || it.stage == 7) } ||
-                broker?.hasActiveOrder(s.dir) == true
-        else setups.any { it.id != s.id && it.stage == 6 }
+        val limit = max(1, cfg.maxSetups)
+        val activeNow = if (cfg.strategy == Strategy.NO_TREND)
+            max(setups.count { it.id != s.id && it.dir == s.dir && (it.stage == 6 || it.stage == 7) },
+                broker?.activeCount(s.dir) ?: 0)
+        else
+            max(setups.count { it.id != s.id && (it.stage == 6 || it.stage == 7) }, broker?.activeCount() ?: 0)
+        val hasPendingSetupOrder = activeNow >= limit
         if (hasPendingSetupOrder) {
             clearHvMark(s)
             lg("ENGINE", if (cfg.strategy == Strategy.NO_TREND)
                 "مسلح‌شدن ستاپ #${s.id} رد شد — از هر جهت فقط یک سفارش (معلق یا باز) مجاز است"
-            else "مسلح‌شدن ستاپ #${s.id} رد شد — سفارش معلق دیگری در چارت وجود دارد",
+            else "مسلح‌شدن ستاپ #${s.id} رد شد — سقف ستاپ هم‌زمان (${limit}) پر است: سفارش معلق یا معاملهٔ باز دیگری وجود دارد (§۱۸-۱۳)",
                 "bar=$curBi")
             return
         }
@@ -1764,6 +1772,9 @@ class Engine(val cfg: Settings) {
     }
 
     companion object {
+        /** حداقل تعداد ستاپ‌های در حال پیگیری (ناحیه‌های منتظر لمس تا معامله)؛ مستقل از «حداکثر ستاپ هم‌زمان». */
+        const val TRACKED_SETUPS_MIN = 6
+
         fun fmtV(v: Double): String = if (v >= 1000) String.format("%.1fk", v / 1000) else String.format("%.0f", v)
         fun f2(v: Double): String = String.format("%.2f", v)
     }

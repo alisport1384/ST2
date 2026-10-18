@@ -10,8 +10,8 @@ import kotlin.math.min
 //  ثبت سفارش لیمیت روی لبهٔ ناحیهٔ ولوم زیاد ، پر شدن ، خروج پله‌ای ۳۳/۳۳/۳۴ ،
 //  سر‌به‌سر بعد از TP1 ، انقضای سفارش ، و محاسبهٔ سود/زیان به دلار و R.
 //
-//  §4-8 / §10 / §18-12 / §18-13 سند: در هر لحظه حداکثر ۱ سفارش معلق؛ وجود معاملهٔ باز
-//  مانع مسلح‌شدن سفارش جدید نیست (چند معامله باز می‌توانند هم‌زمان باشند).
+//  §4-8 / §10 / §18-12 / §18-13 سند: در هر لحظه حداکثر ۱ سفارش (معلق یا باز)؛ وجود معاملهٔ باز
+//  مانع مسلح‌شدن سفارش جدید است (استراتژی ۱). استراتژی ۲: از هر جهت فقط یکی.
 //
 //  §۲۰ سند: مدیریت مالی و مدیریت زیان (ManageAllLost / Mixed) در [MoneyManager]؛
 //  حجم سفارش هنگام ثبت (مسلح‌شدن) با Lost/cmsnLost لحظهٔ ثبت ثابت می‌شود.
@@ -40,13 +40,16 @@ class PaperBroker(private val cfg: Settings) {
     var lastError: String? = null
     var engine: Engine? = null
 
-    /** چند سفارش/پوزیشن فعال هم‌زمان (تصمیم ۲۰۲۶-۱۰-۱۰). */
+    /** سفارش‌های معلق و پوزیشن‌های باز (استراتژی ۱: حداکثر یکی؛ استراتژی ۲: از هر جهت یکی). */
     private val pendings = ArrayList<Order>()
     private val opens = ArrayList<Trade>()
 
-    /** استراتژی ۲: آیا در جهت [dir] (۱ خرید / ‎−۱ فروش) سفارش معلق یا معاملهٔ بازی وجود دارد؟ */
-    fun hasActiveOrder(dir: Int): Boolean =
-        pendings.any { it.dir == dir } || opens.any { it.open && it.dir == dir }
+    /** تعداد سفارش معلق + معاملهٔ باز؛ با [dir] فقط همان جهت (۱ خرید / ‎−۱ فروش). */
+    fun activeCount(dir: Int? = null): Int =
+        pendings.count { dir == null || it.dir == dir } + opens.count { it.open && (dir == null || it.dir == dir) }
+
+    /** آیا در جهت [dir] به سقف «حداکثر ستاپ هم‌زمان» رسیده‌ایم؟ */
+    fun hasActiveOrder(dir: Int): Boolean = activeCount(dir) >= max(1, cfg.maxSetups)
 
     /** سازگاری با کدهای قدیمی که یک سفارش/پوزیشن انتظار داشتند (اولین مورد). */
     val hasOpenTrade: Boolean get() = opens.isNotEmpty()
@@ -109,15 +112,15 @@ class PaperBroker(private val cfg: Settings) {
 
     /** ثبت سفارش لیمیت — §4-8 و §18-12/§18-13: حداکثر ۱ سفارش معلق در هر لحظه؛ معاملهٔ باز مانع سفارش جدید نیست. */
     fun registerLimit(s: Setup, bar: Candle): Boolean {
-        val activeCount = pendings.size
+        val activeCount = activeCount()
         if (cfg.strategy == Strategy.NO_TREND) {
             // استراتژی ۲: خرید و فروش هم‌زمان مجازند؛ از هر جهت فقط یک سفارش (معلق یا باز).
             if (hasActiveOrder(s.dir)) {
                 lastError = "از هر جهت فقط یک سفارش (معلق یا باز) مجاز است"
                 return false
             }
-        } else if (activeCount >= 1) {
-            lastError = "فقط ۱ سفارش معلق هم‌زمان در چارت مجاز است"
+        } else if (activeCount >= max(1, cfg.maxSetups)) {
+            lastError = "سقف سفارش (معلق یا باز) هم‌زمان در چارت پر است"
             return false
         }
         // هم‌پوشانی روی یک ستاپ: اگر همین setupId در حال حاضر سفارش معلق دارد، رد شود.
@@ -125,7 +128,7 @@ class PaperBroker(private val cfg: Settings) {
             lastError = "برای ستاپ #${s.id} قبلاً سفارش معلق ثبت شده"
             return false
         }
-        // §4-8 سند: سطح سفارش = سقف باکس HV + ۲ تیک بافر (خرید) / کف باکس HV − ۲ تیک بافر (فروش)
+        // §4-8 سند: سطح سفارش = سقف باکس HV + ۱ تیک بافر (خرید) / کف باکس HV − ۱ تیک بافر (فروش)
         val entryPx = cfg.entryLevel(s.bull, s.hvH, s.hvL)
         var mmNote = ""
         var mmCm = false
@@ -385,6 +388,7 @@ class PaperBroker(private val cfg: Settings) {
         // §۲۰: Lost / cmsnLost بعد از بسته شدن کامل معامله به‌روز می‌شود (مود خاموش: بی‌اثر).
         val lostBefore = mm.lost; val cmsnLostBefore = mm.cmsnLost
         mm.onTradeClosed(t)
+        mm.onCapitalUpdated(balance)   // §۲۰-۲: Capital ≥ ۲×NakedCapital ⇒ NakedCapital دو برابر می‌شود
         if (mm.active) lg("TRADE", "مدیریت مالی §۲۰ بعد از معامله #${t.id}",
             "Lost ${fmt(lostBefore)} → ${fmt(mm.lost)} · cmsnLost ${fmt(cmsnLostBefore)} → ${fmt(mm.cmsnLost)} · Capital=${fmt(balance)}")
         lg("TRADE", "معامله #${t.id} بسته شد", "reason=$reason exit=${fmt(px)} pnl=${fmt(t.pnl())} R=${fmt(t.rMultiple())} موجودی=${fmt(balance)}")

@@ -6,6 +6,9 @@ package com.alisport.goldpin.core
 //        شمارنده‌ها) · کارگزار (سفارش‌ها/معاملات/موجودی/افت سرمایه)
 // ═══════════════════════════════════════════════════════════════════════════════
 object Store {
+    /** نسخهٔ هم‌ترازی تنظیمات با سند؛ فایل‌های با مقدار کمتر هنگام بارگذاری به پیش‌فرض‌های سند مهاجرت می‌کنند. */
+    const val SPEC_REV = 2
+
 
     const val FORMAT = 3
 
@@ -70,7 +73,8 @@ object Store {
         "cmsnAutoValue" to c.cmsnAutoValue, "cmsnAutoAt" to c.cmsnAutoAt,
         "crtEnabled" to c.crtEnabled, "crtPct" to c.crtPct,
         "mixedGrowthPct" to c.mixedGrowthPct,
-        "lotStep" to c.lotStep, "lostResetAtFinalTp" to c.lostResetAtFinalTp
+        "lotStep" to c.lotStep, "lostResetAtFinalTp" to c.lostResetAtFinalTp,
+        "specRev" to SPEC_REV
     )
 
     private fun settingsFrom(m: Map<String, Any?>): Settings {
@@ -115,6 +119,11 @@ object Store {
             c.maxLeverage = m["mmMaxLeverage"].asD()
         if (m.containsKey("lotStep")) c.lotStep = m["lotStep"].asD()
         if (m.containsKey("lostResetAtFinalTp")) c.lostResetAtFinalTp = m["lostResetAtFinalTp"].asB()
+        // مهاجرت به سند فعلی: فایل‌های قبل از specRev=۲ مقدارهای قدیمی اهرم/بافر سفارش/حداکثر ستاپ را داشتند
+        // (۱۰ / ۲ تیک / ۶). سند: اهرم ۵۰۰ (§۵) ، بافر سفارش ۱ تیک (§۴-۸) ، حداکثر ستاپ ۱ (§۱۸-۱۹).
+        if (!m.containsKey("specRev") || m["specRev"].asI() < SPEC_REV) {
+            c.maxLeverage = 500.0; c.entryBufTicks = 1.0; c.maxSetups = 1
+        }
         return c
     }
 
@@ -313,7 +322,7 @@ object Store {
         o["maxEquity"] = b.maxEquity; o["maxDrawdown"] = b.maxDrawdown
         o["orderSeq"] = b.orderSeq; o["tradeSeq"] = b.tradeSeq
         // §۲۰: وضعیت مدیریت زیان (فایل‌های قدیمی این کلیدها را ندارند ⇒ ۰)
-        o["mmLost"] = b.mm.lost; o["mmCmsnLost"] = b.mm.cmsnLost
+        o["mmLost"] = b.mm.lost; o["mmCmsnLost"] = b.mm.cmsnLost; o["mmNaked"] = b.mm.nakedCapital()
         // ۱۹ ستون اول مثل قبل؛ ستون ۲۰ و ۲۱ (§۲۰): توضیح محاسبهٔ حجم، فاز ManageCM
         o["orders"] = b.orders.map { listOf(it.id, it.setupId, it.dir, it.type, it.price, it.sl, it.tp1, it.tp2, it.tpX, it.qty, it.zoneTop, it.zoneBot, it.placedT, it.placedBi, it.status, it.filledT ?: 0L, it.filledBi ?: -1, it.closedT ?: 0L, it.cancelReason ?: "", it.mmNote, it.mmCm) }
         o["trades"] = b.trades.map { t ->
@@ -344,6 +353,7 @@ object Store {
         b.orderSeq = m["orderSeq"].asL(); b.tradeSeq = m["tradeSeq"].asL()
         if (m.containsKey("mmLost")) b.mm.lost = m["mmLost"].asD()
         if (m.containsKey("mmCmsnLost")) b.mm.cmsnLost = m["mmCmsnLost"].asD()
+        if (m.containsKey("mmNaked")) b.mm.restoreNaked(m["mmNaked"].asD())
         for (x in m["orders"].asList()) {
             val l = x.asList(); if (l.size < 19) continue
             val or = Order(l[0].asL(), l[1].asL(), l[2].asI(), l[3].asS(), l[4].asD(), l[5].asD(), l[6].asD(),

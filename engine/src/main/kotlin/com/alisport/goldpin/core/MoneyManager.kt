@@ -62,10 +62,23 @@ class MoneyManager(private val cfg: Settings) {
 
     val active: Boolean get() = cfg.mmMode != MoneyMode.NONE
 
-    fun reset() { lost = 0.0; cmsnLost = 0.0 }
+    fun reset() { lost = 0.0; cmsnLost = 0.0; naked = Double.NaN }
 
-    /** NakedCapital — سرمایهٔ اولیه (ثابت). */
-    fun nakedCapital(): Double = cfg.initialEquity
+    /** NakedCapital جاری؛ NaN = هنوز دو برابر نشده ⇒ همان سرمایهٔ اولیهٔ تنظیمات. */
+    private var naked: Double = Double.NaN
+
+    /** NakedCapital — سرمایهٔ اولیه؛ در مود Mixed با رسیدن Capital به دو برابر آن، دو برابر می‌شود (§۲۰-۲). */
+    fun nakedCapital(): Double = if (naked.isNaN()) cfg.initialEquity else naked
+
+    /** بازیابی NakedCapital از فایل ذخیره‌شده. */
+    fun restoreNaked(v: Double) { naked = if (v.isNaN() || v <= 0.0 || v == cfg.initialEquity) Double.NaN else v }
+
+    /** §۲۰-۲: if (capital / nakedcapital) >= 2 ⇒ nakedcapital = nakedcapital × 2 (فقط مود Mixed). */
+    fun onCapitalUpdated(capital: Double) {
+        if (cfg.mmMode != MoneyMode.MIXED) return
+        var guard = 0
+        while (nakedCapital() > 0.0 && capital / nakedCapital() >= 2.0 && guard++ < 64) naked = nakedCapital() * 2.0
+    }
 
     /** MinLot = (NakedCapital × risk) / 100 یا مقدار دستی. */
     fun minLot(): Double = if (cfg.minLotAuto) nakedCapital() * cfg.riskPct / 100.0 else cfg.minLotManual
