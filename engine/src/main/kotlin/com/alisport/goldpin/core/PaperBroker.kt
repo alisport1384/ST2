@@ -289,10 +289,8 @@ class PaperBroker(private val cfg: Settings) {
         val bull = t.dir == 1
         val sameEntryBar = cd.bi == t.entryBi
         val slLvl = if (t.be) t.entry else if (!t.slAdj.isNaN()) t.slAdj else t.sl0
-        val q1 = t.qty * 0.33
-        val q2 = t.qty * 0.33
 
-        // §4-9 ترتیب ثابت: حد ضرر، حد سود نهایی، TP1، TP2.
+        // §4-9 ترتیب ثابت: حد ضرر، حد سود نهایی، TP1.
         // حد ضرر در کندلی که SL و TP لمس شوند برنده است.
         val hitStop = if (bull) cd.l <= slLvl else cd.h >= slLvl
         if (hitStop) {
@@ -305,51 +303,31 @@ class PaperBroker(private val cfg: Settings) {
             return
         }
 
-        // §6-21: اگر همان کندل ورود، هم TP1 و هم ورود لمس شوند، TP1 ثبت نمی‌شود؛
-        // کل معامله در ورود بسته می‌شود. این استثنا بعد از اولویت SL و TPX است.
-        if (sameEntryBar && !t.tp1.isNaN()) {
-            val tp1Hit = if (bull) cd.h >= t.tp1 else cd.l <= t.tp1
-            val entryTouched = if (bull) cd.l <= t.entry else cd.h >= t.entry
-            if (tp1Hit && entryTouched) {
-                t.be = true
-                closeAll(t, t.entry, cd.t, cd.bi, "خروج سر‌به‌سر (TP1 و ورود یک کندل)")
-                return
-            }
-        }
-
-        val tp1Done = t.fills.any { it.kind == "TP1" }
-        val remaining = t.qty - t.fills.filter { it.kind != "ENTRY" }.sumOf { it.qty }
-        if (!tp1Done && !t.tp1.isNaN()) {
+        // §18-20: در صورت رسیدن قیمت به حد سود اول یعنی ناحیه 0.382 فیبوناچی (یا 0.5 در صورت باز شدن سفارش بعد از 0.382)
+        // حد ضرر به قیمت باز شدن سفارش منتقل میشود و در صورت برگشت قیمت نتیجه ضرر صفر میشود (بدون کارمزد).
+        if (!t.be && !t.tp1.isNaN()) {
             val hit = if (bull) cd.h >= t.tp1 else cd.l <= t.tp1
             if (hit) {
-                addExit(t, cd, t.tp1, min(q1, remaining), "TP1")
                 t.be = true
+                lg("TRADE", "حد سود اول لمس شد → انتقال حد ضرر به نقطهٔ ورود (سر‌به‌سر) · معامله #${t.id}",
+                    "tp1=${fmt(t.tp1)} sl=${fmt(t.entry)} bar=${cd.bi}")
+                alarm(AlertKind.TP1, "انتقال به سر‌به‌سر (TP1)",
+                    "معامله #${t.id} · لمس ${fmt(t.tp1)} · حدضرر به ورود (${fmt(t.entry)}) منتقل شد")
             }
         }
 
-        val remainingNow = t.qty - t.fills.filter { it.kind != "ENTRY" }.sumOf { it.qty }
-        val tp2Done = t.fills.any { it.kind == "TP2" }
-        if (t.open && t.be && !tp2Done && !t.tp2.isNaN() && remainingNow > 1e-9) {
-            val hit = if (bull) cd.h >= t.tp2 else cd.l <= t.tp2
-            if (hit) addExit(t, cd, t.tp2, min(q2, remainingNow), "TP2")
+        if (t.open && !t.tp2.isNaN()) {
+            val hit2 = if (bull) cd.h >= t.tp2 else cd.l <= t.tp2
+            if (hit2) {
+                lg("TRADE", "سطح ۰.۵ فیبو (TP2) لمس شد · معامله #${t.id}", "tp2=${fmt(t.tp2)} bar=${cd.bi}")
+            }
         }
 
         // اگر TP1 همین کندل حد ضرر را به ورود برد و قیمت به ورود برگشت،
-        // کل باقیمانده در همین کندل بسته می‌شود؛ موتور و دفتر Broker یکی می‌مانند.
+        // کل معامله در همین کندل در نقطهٔ ورود با نتیجهٔ صفر (بدون کارمزد) بسته می‌شود.
         val returnedToEntry = if (bull) cd.l <= t.entry else cd.h >= t.entry
         if (t.open && t.be && returnedToEntry) {
-            closeAll(t, t.entry, cd.t, cd.bi, "خروج سر‌به‌سر")
-        }
-
-        // §4-9 سند («خیلی مهم»): اولین کندل تریگر۲ که کاملاً آن‌سوی سطح سفارش بسته شود
-        // (بدون حتی یک تیک لمس سطح) → حد ضرر یک‌بار به سطح سفارش منتقل می‌شود.
-        if (t.open && !t.be && t.slAdj.isNaN() && !sameEntryBar) {
-            val clear = if (bull) cd.l > t.entry else cd.h < t.entry
-            if (clear) {
-                t.slAdj = t.entry
-                lg("TRADE", "کندل تریگر۲ کاملاً آن‌سوی سطح سفارش بسته شد → حدضرر به سطح سفارش منتقل شد · معامله #${t.id}",
-                    "sl=${fmt(t.entry)} bar=${cd.bi}")
-            }
+            closeAll(t, t.entry, cd.t, cd.bi, if (sameEntryBar) "خروج سر‌به‌سر (TP1 و ورود یک کندل)" else "خروج سر‌به‌سر")
         }
     }
 

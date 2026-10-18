@@ -191,6 +191,7 @@ object Store {
         o["lastBUpinRef"] = e.lastBUpinRef; o["lastBUpinHi"] = e.lastBUpinHi
         o["lastBEpinRef"] = e.lastBEpinRef; o["lastBEpinLo"] = e.lastBEpinLo
         o["lastZoneTop"] = e.lastZoneTop; o["lastZoneBot"] = e.lastZoneBot
+        o["zoneRefH"] = e.zoneRefH; o["zoneRefL"] = e.zoneRefL
         o["lastPocPx"] = e.lastPocPx; o["lastProfBars"] = e.lastProfBars
         o["lastEntryPx"] = e.lastEntryPx; o["lastSlPx"] = e.lastSlPx; o["lastTpPx"] = e.lastTpPx
         o["lastResult"] = e.lastResult
@@ -260,6 +261,8 @@ object Store {
         e.lastBUpinRef = m["lastBUpinRef"].asD(); e.lastBUpinHi = m["lastBUpinHi"].asD()
         e.lastBEpinRef = m["lastBEpinRef"].asD(); e.lastBEpinLo = m["lastBEpinLo"].asD()
         e.lastZoneTop = m["lastZoneTop"].asD(); e.lastZoneBot = m["lastZoneBot"].asD()
+        if (m.containsKey("zoneRefH")) e.zoneRefH = m["zoneRefH"].asD()
+        if (m.containsKey("zoneRefL")) e.zoneRefL = m["zoneRefL"].asD()
         e.lastPocPx = m["lastPocPx"].asD(); e.lastProfBars = m["lastProfBars"].asI()
         e.lastEntryPx = m["lastEntryPx"].asD(); e.lastSlPx = m["lastSlPx"].asD(); e.lastTpPx = m["lastTpPx"].asD()
         e.lastResult = m["lastResult"].asS()

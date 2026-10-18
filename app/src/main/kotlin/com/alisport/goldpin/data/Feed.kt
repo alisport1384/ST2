@@ -283,6 +283,39 @@ object Feed {
         }
     }
 
+    /** ۱) نرخ لحظه‌ای تتر طلا (PAXGUSDT) از Binance — بدون کلید */
+    fun binanceSpot(): Double? {
+        val urls = listOf(
+            "https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT",
+            "https://data-api.binance.vision/api/v3/ticker/price?symbol=PAXGUSDT"
+        )
+        for (u in urls) {
+            try {
+                val body = get(u)
+                val p = JSONObject(body).optString("price").toDoubleOrNull()
+                    ?: JSONObject(body).optDouble("price", Double.NaN)
+                if (!p.isNaN() && p > 500.0 && p < 20000.0) return p
+            } catch (e: Exception) {
+                Log.d(Log.CAT_FEED, "Binance پاسخ نداد", e.message ?: "")
+            }
+        }
+        return null
+    }
+
+    /** ۲) نرخ لحظه‌ای تتر طلا (PAXG-USDT) از KuCoin — بدون کلید */
+    fun kucoinSpot(): Double? {
+        return try {
+            val body = get("https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=PAXG-USDT")
+            val data = JSONObject(body).optJSONObject("data")
+            val p = data?.optString("price")?.toDoubleOrNull()
+                ?: data?.optDouble("price", Double.NaN) ?: Double.NaN
+            if (!p.isNaN() && p > 500.0 && p < 20000.0) p else null
+        } catch (e: Exception) {
+            Log.d(Log.CAT_FEED, "KuCoin پاسخ نداد", e.message ?: "")
+            null
+        }
+    }
+
     /** نرخ لحظه‌ای طلای نقدی (Spot) — بدون کلید */
     fun goldApiSpot(): Double? {
         return try {
@@ -295,7 +328,7 @@ object Feed {
         }
     }
 
-    /** نرخ XAU/USD از Swissquote (عمومی، بدون کلید) */
+    /** ۳) نرخ XAU/USD از Swissquote (عمومی، بدون کلید) */
     fun swissquoteSpot(): Double? {
         return try {
             val body = get("https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/XAU/USD")
@@ -336,7 +369,7 @@ object Feed {
         }
     }
 
-    /** نرخ طلای توکنیزه (PAXG) از CoinGecko — پشتیبان سوم */
+    /** نرخ طلای توکنیزه (PAXG) از CoinGecko — پشتیبان */
     fun coinGeckoSpot(): Double? {
         return try {
             val body = get("https://api.coingecko.com/api/v3/simple/price?ids=pax-gold&vs_currencies=usd")
@@ -348,22 +381,59 @@ object Feed {
     }
 
     /**
-     * زنجیرهٔ منابع قیمت لحظه‌ای — هر کدام پاسخ داد، همان استفاده می‌شود.
-     * (برای شرایطی که یک سرویس در دسترس نباشد.)
+     * §6 سند: زنجیرهٔ منابع قیمت لحظه‌ای زنده (۱. Binance · ۲. KuCoin · ۳. Swissquote + پشتیبان‌ها).
+     * در صورت نیامدن قیمت زنده، زنجیره در چارچوب بودجهٔ زمانی به طور مداوم تکرار می‌شود تا منبع دریافت گردد.
      */
-    /**
-     * کل زنجیرهٔ قیمت لحظه‌ای حداکثر [budgetMs] میلی‌ثانیه وقت دارد.
-     * بدون این سقف، وقتی هر سه منبع قطع باشند یک تیک لایو ~۳۶ ثانیه فقط برای
-     * قیمت لحظه‌ای معطل می‌ماند (و تیک‌های بعدی پشت آن صف می‌کشند).
-     */
-    fun spotPrice(budgetMs: Long = connectTimeoutMs.toLong() + readTimeoutMs.toLong()): Pair<Double?, String> {
+    fun spotPrice(
+        budgetMs: Long = connectTimeoutMs.toLong() + readTimeoutMs.toLong(),
+        maxRounds: Int = 3
+    ): Pair<Double?, String> {
         val deadline = System.currentTimeMillis() + budgetMs
-        goldApiSpot()?.let { Log.d(Log.CAT_FEED, "قیمت لحظه‌ای از gold-api", com.alisport.goldpin.util.Fa.n(it, 2)); return it to "gold-api" }
-        if (System.currentTimeMillis() >= deadline) { Log.w(Log.CAT_FEED, "بودجهٔ قیمت لحظه‌ای تمام شد", "منبع بعدی امتحان نشد"); return null to "کند/ناموفق" }
-        swissquoteSpot()?.let { Log.d(Log.CAT_FEED, "قیمت لحظه‌ای از Swissquote", com.alisport.goldpin.util.Fa.n(it, 2)); return it to "Swissquote" }
-        if (System.currentTimeMillis() >= deadline) { Log.w(Log.CAT_FEED, "بودجهٔ قیمت لحظه‌ای تمام شد", "منبع بعدی امتحان نشد"); return null to "کند/ناموفق" }
-        coinGeckoSpot()?.let { Log.d(Log.CAT_FEED, "قیمت لحظه‌ای از CoinGecko", com.alisport.goldpin.util.Fa.n(it, 2)); return it to "CoinGecko(PAXG)" }
-        Log.w(Log.CAT_FEED, "هیچ منبع قیمت لحظه‌ای پاسخ نداد")
+        var round = 0
+        while (round < maxOf(1, maxRounds)) {
+            round++
+            binanceSpot()?.let {
+                Log.d(Log.CAT_FEED, "قیمت لحظه‌ای از Binance", com.alisport.goldpin.util.Fa.n(it, 2))
+                return it to "Binance"
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                Log.w(Log.CAT_FEED, "بودجهٔ قیمت لحظه‌ای تمام شد", "دور=$round")
+                return null to "کند/ناموفق"
+            }
+            kucoinSpot()?.let {
+                Log.d(Log.CAT_FEED, "قیمت لحظه‌ای از KuCoin", com.alisport.goldpin.util.Fa.n(it, 2))
+                return it to "KuCoin"
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                Log.w(Log.CAT_FEED, "بودجهٔ قیمت لحظه‌ای تمام شد", "دور=$round")
+                return null to "کند/ناموفق"
+            }
+            swissquoteSpot()?.let {
+                Log.d(Log.CAT_FEED, "قیمت لحظه‌ای از Swissquote", com.alisport.goldpin.util.Fa.n(it, 2))
+                return it to "Swissquote"
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                Log.w(Log.CAT_FEED, "بودجهٔ قیمت لحظه‌ای تمام شد", "دور=$round")
+                return null to "کند/ناموفق"
+            }
+            goldApiSpot()?.let {
+                Log.d(Log.CAT_FEED, "قیمت لحظه‌ای از gold-api", com.alisport.goldpin.util.Fa.n(it, 2))
+                return it to "gold-api"
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                Log.w(Log.CAT_FEED, "بودجهٔ قیمت لحظه‌ای تمام شد", "دور=$round")
+                return null to "کند/ناموفق"
+            }
+            coinGeckoSpot()?.let {
+                Log.d(Log.CAT_FEED, "قیمت لحظه‌ای از CoinGecko", com.alisport.goldpin.util.Fa.n(it, 2))
+                return it to "CoinGecko(PAXG)"
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                Log.w(Log.CAT_FEED, "بودجهٔ قیمت لحظه‌ای تمام شد", "دور=$round")
+                return null to "کند/ناموفق"
+            }
+        }
+        Log.w(Log.CAT_FEED, "هیچ منبع قیمت لحظه‌ای پاسخ نداد", "دورها=$round")
         return null to "ناموفق"
     }
 
