@@ -691,6 +691,7 @@ class Engine(val cfg: Settings) {
                     val oldHL = HL; val oldHH = HH
                     trend = -1; evChgDn = true
                     highestBE = oldHH; lowestBUpin = oldHL
+                    removeStructLabel("HH", oldHH); removeStructLabel("HL", oldHL)
                     HH = Double.NaN; HL = Double.NaN; LL = Double.NaN; LH = Double.NaN
                     clearBUpin()
                     if (!hhPinHi.isNaN()) {
@@ -715,6 +716,7 @@ class Engine(val cfg: Settings) {
                             }
                             expectedReady = -1
                         } else {
+                            removeStructLabel("HH", HH); removeStructLabel("HL", HL)
                             HH = Double.NaN; HL = Double.NaN
                             expectedReady = -1
                         }
@@ -768,6 +770,7 @@ class Engine(val cfg: Settings) {
                     val oldLH = LH; val oldLL = LL
                     trend = 1; evChgUp = true
                     highestBE = oldLH; lowestBUpin = oldLL
+                    removeStructLabel("LL", oldLL); removeStructLabel("LH", oldLH)
                     HH = Double.NaN; HL = Double.NaN; LL = Double.NaN; LH = Double.NaN
                     clearBEpin()
                     if (!llPinLo.isNaN()) {
@@ -792,6 +795,7 @@ class Engine(val cfg: Settings) {
                             }
                             expectedReady = 1
                         } else {
+                            removeStructLabel("LL", LL); removeStructLabel("LH", LH)
                             LL = Double.NaN; LH = Double.NaN
                             expectedReady = 1
                         }
@@ -880,6 +884,10 @@ class Engine(val cfg: Settings) {
         // در پیش‌بارگذاری تاریخچهٔ ساختار، دیتای تریگر۲ نداریم؛ بنابراین فقط
         // توالی/روند ثبت می‌شود و هیچ باکس پروفایل حدسی ساخته نمی‌شود.
         if (!buildZones) return
+
+        for (s in setups) {
+            if (s.stage in 2..5 && !s.midRef.isNaN()) updateSetupFib(s)
+        }
 
         registerZones(sb, insideRef)
     }
@@ -1019,6 +1027,7 @@ class Engine(val cfg: Settings) {
                 s.stage = 2
                 cnt.mid++
                 s.lvReEntered = false
+                updateSetupFib(s)
                 lg("ENGINE", "تایید میانی انجام شد · ستاپ #${s.id}",
                     if (s.dir == 1) "کف تایید=${f2(s.midRef)} bar=${mc.bi}" else "سقف تایید=${f2(s.midRef)} bar=${mc.bi}")
                 addMarker(mc.bi, s.midRef, 3, if (s.dir == 1) "کف تایید میانی" else "سقف تایید میانی")
@@ -1045,6 +1054,7 @@ class Engine(val cfg: Settings) {
                     closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
                     closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
                     s.midRef = Double.NaN; s.midBi = -1; s.midT = 0L; s.markBi = -1
+                    clearSetupFib(s)
                     s.lvBi = -1; s.lvT = 0L; s.lvConfBi = -1; s.lvConfT = 0L; s.lvH = Double.NaN; s.lvL = Double.NaN
                     s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.hvScanBi = -1; s.runMax = Double.NaN
                     s.lvTouched = false; s.lvUsed = false; s.lvReEntered = false; s.lvUses = 0
@@ -1069,6 +1079,7 @@ class Engine(val cfg: Settings) {
                         s.touchMidStart = mc.t
                         s.stage = 2
                         cnt.mid++
+                        updateSetupFib(s)
                         lg("ENGINE", "تایید میانی انجام شد (کندل باطل‌کننده، §18-8) · ستاپ #${s.id}",
                             if (s.dir == 1) "کف تایید=${f2(s.midRef)} bar=${mc.bi}" else "سقف تایید=${f2(s.midRef)} bar=${mc.bi}")
                         addMarker(mc.bi, s.midRef, 3, if (s.dir == 1) "کف تایید میانی" else "سقف تایید میانی")
@@ -1577,6 +1588,7 @@ class Engine(val cfg: Settings) {
                     closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
                     closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
                     s.midRef = Double.NaN; s.midBi = -1; s.midT = 0L; s.markBi = -1
+                    clearSetupFib(s)
                     if (s.zUsed) {
                         // §18-14: ناحیهٔ ساختار مصرف شده بود ⇒ ستاپ باطل و تا لمس ناحیهٔ بعدی غیرفعال
                         s.zGone = true
@@ -1621,6 +1633,7 @@ class Engine(val cfg: Settings) {
                     if (s.stage == 6) broker?.onSetupInvalidated(s, curT, curBi)
                     closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
                     closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
+                    clearSetupFib(s)
                     s.zGone = true
                     s.stage = 8
                     s.note = "شکست ناحیهٔ ساختار (لغو)"
@@ -1872,6 +1885,12 @@ class Engine(val cfg: Settings) {
         s.prevEntry = eRef
         // §4-8: انقضای سفارش معلق با عبور باز/کلوز از HH (خرید) / LL (فروش) در لحظهٔ مسلح‌شدن
         s.priceExpiryRef = if (bull) HH else LL
+        if (targets.fibDeleted) {
+            // §4-8: اگر فیبوناچی نامعتبر باشد یا فاصلهٔ حد سود نهایی فیبوناچی از ورود کمتر از ۱۰ واحد باشد، فیبوناچی در آن معامله حذف می‌شود.
+            clearSetupFib(s)
+        } else {
+            updateSetupFib(s)
+        }
         s.rearmAllowed = false
         s.stage = 6
         cnt.hv++
@@ -1938,6 +1957,39 @@ class Engine(val cfg: Settings) {
         lastBEpinLo = Double.NaN
     }
 
+    /** §18-5: رسم فیبوناچی ریتریسمنت از HH (خرید) / LL (فروش) تا کف/سقف تایید میانی. */
+    private fun updateSetupFib(s: Setup) {
+        if (cfg.strategy == Strategy.NO_TREND || s.midRef.isNaN()) {
+            clearSetupFib(s)
+            return
+        }
+        val bull = s.dir == 1
+        val a0 = if (bull) HH else LL
+        val a1 = s.midRef
+        val valid = !a0.isNaN() && !a1.isNaN() && (if (bull) a0 > a1 else a0 < a1)
+        if (!valid) {
+            clearSetupFib(s)
+            return
+        }
+        val r = if (bull) a0 - a1 else a1 - a0
+        s.fib0 = a0
+        s.fib1 = a1
+        s.fib382 = if (bull) a1 + 0.382 * r else a1 - 0.382 * r
+        s.fib500 = if (bull) a1 + 0.5 * r else a1 - 0.5 * r
+        s.fib1272 = if (bull) a1 + 1.272 * r else a1 - 1.272 * r
+        s.fibValid = true
+    }
+
+    /** §18-5 / §4-8: ابطال یا حذف فیبوناچی در ستاپ/معامله. */
+    private fun clearSetupFib(s: Setup) {
+        s.fib0 = Double.NaN
+        s.fib1 = Double.NaN
+        s.fib382 = Double.NaN
+        s.fib500 = Double.NaN
+        s.fib1272 = Double.NaN
+        s.fibValid = false
+    }
+
     private fun cancelDir(dir: Int) {
         val it = setups.iterator()
         while (it.hasNext()) {
@@ -1945,6 +1997,7 @@ class Engine(val cfg: Settings) {
             if (s.dir == dir && s.stage < 7) {
                 closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
                 closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
+                clearSetupFib(s)
                 s.stage = 8
                 s.note = "لغو (تغییر روند)"
                 events.add("[${s.id}] لغو شد — تغییر روند")
@@ -2089,12 +2142,19 @@ class Setup(
     var priceExpiryRef = Double.NaN // آخرین پین مخالف هنگام مسلح‌شدن این سفارش
     var entryBi = -1              // کندلی که ورود در آن پر شد (برای قاعده «ورود و TP1 در یک کندل»)
     var entryT = 0L
+    // §18-5 و §4-8: لنگرها و سطوح فیبوناچی ریتریسمنت برای این ستاپ/معامله
+    var fib0 = Double.NaN
+    var fib1 = Double.NaN
+    var fib382 = Double.NaN
+    var fib500 = Double.NaN
+    var fib1272 = Double.NaN
+    var fibValid = false
     val bull: Boolean get() = dir == 1
 }
 
 
-/** هدف‌های فیبوناچی با فالبک حداقل فاصلهٔ TPX. اگر TPX فالبک شود، پله‌ها نیز از همان فاصله محاسبه می‌شوند. */
-internal data class TargetLevels(val tp1: Double, val tp2: Double, val tpx: Double)
+/** هدف‌های فیبوناچی با فالبک حداقل فاصلهٔ TPX. اگر TPX فالبک شود، پله‌ها نیز از همان فاصله محاسبه می‌شوند و فیبوناچی در آن معامله حذف می‌شود (§4-8). */
+internal data class TargetLevels(val tp1: Double, val tp2: Double, val tpx: Double, val fibDeleted: Boolean = false)
 
 internal fun calculateTargetLevels(
     bull: Boolean,
@@ -2107,7 +2167,7 @@ internal fun calculateTargetLevels(
             (if (bull) anchor0 > anchor1 else anchor0 < anchor1)
     if (!haveFib) {
         val tpx = if (bull) entry + minDistance else entry - minDistance
-        return TargetLevels(Double.NaN, Double.NaN, tpx)
+        return TargetLevels(Double.NaN, Double.NaN, tpx, fibDeleted = true)
     }
 
     val r = if (bull) anchor0 - anchor1 else anchor1 - anchor0
@@ -2120,26 +2180,26 @@ internal fun calculateTargetLevels(
         if (movedToMinimum) {
             val tpx = entry + minDistance
             val distance = tpx - entry
-            TargetLevels(entry + distance * 0.382, entry + distance * 0.5, tpx)
+            TargetLevels(entry + distance * 0.382, entry + distance * 0.5, tpx, fibDeleted = true)
         } else if (entry >= fib0382) {
             // §18-20: در صورتی که سفارش بعد از ناحیه 0.382 فیبو باز شده بود حد سود اول ناحیه 0.5 و حد سود نهایی 1.272 است و لحظه سر به سر شدن معامله در ناحیه 0.5 است
             val tp1 = if (fib0500 > entry) fib0500 else Double.NaN
-            TargetLevels(tp1, Double.NaN, fib1272)
+            TargetLevels(tp1, Double.NaN, fib1272, fibDeleted = false)
         } else {
-            TargetLevels(fib0382, fib0500, fib1272)
+            TargetLevels(fib0382, fib0500, fib1272, fibDeleted = false)
         }
     } else {
         val movedToMinimum = entry - fib1272 < minDistance
         if (movedToMinimum) {
             val tpx = entry - minDistance
             val distance = entry - tpx
-            TargetLevels(entry - distance * 0.382, entry - distance * 0.5, tpx)
+            TargetLevels(entry - distance * 0.382, entry - distance * 0.5, tpx, fibDeleted = true)
         } else if (entry <= fib0382) {
             // §18-20: در صورتی که سفارش بعد از ناحیه 0.382 فیبو باز شده بود حد سود اول ناحیه 0.5 و حد سود نهایی 1.272 است و لحظه سر به سر شدن معامله در ناحیه 0.5 است
             val tp1 = if (fib0500 < entry) fib0500 else Double.NaN
-            TargetLevels(tp1, Double.NaN, fib1272)
+            TargetLevels(tp1, Double.NaN, fib1272, fibDeleted = false)
         } else {
-            TargetLevels(fib0382, fib0500, fib1272)
+            TargetLevels(fib0382, fib0500, fib1272, fibDeleted = false)
         }
     }
 }

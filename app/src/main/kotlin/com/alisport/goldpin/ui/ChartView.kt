@@ -72,7 +72,13 @@ class SetupOverlay(
     val midT: Long = 0L,
     val lvT: Long = 0L,
     val hvT: Long = 0L,
-    val armT: Long = 0L
+    val armT: Long = 0L,
+    val fib0: Double = Double.NaN,
+    val fib1: Double = Double.NaN,
+    val fib382: Double = Double.NaN,
+    val fib500: Double = Double.NaN,
+    val fib1272: Double = Double.NaN,
+    val fibValid: Boolean = false
 )
 
 class ChartView @JvmOverloads constructor(
@@ -1377,6 +1383,20 @@ class ChartView @JvmOverloads constructor(
             }
             if (showMidLine && !o.midRef.isNaN()) {
                 line(o.midRef, Color.parseColor("#BA68C8"), "تایید میانی", midIdx)
+            }
+            if (o.fibValid && o.stage in 2..7) {
+                if (showMidLine && !o.fib0.isNaN()) {
+                    line(o.fib0, Color.parseColor("#9575CD"), if (o.dir == 1) "فیبو 0% (HH)" else "فیبو 0% (LL)", midIdx)
+                }
+                if (o.stage < 6) {
+                    if (showTpStepsLines) {
+                        line(o.fib382, Color.parseColor("#FFB74D"), "فیبو 38.2%", midIdx)
+                        line(o.fib500, Color.parseColor("#FFB74D"), "فیبو 50%", midIdx)
+                    }
+                    if (showTpFinalLine) {
+                        line(o.fib1272, Palette.violet, "فیبو 127.2%", midIdx)
+                    }
+                }
             }
             if (showTrigger1Lines && o.stage >= 4 && !o.lvUsed && o.lvConfBi >= 0) {
                 line(o.lvH, Palette.gold, "ولوم کم", lvIdx)

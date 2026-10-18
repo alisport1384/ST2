@@ -57,6 +57,7 @@ float qtyPct   = input.float(100.0, "درصد سرمایه در حالت Equity 
 bool  roundQty = input.bool(false, "گرد کردن حجم به عدد صحیح", group = "⑤ Backtest | بک‌تست")
 
 float slBufTicks = input.float(2.0, "بافر حد ضرر (تیک)", minval = 0.0, group = "④ Trade | معامله")
+float entryBufTicks = input.float(1.0, "بافر سطح سفارش (تیک)", minval = 0.0, group = "④ Trade | معامله")
 float minTPunits  = input.float(10.0, "حداقل فاصله حدسود (واحد قیمتی)", minval = 0.0, group = "④ Trade | معامله", tooltip = "اگر فاصله ورود تا خط 1.272 کمتر از این عدد بود، حدسود = ورود ± همین عدد")
 bool  showTrade   = input.bool(true, "نمایش سطوح معامله (Entry/SL/TP)", group = "④ Trade | معامله")
 bool  showTable   = input.bool(true, "نمایش پنل وضعیت", group = "④ Trade | معامله")
@@ -781,7 +782,7 @@ if aggS.closedNow
                     if trend == 0 and beActive and not na(lastBEpin)
                         tempBoxTop := lastBEpin
                         tempBoxBot := lastBUpin
-                    else if trend == -1 and not na(lastBEpin)
+                    else if trend == -1 and not na(lastBEpin) and na(LL)
                         LL := lastBUpin
                         LH := lastBEpin
                         lhPinHi := lastBEpin
@@ -812,7 +813,7 @@ if aggS.closedNow
                     if trend == 0 and buActive and not na(lastBUpin)
                         tempBoxTop := lastBEpin
                         tempBoxBot := lastBUpin
-                    else if trend == 1 and not na(lastBUpin)
+                    else if trend == 1 and not na(lastBUpin) and na(HH)
                         HH := lastBEpin
                         HL := lastBUpin
                         hlPinLo := lastBUpin
@@ -1451,9 +1452,9 @@ if array.size(setups) > 0
                     // ✔ ناحیه ولوم زیاد تایید شد → مسلح
                     //   ⚠ فقط اگر کارگزار/استراتژی در حال حاضر سفارش/پوزیشن باز نداشته باشد
                     //   stage=6 می‌رویم.
-                    float eRef = bull ? s.hvH : s.hvL
+                    float eRef = bull ? s.hvH + entryBufTicks * syminfo.mintick : math.max(syminfo.mintick, s.hvL - entryBufTicks * syminfo.mintick)
                     s.sl := bull ? s.hvL - slBufTicks * syminfo.mintick : s.hvH + slBufTicks * syminfo.mintick
-                    float a0 = bull ? highestBE : lowestBUpin
+                    float a0 = bull ? HH : LL
                     float a1 = s.midRef
                     bool haveFib = not na(a0) and not na(a1) and (bull ? a0 > a1 : a0 < a1)
                     float tp1loc = na
@@ -1524,7 +1525,7 @@ if array.size(setups) > 0
                         s.armBi := bar_index
                         s.armsSinceS += 1
                         s.prevEntry := eRef
-                        s.priceExpiryRef := bull ? lastBEpin : lastBUpin
+                        s.priceExpiryRef := bull ? HH : LL
                         s.rearmAllowed := false
                         evArmedB := bull
                         evArmedS := not bull

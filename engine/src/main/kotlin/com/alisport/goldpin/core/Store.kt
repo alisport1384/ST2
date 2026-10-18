@@ -283,7 +283,8 @@ object Store {
         "entry" to s.entry, "sl" to s.sl, "tp1" to s.tp1, "tp2" to s.tp2, "tpx" to s.tpx,
         "be" to s.be, "tp2Hit" to s.tp2Hit, "note" to s.note, "orderId" to s.orderId,
         "armBi" to s.armBi, "armT" to s.armT, "armsSinceS" to s.armsSinceS, "prevEntry" to s.prevEntry,
-        "rearmAllowed" to s.rearmAllowed, "priceExpiryRef" to s.priceExpiryRef, "entryBi" to s.entryBi, "entryT" to s.entryT
+        "rearmAllowed" to s.rearmAllowed, "priceExpiryRef" to s.priceExpiryRef, "entryBi" to s.entryBi, "entryT" to s.entryT,
+        "fib0" to s.fib0, "fib1" to s.fib1, "fib382" to s.fib382, "fib500" to s.fib500, "fib1272" to s.fib1272, "fibValid" to s.fibValid
     )
 
     private fun setupFrom(m: Map<String, Any?>): Setup {
@@ -314,6 +315,12 @@ object Store {
         s.priceExpiryRef = m["priceExpiryRef"].asD() // فایل‌های قدیمی: NaN و در اولین بررسی از آخرین پین پر می‌شود.
         s.entryBi = if (m.containsKey("entryBi")) m["entryBi"].asI() else -1
         s.entryT = m["entryT"].asL()
+        if (m.containsKey("fib0")) s.fib0 = m["fib0"].asD()
+        if (m.containsKey("fib1")) s.fib1 = m["fib1"].asD()
+        if (m.containsKey("fib382")) s.fib382 = m["fib382"].asD()
+        if (m.containsKey("fib500")) s.fib500 = m["fib500"].asD()
+        if (m.containsKey("fib1272")) s.fib1272 = m["fib1272"].asD()
+        if (m.containsKey("fibValid")) s.fibValid = m["fibValid"].asB()
         return s
     }
 

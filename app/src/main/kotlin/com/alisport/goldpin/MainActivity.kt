@@ -798,7 +798,8 @@ class MainActivity : Activity() {
             SetupOverlay(
                 st.id, st.dir, st.stage, st.zTop, st.zBot, st.lvH, st.lvL, st.hvH, st.hvL,
                 st.entry, st.sl, st.tp1, st.tp2, st.tpx, st.midRef, st.zBi, st.lvUsed, st.lvConfBi,
-                st.zT, st.midT, st.lvT, st.hvT, st.armT
+                st.zT, st.midT, st.lvT, st.hvT, st.armT,
+                st.fib0, st.fib1, st.fib382, st.fib500, st.fib1272, st.fibValid
             )
         }
         cv.refresh()
