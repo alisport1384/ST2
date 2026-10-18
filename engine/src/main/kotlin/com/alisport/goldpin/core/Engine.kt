@@ -1734,6 +1734,18 @@ class Engine(val cfg: Settings) {
             //   ترتیب محافظه‌کارانه، مطابق §۴-۹ و PaperBroker.manageBar:
             //   حد ضرر → حد سود نهایی → حد سود اول → حد سود دوم.
             if (s.stage == 7 && !s.sl.isNaN() && !s.tpx.isNaN()) {
+                // §4-9 (سطح oo): کندل تریگر۲ بعد از کندل ورود که کاملاً خارج از باکس HV و
+                // بدون حتی یک تیک لمسِ سطح oo بسته شود ⇒ حد ضرر یک‌بار به oo (= ورود) می‌رود.
+                if (!s.be && !s.slMidDone && curBi > s.entryBi && !s.entry.isNaN()) {
+                    val ooMoved = if (bull) low > s.entry && low > s.hvH else high < s.entry && high < s.hvL
+                    if (ooMoved) {
+                        s.sl = s.entry
+                        s.slMidDone = true
+                        addMarker(curBi, s.entry, 8, "حدضرر → سطح oo")
+                        lg("TRADE", "کندل کاملاً خارج از باکس HV و بدون لمس oo بسته شد → حدضرر به سطح oo منتقل شد · ستاپ #${s.id}",
+                            "oo=${f2(s.entry)} bar=$curBi")
+                    }
+                }
                 var done = false
                 var px = Double.NaN
                 var note = ""

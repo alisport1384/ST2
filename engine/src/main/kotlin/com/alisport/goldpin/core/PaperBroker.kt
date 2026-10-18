@@ -160,6 +160,8 @@ class PaperBroker(private val cfg: Settings) {
         )
         o.mmNote = mmNote
         o.mmCm = mmCm
+        o.hvTop = s.hvH
+        o.hvBot = s.hvL
         s.orderId = o.id
         orders.add(o)
         pendings.add(o)
@@ -274,6 +276,8 @@ class PaperBroker(private val cfg: Settings) {
         )
         tr.fills.add(Fill(cd.t, cd.bi, o.price, o.qty, "ENTRY", 0.0))
         tr.mmCm = o.mmCm
+        tr.hvTop = o.hvTop
+        tr.hvBot = o.hvBot
         // §۲۰ cmsn: اسپرد تحمیلی هر معامله هنگام ورود تعیین و روی خودِ معامله ثبت می‌شود (در مود خاموش ۰ است)؛
         // از سود/زیان همین معامله کم می‌شود و با بسته شدن کامل وارد موجودی (Capital) می‌گردد.
         val cmsn = mm.commissionFor(o.qty)
@@ -290,6 +294,25 @@ class PaperBroker(private val cfg: Settings) {
     private fun manageBar(t: Trade, cd: Candle) {
         val bull = t.dir == 1
         val sameEntryBar = cd.bi == t.entryBi
+        // §4-9 («خیلی مهم» ـ سطح oo): بعد از پرشدن سفارش، اگر یک کندل تریگر۲ کاملاً خارج از
+        // باکس HV و کاملاً آن‌سوی سطح oo (قیمت واقعی بازشدن سفارش = t.entry) بسته شود، به‌طوری
+        // که سقف/کف/باز/بستهٔ آن حتی یک تیک هم سطح oo را لمس نکرده باشد، حد ضرر یک‌بار به oo منتقل می‌شود.
+        // کندل ورود خودش مشمول نیست (در بک‌تست همان کندل برای پرشدن باید oo را لمس کرده باشد).
+        if (!sameEntryBar && !t.be && t.slAdj.isNaN()) {
+            val oo = t.entry
+            val moved = if (bull) {
+                cd.l > oo && (t.hvTop.isNaN() || cd.l > t.hvTop)
+            } else {
+                cd.h < oo && (t.hvBot.isNaN() || cd.h < t.hvBot)
+            }
+            if (moved) {
+                t.slAdj = oo
+                lg("TRADE", "کندل تریگر۲ کاملاً خارج از باکس HV و بدون لمس oo بسته شد → حد ضرر به سطح oo منتقل شد · معامله #${t.id}",
+                    "oo=${fmt(oo)} hv=${fmt(t.hvBot)}-${fmt(t.hvTop)} bar=${cd.bi}")
+                alarm(AlertKind.BE, "حد ضرر به سطح oo منتقل شد",
+                    "معامله #${t.id} · سطح oo ${fmt(oo)}")
+            }
+        }
         val slLvl = if (t.be) t.entry else if (!t.slAdj.isNaN()) t.slAdj else t.sl0
 
         // §4-9 ترتیب ثابت: حد ضرر → حد سود نهایی → حد سود اول → حد سود دوم.

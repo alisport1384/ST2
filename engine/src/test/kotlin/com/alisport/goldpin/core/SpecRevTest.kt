@@ -402,4 +402,41 @@ class SpecRevTest {
         assertEquals(1, b.pendingOrders.size)
         assertEquals(2012.01, b.pendingOrders[0].price, 1e-9)
     }
+
+    @Test
+    fun `doc 4-9 oo level moves stop once candle closes fully outside HV without touching oo`() {
+        val cfg = Settings().apply { initialEquity = 100000.0 }
+        val b = PaperBroker(cfg)
+        val t0 = 1_700_000_000_000L
+        // سفارش خرید: oo=2010.01 (سقف HV 2010 + ۱ تیک)، باکس HV 2007..2010، SL=2006.98
+        val s = Setup(9L, 1, 6, 2020.0, 2000.0, 1, 0).apply {
+            hvH = 2010.0; hvL = 2007.0; sl = 2006.98
+            tp1 = 2030.0; tp2 = 2040.0; tpx = 2100.0; entry = 2010.01
+        }
+        assertTrue(b.registerLimit(s, Candle(0, t0, 2015.0, 2016.0, 2014.0, 2015.5, 100.0)))
+        assertEquals(2010.0, b.pendingOrders[0].hvTop, 1e-9)
+        assertEquals(2007.0, b.pendingOrders[0].hvBot, 1e-9)
+        // کندل پرشدن (باید oo را لمس کند؛ مشمول قاعدهٔ oo نیست)
+        b.onBar(Candle(1, t0 + 60_000L, 2012.0, 2013.0, 2010.0, 2012.5, 100.0))
+        assertEquals(1, b.openTrades.size)
+        val tr = b.openTrades[0]
+        assertTrue(tr.slAdj.isNaN(), "کندل ورود نباید حد ضرر را به oo ببرد")
+        // کندلی که هنوز باکس HV را لمس می‌کند (کف 2009 < سقف باکس) ⇒ انتقال ممنوع
+        b.onBar(Candle(2, t0 + 120_000L, 2011.0, 2012.0, 2009.0, 2011.5, 100.0))
+        assertTrue(tr.slAdj.isNaN())
+        // کندل کاملاً خارج از باکس و کاملاً بالای oo بدون لمس آن ⇒ حد ضرر = oo
+        b.onBar(Candle(3, t0 + 180_000L, 2011.0, 2014.0, 2010.5, 2013.5, 100.0))
+        assertEquals(2010.01, tr.slAdj, 1e-9, "حد ضرر باید دقیقاً به سطح oo منتقل شود (§4-9)")
+        // ذخیره/بازیابی: لبه‌های HV و slAdj باید برگردند
+        val e = Engine(cfg)
+        val loaded = Store.load(Store.save(cfg, e, b, emptyList()))
+        val lt = loaded.broker.trades.first { it.id == tr.id }
+        assertEquals(2010.0, lt.hvTop, 1e-9); assertEquals(2007.0, lt.hvBot, 1e-9)
+        assertEquals(2010.01, lt.slAdj, 1e-9)
+        // برگشت قیمت به oo ⇒ خروج سر‌به‌سر (بدون سود/زیان قیمتی)
+        b.onBar(Candle(4, t0 + 240_000L, 2013.0, 2013.5, 2010.0, 2011.0, 100.0))
+        assertFalse(tr.open)
+        assertEquals("خروج سر‌به‌سر", tr.reason)
+        assertEquals(0.0, tr.grossPnl(), 1e-9)
+    }
 }

@@ -138,6 +138,9 @@ class Order(
     var mmNote: String = ""
     /** §20 Mixed: این سفارش در فاز ManageCM (Capital > M) حجم‌گذاری شده است؟ (فقط آن معاملات cmsnLost را می‌سازند) */
     var mmCm: Boolean = false
+    /** §4-9: لبه‌های باکس HV هنگام مسلح‌شدن؛ برای قاعدهٔ انتقال حد ضرر به سطح oo لازم‌اند. */
+    var hvTop: Double = Double.NaN
+    var hvBot: Double = Double.NaN
 }
 
 class Fill(
@@ -178,6 +181,9 @@ class Trade(
     /** §20 Mixed: این معامله در فاز ManageCM (Capital > M) حجم‌گذاری شده بود؟ */
     var mmCm: Boolean = false
 ) {
+    /** §4-9: لبه‌های باکس HV این معامله؛ برای قاعدهٔ انتقال حد ضرر به سطح oo (قیمت واقعی بازشدن سفارش). */
+    var hvTop: Double = Double.NaN
+    var hvBot: Double = Double.NaN
     val open: Boolean get() = exitT == null
     val risk: Double get() = if (sl0 != 0.0) kotlin.math.abs(entry - sl0) else 0.0
 

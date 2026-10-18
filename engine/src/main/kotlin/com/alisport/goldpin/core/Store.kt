@@ -334,7 +334,7 @@ object Store {
         // §۲۰: وضعیت مدیریت زیان (فایل‌های قدیمی این کلیدها را ندارند ⇒ ۰)
         o["mmLost"] = b.mm.lost; o["mmCmsnLost"] = b.mm.cmsnLost; o["mmNaked"] = b.mm.nakedCapital()
         // ۱۹ ستون اول مثل قبل؛ ستون ۲۰ و ۲۱ (§۲۰): توضیح محاسبهٔ حجم، فاز ManageCM
-        o["orders"] = b.orders.map { listOf(it.id, it.setupId, it.dir, it.type, it.price, it.sl, it.tp1, it.tp2, it.tpX, it.qty, it.zoneTop, it.zoneBot, it.placedT, it.placedBi, it.status, it.filledT ?: 0L, it.filledBi ?: -1, it.closedT ?: 0L, it.cancelReason ?: "", it.mmNote, it.mmCm) }
+        o["orders"] = b.orders.map { listOf(it.id, it.setupId, it.dir, it.type, it.price, it.sl, it.tp1, it.tp2, it.tpX, it.qty, it.zoneTop, it.zoneBot, it.placedT, it.placedBi, it.status, it.filledT ?: 0L, it.filledBi ?: -1, it.closedT ?: 0L, it.cancelReason ?: "", it.mmNote, it.mmCm, it.hvTop, it.hvBot) }
         o["trades"] = b.trades.map { t ->
             linkedMapOf<String, Any?>(
                 "id" to t.id, "orderId" to t.orderId, "setupId" to t.setupId, "dir" to t.dir,
@@ -343,6 +343,7 @@ object Store {
                 "zoneTop" to t.zoneTop, "zoneBot" to t.zoneBot, "contractSize" to t.contractSize,
                 "exitT" to (t.exitT ?: 0L), "exitBi" to (t.exitBi ?: -1), "exitPx" to (t.exitPx ?: Double.NaN),
                 "reason" to t.reason, "be" to t.be, "slAdj" to t.slAdj,
+                "hvTop" to t.hvTop, "hvBot" to t.hvBot,
                 "commission" to t.commission, "mmCm" to t.mmCm,
                 "fills" to t.fills.map { listOf(it.t, it.bi, it.price, it.qty, it.kind, it.pnl) }
             )
@@ -373,6 +374,7 @@ object Store {
             or.closedT = if (l[17].asL() == 0L) null else l[17].asL()
             or.cancelReason = l[18].asS().ifEmpty { null }
             if (l.size >= 21) { or.mmNote = l[19].asS(); or.mmCm = l[20].asB() }
+            if (l.size >= 23) { or.hvTop = l[21].asD(); or.hvBot = l[22].asD() }
             b.orders.add(or)
         }
         for (x in m["trades"].asList()) {
@@ -386,6 +388,8 @@ object Store {
                 tr.fills.add(Fill(l[0].asL(), l[1].asI(), l[2].asD(), l[3].asD(), l[4].asS(), l[5].asD()))
             }
             if (t.containsKey("slAdj")) tr.slAdj = t["slAdj"].asD()
+            if (t.containsKey("hvTop")) tr.hvTop = t["hvTop"].asD()
+            if (t.containsKey("hvBot")) tr.hvBot = t["hvBot"].asD()
             if (t.containsKey("commission")) tr.commission = t["commission"].asD()
             if (t.containsKey("mmCm")) tr.mmCm = t["mmCm"].asB()
             if (t["exitT"].asL() != 0L) {

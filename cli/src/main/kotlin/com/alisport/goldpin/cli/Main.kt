@@ -51,19 +51,26 @@ fun main(args: Array<String>) {
         val h = p[2].toDoubleOrNull() ?: return null
         val l = p[3].toDoubleOrNull() ?: return null
         val c = p[4].toDoubleOrNull() ?: return null
-        var v = if (hasVolume && p.size >= 6) (p[5].toDoubleOrNull() ?: 0.0) else 0.0
-        if (vol == "synthetic" || (vol == "auto" && v <= 0.0)) {
-            // حجم مصنوعی: دامنهٔ کندل (رگرسیون سرانگشتی وقتی فید حجم ندارد)
-            v = (h - l) * 1000.0 + 1.0
-        }
+        val v = if (hasVolume && p.size >= 6) (p[5].toDoubleOrNull() ?: 0.0) else 0.0
         return Candle(0, t, o, h, l, c, v)
     }
+    val rawCandles = ArrayList<Candle>()
     for (ln in lines) {
         val cd = parseRow(ln)
         if (cd == null) { if (ln.isNotBlank()) skipped++; continue }
-        candles.add(Candle(bi++, cd.t, cd.o, cd.h, cd.l, cd.c, cd.v))
-        if (candles.size >= maxRows) break
+        rawCandles.add(Candle(bi++, cd.t, cd.o, cd.h, cd.l, cd.c, cd.v))
+        if (rawCandles.size >= maxRows) break
     }
+    // §6 سند: حجم صفر به موتور نمی‌رسد؛ اگر بیش از ۹۰٪ کندل‌ها حجم صفر داشته باشند حجم ساختگی
+    // از روی دامنهٔ کندل ساخته می‌شود، وگرنه کندل‌های صفرحجم با همان حجم صفر به موتور می‌روند.
+    val zeroVol = rawCandles.count { !(it.v > 0.0) }
+    val synthetic = vol == "synthetic" || (vol == "auto" && rawCandles.isNotEmpty() &&
+        zeroVol.toLong() * 10L > rawCandles.size.toLong() * 9L)
+    for (cd in rawCandles) {
+        val v = if (synthetic) (cd.h - cd.l) * 1000.0 + 1.0 else cd.v
+        candles.add(Candle(cd.bi, cd.t, cd.o, cd.h, cd.l, cd.c, v))
+    }
+    if (synthetic && vol != "synthetic") println("حجم ساختگی است (§6 سند: بیش از ۹۰٪ کندل‌ها حجم صفر داشتند)")
     if (candles.isEmpty()) { println("هیچ کندل معتبری در $csv پیدا نشد (قالب: timestamp,open,high,low,close[,volume])"); return }
     println("استراتژی: ${Strategy.label(strategy)}")
     println("کندل‌های بارگذاری‌شده: ${candles.size}   حجم واقعی: ${hasVolume && vol != "synthetic"}   ردیف ردشده: $skipped")
