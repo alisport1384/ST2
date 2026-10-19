@@ -290,7 +290,12 @@ class Engine(val cfg: Settings) {
         while (i <= lastIdx) {
             val cd = candles[i]
             val isLast = i == lastIdx
-            if (!isLast || lastIsClosed) {
+            if (MarketHours.isClosed(cd.t)) {
+                // تعطیلات شنبه و یکشنبه (ساعت استاندارد بازار): کندل آخر هفته هیچ تصمیمی
+                // نمی‌سازد و وارد تجمیع هم نمی‌شود؛ فقط شمارنده جلو می‌رود تا دوباره دیده نشود.
+                // سشن یکشنبه‌شب (از ۲۲:۰۰ UTC) باز است و جزئی از دوشنبه حساب می‌شود.
+                processed = i + 1
+            } else if (!isLast || lastIsClosed) {
                 processClosed(cd, i, candles.getOrNull(i - 1))
                 processed = i + 1
             } else {
@@ -1767,63 +1772,47 @@ class Engine(val cfg: Settings) {
                 var px = Double.NaN
                 var note = ""
                 val entrySameBar = (s.entryBi == curBi)
-                if (bull) {
-                    if (low <= s.sl) { done = true; px = s.sl; note = if (s.be || s.slMidDone) "خروج سر‌به‌سر" else "حد ضرر" }
-                    else if (high >= s.tpx) { done = true; px = s.tpx; note = "حد سود نهایی (1.272)" }
-                    else {
-                        // §4-9: اگر در کندل ورود هم حد سود اول (۰.۳۸۲ فیبو) و هم قیمت ورود لمس شود،
-                        // ورود ثبت می‌شود، حد سود اول ۰.۵ فیبو و حد سود نهایی ۱.۲۷۲ فیبو محاسبه می‌شود (۵۰٪/۵۰٪)
-                        // و حد ضرر بعد از لمس ۰.۵ فیبو به نقطهٔ ورود منتقل می‌شود.
-                        if (entrySameBar && !s.tp1.isNaN() && !s.tp2.isNaN() && high >= s.tp1) {
-                            s.tp1 = s.tp2
-                            s.tp2 = Double.NaN
-                            lg("TRADE", "لمس هم‌زمان ورود و ۰.۳۸۲ فیبو در یک کندل → حد سود اول به ۰.۵ فیبو منتقل شد · ستاپ #${s.id}",
-                                "tp1=${f2(s.tp1)} bar=$curBi")
-                        }
-                        if (!s.be && !s.tp1.isNaN() && high >= s.tp1) {
-                            s.be = true; s.sl = s.entry
-                            val tp1Lbl = if (s.tp2.isNaN()) "TP1 (50%)" else "TP1 (38%)"
-                            val tp1Fa = if (s.tp2.isNaN()) "TP1 (۵۰٪)" else "TP1 (۳۸٪)"
-                            addMarker(curBi, s.entry, 8, "$tp1Lbl ✔ · حدضرر = سر‌به‌سر")
-                            lg("TRADE", "$tp1Fa لمس شد → حدضرر به سر‌به‌سر منتقل شد · ستاپ #${s.id}",
-                                "tp1=${f2(s.tp1)} bar=$curBi")
-                            alarm(AlertKind.TP1, "$tp1Fa لمس شد", "ستاپ #${s.id} · حدضرر به سر‌به‌سر منتقل شد · ${f2(s.tp1)}")
-                        }
-                        if (s.be && !s.tp2Hit && !s.tp2.isNaN() && high >= s.tp2) {
-                            s.tp2Hit = true
-                            addMarker(curBi, s.tp2, 8, "TP2 (50%) ✔")
-                            lg("TRADE", "TP2 (۵۰٪) لمس شد · ستاپ #${s.id}", "tp2=${f2(s.tp2)} bar=$curBi")
-                            alarm(AlertKind.TP2, "TP2 (۵۰٪) لمس شد", "ستاپ #${s.id} · قیمت ${f2(s.tp2)}")
-                        }
-                        if (!entrySameBar && s.be && low <= s.entry) { done = true; px = s.entry; note = "خروج سر‌به‌سر" }
+                // §4-9: پله‌های TP1/TP2 در هر کندلی که سطحشان رد شده ثبت می‌شوند — از جمله
+                // کندلی که تا حد سود نهایی رفته است (قیمت برای رسیدن به ۱.۲۷۲ ناچار از
+                // ۰.۳۸۲ و ۰.۵ گذشته). پیش‌تر شاخهٔ «حد سود نهایی» پیش از این پله‌ها معامله را
+                // می‌بست و TP1/TP2 نه روی چارت مارک می‌شدند و نه در گزارش سفارش‌ها می‌آمدند.
+                fun crossedTp(level: Double): Boolean = if (bull) high >= level else low <= level
+                fun markTpLegs() {
+                    // §4-9: اگر در کندل ورود هم حد سود اول (۰.۳۸۲ فیبو) و هم قیمت ورود لمس شود،
+                    // ورود ثبت می‌شود، حد سود اول ۰.۵ فیبو و حد سود نهایی ۱.۲۷۲ فیبو محاسبه می‌شود (۵۰٪/۵۰٪)
+                    // و حد ضرر بعد از لمس ۰.۵ فیبو به نقطهٔ ورود منتقل می‌شود.
+                    if (entrySameBar && !s.tp1.isNaN() && !s.tp2.isNaN() && crossedTp(s.tp1)) {
+                        s.tp1 = s.tp2
+                        s.tp2 = Double.NaN
+                        lg("TRADE", "لمس هم‌زمان ورود و ۰.۳۸۲ فیبو در یک کندل → حد سود اول به ۰.۵ فیبو منتقل شد · ستاپ #${s.id}",
+                            "tp1=${f2(s.tp1)} bar=$curBi")
                     }
+                    if (!s.be && !s.tp1.isNaN() && crossedTp(s.tp1)) {
+                        s.be = true; s.sl = s.entry
+                        val tp1Lbl = if (s.tp2.isNaN()) "TP1 (50%)" else "TP1 (38%)"
+                        val tp1Fa = if (s.tp2.isNaN()) "TP1 (۵۰٪)" else "TP1 (۳۸٪)"
+                        addMarker(curBi, s.entry, 8, "$tp1Lbl ✔ · حدضرر = سر‌به‌سر")
+                        lg("TRADE", "$tp1Fa لمس شد → حدضرر به سر‌به‌سر منتقل شد · ستاپ #${s.id}",
+                            "tp1=${f2(s.tp1)} bar=$curBi")
+                        alarm(AlertKind.TP1, "$tp1Fa لمس شد", "ستاپ #${s.id} · حدضرر به سر‌به‌سر منتقل شد · ${f2(s.tp1)}")
+                    }
+                    if (s.be && !s.tp2Hit && !s.tp2.isNaN() && crossedTp(s.tp2)) {
+                        s.tp2Hit = true
+                        addMarker(curBi, s.tp2, 8, "TP2 (50%) ✔")
+                        lg("TRADE", "TP2 (۵۰٪) لمس شد · ستاپ #${s.id}", "tp2=${f2(s.tp2)} bar=$curBi")
+                        alarm(AlertKind.TP2, "TP2 (۵۰٪) لمس شد", "ستاپ #${s.id} · قیمت ${f2(s.tp2)}")
+                    }
+                }
+                val hitStopE = if (bull) low <= s.sl else high >= s.sl
+                val hitFinalE = if (bull) high >= s.tpx else low <= s.tpx
+                if (hitStopE) { done = true; px = s.sl; note = if (s.be || s.slMidDone) "خروج سر‌به‌سر" else "حد ضرر" }
+                else if (hitFinalE) {
+                    markTpLegs()
+                    done = true; px = s.tpx; note = "حد سود نهایی (1.272)"
                 } else {
-                    if (high >= s.sl) { done = true; px = s.sl; note = if (s.be || s.slMidDone) "خروج سر‌به‌سر" else "حد ضرر" }
-                    else if (low <= s.tpx) { done = true; px = s.tpx; note = "حد سود نهایی (1.272)" }
-                    else {
-                        if (entrySameBar && !s.tp1.isNaN() && !s.tp2.isNaN() && low <= s.tp1) {
-                            s.tp1 = s.tp2
-                            s.tp2 = Double.NaN
-                            lg("TRADE", "لمس هم‌زمان ورود و ۰.۳۸۲ فیبو در یک کندل → حد سود اول به ۰.۵ فیبو منتقل شد · ستاپ #${s.id}",
-                                "tp1=${f2(s.tp1)} bar=$curBi")
-                        }
-                        if (!s.be && !s.tp1.isNaN() && low <= s.tp1) {
-                            s.be = true; s.sl = s.entry
-                            val tp1Lbl = if (s.tp2.isNaN()) "TP1 (50%)" else "TP1 (38%)"
-                            val tp1Fa = if (s.tp2.isNaN()) "TP1 (۵۰٪)" else "TP1 (۳۸٪)"
-                            addMarker(curBi, s.entry, 8, "$tp1Lbl ✔ · حدضرر = سر‌به‌سر")
-                            lg("TRADE", "$tp1Fa لمس شد → حدضرر به سر‌به‌سر منتقل شد · ستاپ #${s.id}",
-                                "tp1=${f2(s.tp1)} bar=$curBi")
-                            alarm(AlertKind.TP1, "$tp1Fa لمس شد", "ستاپ #${s.id} · حدضرر به سر‌به‌سر منتقل شد · ${f2(s.tp1)}")
-                        }
-                        if (s.be && !s.tp2Hit && !s.tp2.isNaN() && low <= s.tp2) {
-                            s.tp2Hit = true
-                            addMarker(curBi, s.tp2, 8, "TP2 (50%) ✔")
-                            lg("TRADE", "TP2 (۵۰٪) لمس شد · ستاپ #${s.id}", "tp2=${f2(s.tp2)} bar=$curBi")
-                            alarm(AlertKind.TP2, "TP2 (۵۰٪) لمس شد", "ستاپ #${s.id} · قیمت ${f2(s.tp2)}")
-                        }
-                        if (!entrySameBar && s.be && high >= s.entry) { done = true; px = s.entry; note = "خروج سر‌به‌سر" }
-                    }
+                    markTpLegs()
+                    val backToEntry = if (bull) low <= s.entry else high >= s.entry
+                    if (!entrySameBar && s.be && backToEntry) { done = true; px = s.entry; note = "خروج سر‌به‌سر" }
                 }
                 if (done) {
                     lastResult = note

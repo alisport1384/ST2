@@ -1,6 +1,7 @@
 package com.alisport.goldpin.data
 
 import com.alisport.goldpin.core.Candle
+import com.alisport.goldpin.core.MarketHours
 import com.alisport.goldpin.core.Tf
 import com.alisport.goldpin.util.Fa
 import com.alisport.goldpin.util.Log
@@ -479,6 +480,9 @@ object Feed {
         var curBucket = Long.MIN_VALUE
         var o = 0.0; var h = 0.0; var l = 0.0; var c = 0.0; var v = 0.0; var t = 0L
         for (cd in src) {
+            // ساعت استاندارد بازار: کندل‌های تعطیلات شنبه و یکشنبه در هیچ تایم‌فریمی ساخته
+            // نمی‌شوند؛ سشن یکشنبه‌شب (از ۲۲:۰۰ UTC) با باکت روزانه/هفتگی جزئی از دوشنبه است.
+            if (MarketHours.isClosed(cd.t)) continue
             val b = Tf.bucket(targetSec, cd.t)
             if (b != curBucket) {
                 if (curBucket != Long.MIN_VALUE) out.add(Candle(out.size, t, o, h, l, c, v))

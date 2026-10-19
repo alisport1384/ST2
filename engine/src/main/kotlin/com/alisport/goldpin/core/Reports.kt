@@ -43,24 +43,13 @@ object Reports {
     private val UTC = TimeZone.getTimeZone("UTC")
 
     /**
-     * شروع هفته (پنجشنبه ۰۰:۰۰ UTC).
-     *
-     * انتخاب شد تا با مبدأ کندل‌های تایم‌فریم هفتگی (W1) هماهنگ باشد — در
-     * بازار XAUUSD هفته از باز شدن سیدنی/توکیو در بامداد دوشنبه شروع می‌شود،
-     * اما TradingView/ابزارهای نموداری کندل هفتگی را از پنجشنبه UTC می‌سازند
-     * (سازگاری epoch 1970-01-01 که پنجشنبه بود). برای اینکه گزارش‌های دوره‌ای
-     * و کندل‌های هفتگی روی هم بیفتند، هر دو پنجشنبه ۰۰:۰۰ UTC هستند.
+     * شروع هفتهٔ معاملاتی استاندارد: **دوشنبه ۰۰:۰۰ UTC** — دقیقاً همان باکت کندل
+     * هفتگی ([Tf.bucket] با W1) تا گزارش‌های دوره‌ای و کندل‌های W روی هم بیفتند.
+     * هفته از دوشنبه تا جمعه است؛ شنبه و یکشنبه تعطیل‌اند و خروجیِ یکشنبه‌شب
+     * (سشن بازگشایی) به هفته‌ای تعلق دارد که از دوشنبهٔ بعد شروع می‌شود.
+     * پارامتر [tz] برای هفته عمداً به کار نمی‌رود: هفتهٔ بازار بر مبنای UTC است.
      */
-    fun weekStart(ms: Long, tz: TimeZone = UTC): Long {
-        val c = cal(ms, UTC)
-        c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0)
-        c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0)
-        val dow = c.get(Calendar.DAY_OF_WEEK)                 // 1=یکشنبه … 5=پنجشنبه … 7=شنبه
-        // تعداد روزها که باید به عقب برویم تا به آخرین پنجشنبه برسیم.
-        val back = (dow - Calendar.THURSDAY + 7) % 7
-        if (back > 0) c.add(Calendar.DAY_OF_MONTH, -back)
-        return c.timeInMillis
-    }
+    fun weekStart(ms: Long, tz: TimeZone = UTC): Long = Tf.bucket(Tf.W1, ms)
 
     fun dayStart(ms: Long, tz: TimeZone = TimeZone.getDefault()): Long {
         val c = cal(ms, tz)

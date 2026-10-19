@@ -112,6 +112,10 @@ class PaperBroker(private val cfg: Settings) {
 
     /** ثبت سفارش لیمیت — §4-8 و §18-12/§18-13: حداکثر ۱ سفارش معلق در هر لحظه؛ معاملهٔ باز مانع سفارش جدید نیست. */
     fun registerLimit(s: Setup, bar: Candle): Boolean {
+        if (MarketHours.isClosed(bar.t)) {
+            lastError = "بازار تعطیل است (تعطیلات شنبه و یکشنبه) — سفارش ثبت نمی‌شود"
+            return false
+        }
         val activeCount = activeCount()
         if (cfg.strategy == Strategy.NO_TREND) {
             // استراتژی ۲: خرید و فروش هم‌زمان مجازند؛ از هر جهت فقط یک سفارش (معلق یا باز).
@@ -213,6 +217,8 @@ class PaperBroker(private val cfg: Settings) {
 
     /** پردازش یک کندل برای همهٔ سفارش‌ها و پوزیشن‌های باز. */
     fun onBar(cd: Candle, live: Boolean = false) {
+        // تعطیلات شنبه و یکشنبه: در بازار بسته هیچ سفارشی پر و هیچ معامله‌ای مدیریت نمی‌شود.
+        if (MarketHours.isClosed(cd.t)) return
         // ① پر شدن سفارش‌های لیمیت (روی یک کپی از pendings تا در fillEntry تغییرات لیست به iteration آسیب نزند)
         val pendingSnapshot = ArrayList(pendings)
         for (p in pendingSnapshot) {
@@ -241,6 +247,8 @@ class PaperBroker(private val cfg: Settings) {
      * @return تعداد سفارش‌های پرشده
      */
     fun onLiveCandle(forming: Candle): Int {
+        // آخر هفته حتی اگر منبع قیمت لحظه‌ای عدد بدهد، بازار بسته است و سفارشی پر نمی‌شود.
+        if (MarketHours.isClosed(forming.t)) return 0
         if (pendings.isEmpty()) return 0
         var n = 0
         for (p in ArrayList(pendings)) {
@@ -323,16 +331,12 @@ class PaperBroker(private val cfg: Settings) {
             closeAll(t, slLvl, cd.t, cd.bi, if (t.be || !t.slAdj.isNaN()) "خروج سر‌به‌سر" else "حد ضرر")
             return
         }
-        val hitFinal = if (bull) cd.h >= t.tpX else cd.l <= t.tpX
-        if (hitFinal) {
-            closeAll(t, t.tpX, cd.t, cd.bi, "حد سود نهایی (1.272)")
-            return
-        }
-
         // §4-9 «حد سود اول و قیمت ورود در یک کندل»:
         // اگر در کندل ورود هم قیمت ورود و هم حد سود اول (۰.۳۸۲ فیبو) لمس شود،
         // ورود ثبت می‌شود، حد سود اول ناحیهٔ ۰.۵ فیبو و حد سود نهایی ۱.۲۷۲ فیبو محاسبه می‌شود
         // و ۵۰٪ معامله در ۰.۵ فیبو (با انتقال حد ضرر به نقطهٔ ورود پس از لمس ۰.۵) و ۵۰٪ باقی در ۱.۲۷۲ بسته می‌شود.
+        // این تبدیل باید پیش از سنجش پله‌ها و حد سود نهایی انجام شود تا اگر همان کندل تا
+        // حد سود نهایی هم رفت، پله‌ها با سطوح درست (۰.۵ و ۱.۲۷۲) ثبت شوند.
         if (sameEntryBar && !t.tp1.isNaN() && !t.tp2.isNaN()) {
             val touched382OnEntry = if (bull) cd.h >= t.tp1 else cd.l <= t.tp1
             if (touched382OnEntry) {
@@ -350,6 +354,29 @@ class PaperBroker(private val cfg: Settings) {
         val isTwoStep = t.tp2.isNaN()
         val q1 = t.qty * (if (isTwoStep) 0.50 else 0.33)
         val q2 = t.qty * 0.33
+        fun crossedLevel(level: Double): Boolean = if (bull) cd.h >= level else cd.l <= level
+        fun remainingQty(): Double = t.qty - t.fills.filter { it.kind != "ENTRY" }.sumOf { it.qty }
+
+        val hitFinal = if (bull) cd.h >= t.tpX else cd.l <= t.tpX
+        if (hitFinal) {
+            // §4-9: معامله سه پله دارد و هر پله در سطح خودش بسته و در گزارش ثبت می‌شود.
+            // قیمت برای رسیدن به حد سود نهایی ناچار از سطح‌های TP1 و TP2 گذشته است؛ پس اگر
+            // پله‌ای در کندل‌های قبلی ثبت نشده، در همین کندل و پیش از بستن باقی‌مانده در
+            // حد سود نهایی ثبتش می‌کنیم (۳۳٪/۳۳٪ و باقی‌مانده در ۱.۲۷۲ — یا ۵۰٪/۵۰٪ دوپله‌ای).
+            // پیش‌تر کل حجم باقی‌مانده یکجا با TPX بسته می‌شد: در گزارش سفارش‌ها TP1/TP2
+            // دیده نمی‌شدند و سود هم با قیمت نهاییِ کل حجم بیش‌ازحد حساب می‌شد.
+            if (!t.tp1.isNaN() && t.fills.none { it.kind == "TP1" } && crossedLevel(t.tp1)) {
+                t.be = true
+                t.commission = 0.0
+                addExit(t, cd, t.tp1, min(q1, remainingQty()), "TP1")
+            }
+            if (!t.tp2.isNaN() && t.fills.none { it.kind == "TP2" } && crossedLevel(t.tp2)) {
+                addExit(t, cd, t.tp2, min(q2, remainingQty()), "TP2")
+            }
+            closeAll(t, t.tpX, cd.t, cd.bi, "حد سود نهایی (1.272)")
+            return
+        }
+
         val tp1Done = t.fills.any { it.kind == "TP1" }
         val remaining = t.qty - t.fills.filter { it.kind != "ENTRY" }.sumOf { it.qty }
         if (!tp1Done && !t.tp1.isNaN()) {
