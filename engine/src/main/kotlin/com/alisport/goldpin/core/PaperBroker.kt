@@ -341,8 +341,11 @@ class PaperBroker(private val cfg: Settings) {
         // اگر در یک کندل هم حد ضرر و هم حد سود لمس شود، حد ضرر برنده است.
         val hitStop = if (bull) cd.l <= slLvl else cd.h >= slLvl
         if (hitStop) {
-            if (t.be || !t.slAdj.isNaN()) t.commission = 0.0
-            closeAll(t, slLvl, cd.t, cd.bi, if (t.be || !t.slAdj.isNaN()) "خروج سر‌به‌سر" else "حد ضرر")
+            val isBe = t.be || !t.slAdj.isNaN()
+            if (isBe) t.commission = 0.0
+            // §۵ سند: لغزش یک تیک فقط روی خروج با حد ضرر (در جهت ضرر). خروج سر‌به‌سر طبق
+            // §۱۸-۲۴ باید دقیقاً روی سطح oo و بدون هزینه باشد، پس لغزش نمی‌خورد.
+            closeAll(t, cfg.exitFill(bull, slLvl, isBe), cd.t, cd.bi, if (isBe) "خروج سر‌به‌سر" else "حد ضرر")
             return
         }
         // §4-9 (ویرایش نهایی سند — «خیلی مهم» ـ سطح oo):

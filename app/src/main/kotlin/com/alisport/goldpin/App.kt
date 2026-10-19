@@ -1047,7 +1047,18 @@ class AppState {
             "${com.alisport.goldpin.core.Tf.label(chartTfSec)} → ${com.alisport.goldpin.core.Tf.label(newTf)} · مود=${cfg.tfMode} (tf2=${com.alisport.goldpin.core.Tf.label(cfg.tf2)})")
         chartTfSec = newTf
 
-        // ۱) اگر دادهٔ تایم‌فریم مقصد از حافظه (کش فید، کندل‌های مود یا نمونهٔ ریزدانه) قابل ساخت است، بلافاصله نمایش بده
+        // ۱) اگر دادهٔ تایم‌فریم مقصد از حافظه قابل ساخت است، بلافاصله نمایش بده.
+        //
+        // ⚠ نکتهٔ مهم (§۴-۵ سند): تجمیعِ محلی از سری تریگر۲ فقط به عمق همان سری است.
+        // اگر تایم‌فریم مقصد **درشت‌تر** از دادهٔ موجود باشد (مثلاً چارت را روی تایم‌فریم
+        // ساختار بگذاریم ولی سری ۱ دقیقه فقط ۷ روز عقب برود)، چارتِ ساختار فقط همان ۷ روز را
+        // نشان می‌دهد و باکس‌های قدیمی (که سند می‌گوید نامحدود نگه داشته و نمایش داده شوند)
+        // بیرون از محدودهٔ چارت می‌افتند و دیده نمی‌شوند. پس برای تایم‌فریم درشت‌تر از منبع،
+        // ابتدا تاریخچهٔ عمیقِ همان تایم‌فریم از فید گرفته می‌شود (با بازگشت به تجمیع محلی در
+        // صورت نبود شبکه).
+        val srcStep = listOf(medianStepSec(modeCandles), medianStepSec(fineCandles))
+            .filter { it > 0L }.minOrNull() ?: 0L
+        val coarserThanSource = srcStep > 0L && newTf.toLong() > srcStep
         val cached = tfFeedCache[newTf]
         val canAggregateLocally = (!modeFromFeed && fineCandles.isNotEmpty() && medianStepSec(fineCandles) in 1L..newTf.toLong()) ||
             (modeCandles.isNotEmpty() && medianStepSec(modeCandles) in 1L..newTf.toLong())
@@ -1060,7 +1071,23 @@ class AppState {
                 setDisplayCandles(mergeDisplayWithMode(cached, newTf))
                 return
             }
-            if (canAggregateLocally) {
+            // تایم‌فریم ساختار: تاریخچهٔ عمیقِ ثبت‌شده (structureCandles) باید بر تجمیع کوتاهِ
+            // سری تریگر۲ ترجیح داشته باشد تا باکس‌های قدیمی ساختار در محدودهٔ چارت بمانند.
+            if (newTf == cfg.tfS) {
+                val deep = availableStructureHistory(newTf)
+                val localAgg = if (canAggregateLocally) aggregateBestAvailable(newTf) else emptyList()
+                val deepStartsEarlier = deep.isNotEmpty() &&
+                    (localAgg.isEmpty() || deep.first().t < localAgg.first().t)
+                if (deepStartsEarlier) {
+                    setDisplayCandles(
+                        if (localAgg.isEmpty()) deep else mergeDisplayWithMode(mergeAtTimeframe(deep, localAgg, newTf), newTf)
+                    )
+                    return
+                }
+            }
+            // فقط برای «تایم‌فریم ساختار» عمق بیشتر از فید گرفته می‌شود (باکس‌های قدیمی ساختار
+            // باید در محدودهٔ چارت بمانند)؛ برای بقیهٔ تایم‌فریم‌ها همان تجمیع محلی سریع کافی است.
+            if (canAggregateLocally && !(coarserThanSource && modeFromFeed && newTf == cfg.tfS)) {
                 val local = aggregateBestAvailable(newTf)
                 if (local.isNotEmpty()) {
                     setDisplayCandles(local)
@@ -1082,6 +1109,11 @@ class AppState {
                     try {
                         baseTfSec = base
                         if (chart.isNotEmpty()) tfFeedCache[newTf] = chart
+                        // §4-5: تاریخچهٔ تایم‌فریم ساختار باید ثبت/ذخیره شود تا باکس‌های قدیمی و
+                        // توالی ساختار در بازسازی‌های بعدی هم در دسترس باشند.
+                        if (chart.isNotEmpty() && newTf == cfg.tfS) {
+                            rememberStructureHistory(chart, cfg.tfS)
+                        }
                         if (modeCandles.isEmpty()) {
                             modeFromFeed = true
                             setCandles(chart, rebuildNow = true)
@@ -1248,6 +1280,7 @@ class AppState {
         to.hvScanFirstTouch = c.hvScanFirstTouch; to.hvMarkFirstIncrease = c.hvMarkFirstIncrease
         to.rejectCandleNext = c.rejectCandleNext
         to.mintick = c.mintick; to.slBufTicks = c.slBufTicks; to.entryBufTicks = c.entryBufTicks; to.minTPunits = c.minTPunits
+        to.slipTicks = c.slipTicks
         to.strategy = c.strategy; to.tpUnits = c.tpUnits
         to.maxSlUnits = c.maxSlUnits
         to.useRiskPct = c.useRiskPct; to.riskPct = c.riskPct; to.equityPct = c.equityPct
@@ -1299,6 +1332,7 @@ class AppState {
         dst.lastBUpinRef = src.lastBUpinRef; dst.lastBUpinHi = src.lastBUpinHi
         dst.lastBEpinRef = src.lastBEpinRef; dst.lastBEpinLo = src.lastBEpinLo
         dst.lastZoneTop = src.lastZoneTop; dst.lastZoneBot = src.lastZoneBot
+        dst.zoneRefH = src.zoneRefH; dst.zoneRefL = src.zoneRefL   // §18-22: مرجع ابطال نواحی درونی
         dst.lastPocPx = src.lastPocPx; dst.lastProfBars = src.lastProfBars
         dst.lastEntryPx = src.lastEntryPx; dst.lastSlPx = src.lastSlPx; dst.lastTpPx = src.lastTpPx
         dst.lastResult = src.lastResult
@@ -1322,6 +1356,9 @@ class AppState {
         dst.maxEquity = src.maxEquity; dst.maxDrawdown = src.maxDrawdown
         dst.orderSeq = src.orderSeq; dst.tradeSeq = src.tradeSeq
         dst.mm.lost = src.mm.lost; dst.mm.cmsnLost = src.mm.cmsnLost   // §۲۰
+        // §۲۰ سند: «اگر Capital = 2×NakedCapital شد، NakedCapital دو برابر می‌شود»؛ این حالت
+        // باید بعد از بازیابی فایل هم حفظ شود، وگرنه با هر بار لود، حجم/ریسک به مقدار اولیه برمی‌گردد.
+        dst.mm.restoreNaked(src.mm.nakedCapital())
         // v1.4.9: همهٔ سفارش‌ها/پوزیشن‌های فعال کپی شوند.
         for (o in src.pendingOrders) dst.restorePending(o)
         for (t in src.openTrades) dst.restoreOpen(t)

@@ -62,6 +62,7 @@ object Store {
         "hvScanFirstTouch" to c.hvScanFirstTouch, "hvMarkFirstIncrease" to c.hvMarkFirstIncrease,
         "rejectCandleNext" to c.rejectCandleNext,
         "mintick" to c.mintick, "slBufTicks" to c.slBufTicks, "entryBufTicks" to c.entryBufTicks, "minTPunits" to c.minTPunits,
+        "slipTicks" to c.slipTicks,
         "strategy" to c.strategy, "tpUnits" to c.tpUnits, "maxSlUnits" to c.maxSlUnits,
         "useRiskPct" to c.useRiskPct, "riskPct" to c.riskPct, "equityPct" to c.equityPct,
         "maxLeverage" to c.maxLeverage, "levModel" to 2, "roundQty" to c.roundQty,
@@ -99,6 +100,8 @@ object Store {
         c.contractSize = m["contractSize"].asD(); c.initialEquity = m["initialEquity"].asD()
         // کلیدهای جدید در فایل‌های قدیمی نیستند ⇒ مقدار پیش‌فرض Settings() می‌ماند (asB(null)=false درست نیست).
         if (m.containsKey("entryBufTicks")) c.entryBufTicks = m["entryBufTicks"].asD()
+        // §۵: لغزش یک تیک؛ فایل‌های قدیمی کلید ندارند ⇒ پیش‌فرض سند (۱ تیک) می‌ماند.
+        if (m.containsKey("slipTicks")) c.slipTicks = m["slipTicks"].asD()
         // استراتژی انتخابی: فایل‌های قدیمی کلید ندارند ⇒ استراتژی ۱ (سند) می‌ماند.
         if (m.containsKey("strategy") && Strategy.valid(m["strategy"].asI())) c.strategy = m["strategy"].asI()
         if (m.containsKey("tpUnits")) c.tpUnits = m["tpUnits"].asD()

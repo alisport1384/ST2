@@ -1153,7 +1153,14 @@ class MainActivity : Activity() {
         v.addView(numRow("حداقل ردیف یک ناحیه", s.cfg.minZoneRows.toDouble()) { s.cfg.minZoneRows = it.toInt(); s.rebuildAsync() })
         // §v1.4.9: باکس‌ها با «کلوز از سمت دور» پاک می‌شوند؛ محدودیت تعداد غیرفعال (نامحدود).
         v.addView(Ui.tv(this, "حداکثر باکس روی چارت: نامحدود (پاک‌سازی با کلوز از سمت دور)", 11f, Palette.dim))
-        v.addView(switchRow("نمایش ناحیه‌های ردشده", s.cfg.showRejectedZones) { s.cfg.showRejectedZones = it; s.rebuildAsync() })
+        // §4-5: ناحیهٔ ردشده «روی چارت با خط‌چین خاکستری دیده می‌شود، ولی در معامله استفاده
+        // نمی‌شود». این سوییچ باید واقعاً نمایش چارت را عوض کند؛ قبلاً فقط یک فیلد ذخیره می‌شد
+        // و هیچ‌جا خوانده نمی‌شد (سوییچ بی‌اثر در تنظیمات).
+        v.addView(switchRow("نمایش ناحیه‌های ردشده", s.cfg.showRejectedZones) {
+            s.cfg.showRejectedZones = it
+            s.showRejectedStructureBoxes = it
+            applyAndSaveChartVis()
+        })
         v.addView(Ui.tv(this, "ابطال ناحیه با کلوز از سمت دور: طبق سند همیشه فعال", 11f, Palette.dim))
         val dists = arrayOf("مثلثی حول Close", "مثلثی حول Typical", "یکنواخت")
         dists.forEachIndexed { i, n ->
@@ -1173,9 +1180,11 @@ class MainActivity : Activity() {
         // ── معامله ──
         v.addView(Ui.section(this, "⑥ معامله و بک‌تست"))
         v.addView(numRow("بافر حدضرر (تیک)", s.cfg.slBufTicks) { s.cfg.slBufTicks = it; s.rebuildAsync() })
-        // §4-8 سند: «سطح سفارش = سقف/کف باکس HV ± ۲ تیک بافر … تعداد تیک بافر قابل تغییر است»
+        // §4-8 سند: «سطح سفارش = سقف/کف باکس HV ± ۱ تیک بافر … تعداد تیک بافر قابل تغییر است»
         v.addView(numRow("بافر سطح سفارش (تیک)", s.cfg.entryBufTicks) { s.cfg.entryBufTicks = it; s.rebuildAsync() })
-        // §18-31 سند: سفارش با فاصلهٔ حد ضرر بیشتر از N ثبت نمی‌شود (SL>N)؛ پیش‌فرض ۳
+        // §۵ سند: «اپ اندروید: بدون کارمزد (لغزش ۱ تیک)» — فقط روی خروج با حد ضرر اعمال می‌شود.
+        v.addView(numRow("لغزش خروج با حد ضرر (تیک)", s.cfg.slipTicks) { s.cfg.slipTicks = it; s.rebuildAsync() })
+        // §18-31 سند: سفارش با فاصلهٔ حد ضرر بیشتر از N ثبت نمی‌شود (SL>N)؛ پیش‌فرض سند ۱۰
         v.addView(numRow("حداکثر فاصلهٔ حد ضرر N (واحد)", s.cfg.maxSlUnits) { s.cfg.maxSlUnits = it; s.rebuildAsync() })
         if (s.cfg.strategy == Strategy.NO_TREND) {
             // استراتژی ۲: حد سود فقط «واحد» است (بدون فیبو و بدون TP1/TP2)؛ پیش‌فرض ۱۰

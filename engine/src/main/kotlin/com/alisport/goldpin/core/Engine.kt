@@ -50,6 +50,19 @@ class Settings {
 
     var mintick: Double = 0.01
     var slBufTicks: Double = 2.0
+    /**
+     * §۵ سند: «اپ اندروید: بدون کارمزد (لغزش ۱ تیک)» — لیکن سفارش‌های لیمیت ورود و پله‌های
+     * حد سود در سطح خودشان پر می‌شوند و §۱۸-۲۴ تأکید می‌کند خروج سر‌به‌سر باید **دقیقاً** صفر
+     * هزینه شود؛ پس لغزش فقط روی **خروج با حد ضرر** (بازارِ استاپ) اعمال می‌شود و در جهت ضرر
+     * است. مقدار قابل تغییر است؛ ۰ = بدون لغزش.
+     */
+    var slipTicks: Double = 1.0
+    /** قیمت واقعی پر شدن خروج: حد ضرر با یک تیک لغزش در جهت ضرر؛ خروج سر‌به‌سر/حد سود بدون لغزش (§۵ و §۱۸-۲۴). */
+    fun exitFill(bull: Boolean, level: Double, breakeven: Boolean): Double {
+        if (breakeven || slipTicks <= 0.0 || level.isNaN()) return level
+        val slip = slipTicks * mintick
+        return if (bull) level - slip else level + slip
+    }
     /** §4-8 سند: سطح سفارش = سقف باکس HV + ۱ تیک بافر (خرید) / کف باکس HV − ۱ تیک بافر (فروش). */
     var entryBufTicks: Double = 1.0
     /** سطح سفارش (§4-8): خرید = سقف باکس HV + بافر؛ فروش = کف باکس HV − بافر؛ همیشه عددی مثبت. */
@@ -137,6 +150,7 @@ class Settings {
         it.hvScanFirstTouch = hvScanFirstTouch; it.hvMarkFirstIncrease = hvMarkFirstIncrease
         it.rejectCandleNext = rejectCandleNext
         it.mintick = mintick; it.slBufTicks = slBufTicks; it.entryBufTicks = entryBufTicks; it.minTPunits = minTPunits
+        it.slipTicks = slipTicks
         it.strategy = strategy; it.tpUnits = tpUnits
         it.maxSlUnits = maxSlUnits
         it.useRiskPct = useRiskPct; it.riskPct = riskPct; it.equityPct = equityPct
@@ -1081,25 +1095,29 @@ class Engine(val cfg: Settings) {
 
         val firstBi = currentCandles.firstOrNull()?.bi ?: -1
         val lastBi = currentCandles.lastOrNull()?.bi ?: -1
-        val oldStructure = prevZones.filter { it.createdT in 1 until fromT && it.status != ZoneStatus.CAP }
+        // §4-5: هر ناحیهٔ ابطال‌نشده‌ای که در این اجرا ستاپ ندارد (چه قدیمی‌تر از پنجره، چه
+        // داخل پنجره ولی بازسازی‌نشده) باید ستاپ منتظرِ برخورد بگیرد؛ وگرنه باکس روی چارت
+        // می‌ماند ولی هیچ‌وقت معامله نمی‌شود.
+        val oldStructure = prevZones.filter { it.createdT > 0L && it.status != ZoneStatus.CAP }
         for (oldZone in oldStructure) {
-            val restored = zones.firstOrNull { sameZone(it, oldZone) } ?: continue
+            val matches = zones.filter { sameZone(it, oldZone) }
+            // اگر همان ناحیه در این اجرا چند وضعیت داشته باشد، نسخهٔ فعال مرجع است.
+            val restored = matches.firstOrNull { it.status == ZoneStatus.ACTIVE } ?: matches.firstOrNull() ?: continue
             if (restored.status != ZoneStatus.ACTIVE) continue
-            val oldSetup = prevSetups.firstOrNull {
-                it.dir == oldZone.dir && it.zIdx == oldZone.idx &&
-                    (it.zT == oldZone.createdT || (it.zT <= 0L && it.zBi == oldZone.createdBi)) &&
-                    it.zTop == oldZone.top && it.zBot == oldZone.bot
-            }
+            // ستاپ قبلی همان ناحیه (اگر بوده) با **هویت** پیدا می‌شود، نه هندسه؛ و از میان
+            // نسخه‌های تکراری، ستاپِ زنده (stage ۰..۶) مرجع است.
+            val oldSetup = prevSetups.firstOrNull { setupMatchesZone(it, oldZone) && it.stage in 0..6 && !it.zGone }
+                ?: prevSetups.firstOrNull { setupMatchesZone(it, oldZone) }
             if (oldSetup == null) {
                 // فایل قدیمی/محدود که فقط باکس را داشت: باکس معتبر را به یک ستاپ تازهٔ منتظر برخورد تبدیل کن.
-                if (setups.none { it.zT == restored.createdT && it.dir == restored.dir && it.zTop == restored.top && it.zBot == restored.bot }) {
+                if (setups.none { setupMatchesZone(it, restored) }) {
                     val s = Setup(setupSeq++, restored.dir, 0, restored.top, restored.bot, restored.idx, -1)
                     s.zT = restored.createdT
                     s.note = "ناحیهٔ قدیمیِ بازیابی‌شده · منتظر برخورد"
                     setups.add(s)
                 }
             } else if (oldSetup.stage in 0..5 && !oldSetup.zGone) {
-                if (setups.any { it.zT == restored.createdT && it.dir == restored.dir && it.zTop == restored.top && it.zBot == restored.bot }) continue
+                if (setups.any { setupMatchesZone(it, restored) }) continue
                 val copy = oldSetup.copyWithId(setupSeq++)
                 // ایندکس‌های محلیِ سری قبلی پس از دانلود/بازیابی معنی ندارند؛ state و timestampها
                 // حفظ می‌شوند و همهٔ مقایسه‌های کندلی بعدی از کندل تازهٔ بعد از بازسازی ادامه می‌یابند.
@@ -1132,8 +1150,28 @@ class Engine(val cfg: Settings) {
         return n
     }
 
+    /**
+     * آیا ستاپ [s] به همین ناحیه [z] تعلق دارد؟ (هویت، نه هندسه — §4-5)
+     * ستاپ‌های ساختهٔ موتور `zT` را از کندل ساختار می‌گیرند؛ ستاپ‌های بازیابی‌شدهٔ قدیمی ممکن است
+     * فقط `zBi` داشته باشند.
+     */
+    private fun setupMatchesZone(s: Setup, z: ZoneBox): Boolean =
+        s.dir == z.dir && s.zIdx == z.idx &&
+            (if (z.createdT > 0L) s.zT == z.createdT else (s.zT <= 0L && s.zBi == z.createdBi))
+
+    /**
+     * هویت یک ناحیه در بازسازی: «همان کندل ساختار + همان شمارهٔ Z1/Z2 + همان جهت».
+     *
+     * §4-5 سند: هندسهٔ باکس جزئی از هویت ناحیه **نیست**. اگر همان کندل ساختار در اجرای تازه
+     * پروفایل دقیق‌تری (دادهٔ ریز بیشتر) بدهد و سقف/کف کمی جابه‌جا شود، همچنان همان ناحیه است و
+     * نباید دو نسخه از آن روی چارت/در فایل ذخیره شود. مقایسهٔ قبلی که سقف/کف را هم شرط می‌کرد،
+     * هر بازسازی با دادهٔ کمی متفاوت یک «ناحیهٔ تازه» می‌ساخت و باکس‌های قدیمی تکثیر می‌شدند.
+     *
+     * شناسهٔ محلی ([ZoneBox.id]) هم معیار نیست: بعد از `reset` از صفر شروع می‌شود.
+     */
     private fun sameZone(a: ZoneBox, b: ZoneBox): Boolean =
-        a.dir == b.dir && a.idx == b.idx && a.createdT == b.createdT && a.top == b.top && a.bot == b.bot
+        a.dir == b.dir && a.idx == b.idx &&
+            (if (a.createdT > 0L && b.createdT > 0L) a.createdT == b.createdT else a.createdBi == b.createdBi)
 
     private fun carryZoneList(
         src: List<ZoneBox>,
@@ -1147,7 +1185,10 @@ class Engine(val cfg: Settings) {
         for (z in src) {
             // باکس‌های CAP فایل‌های قدیمی نیز تاریخچه‌اند؛ نباید در بازسازی گم شوند.
             // وضعیت CAP حفظ می‌شود اما به معاملهٔ جدید تبدیل نمی‌شود (وضعیت اصلی ناشناخته است).
-            if (z.createdT <= 0L || z.createdT >= fromT) continue
+            // §4-5 سند: باکس‌های قدیمی حتی وقتی تاریخ ساختشان **داخل** پنجرهٔ دادهٔ تازه است هم
+            // نباید دوباره اضافه/حذف شوند؛ اگر موتور در این اجرا خودش همان ناحیه را نساخته باشد
+            // (مثلاً چون دادهٔ ریز آن بازه در دسترس نبوده)، نسخهٔ ذخیره‌شده حفظ می‌شود.
+            if (z.createdT <= 0L) continue
             val existing = dst.firstOrNull { sameZone(it, z) }
             if (existing != null) {
                 idMap[z.id] = existing.id
@@ -1157,7 +1198,10 @@ class Engine(val cfg: Settings) {
                 zoneSeq++, z.dir, z.idx, z.top, z.bot, -1, z.createdT, z.loIdx, z.hiIdx,
                 -1, z.endT, z.status
             )
-            if (checkStructureInvalidation && copy.status == ZoneStatus.ACTIVE && cfg.clearUsedZones) {
+            // §4-5: ابطال یک **قاعدهٔ استراتژی** است («کلوز کندل تریگر۲ از سمت دور»)، نه گزینهٔ
+            // نمایشی؛ پس بازپخش ابطال روی پنجرهٔ تازه بدون توجه به `clearUsedZones` انجام می‌شود
+            // تا باکسِ کهنه‌ای که در فاصلهٔ دانلود باطل شده، دوباره «فعال/قابل‌معامله» برنگردد.
+            if (checkStructureInvalidation && copy.status == ZoneStatus.ACTIVE) {
                 val broken = currentCandles.firstOrNull { bar ->
                     bar.t >= fromT && if (copy.dir == 1) bar.c < copy.bot else bar.c > copy.top
                 }
@@ -1975,7 +2019,10 @@ class Engine(val cfg: Settings) {
                     // همین کندل) بسته و نتیجه محاسبه و ثبت می‌شود — دلیل: پایان زمان.
                     // این خروج بر حد ضرر/حد سودِ داخل همین کندل مقدم است.
                     done = true; px = open; note = "پایان زمان"
-                } else if (hitStopE) { done = true; px = s.sl; note = if (s.be || s.slMidDone) "خروج سر‌به‌سر" else "حد ضرر" }
+                } else if (hitStopE) {
+                    val isBe = s.be || s.slMidDone
+                    done = true; px = cfg.exitFill(bull, s.sl, isBe); note = if (isBe) "خروج سر‌به‌سر" else "حد ضرر"
+                }
                 else if (hitFinalE) {
                     markTpLegs()
                     done = true; px = s.tpx; note = "حد سود نهایی (1.272)"
@@ -2278,6 +2325,8 @@ class Engine(val cfg: Settings) {
     }
 
     private fun cancelDir(dir: Int) {
+        // §4-1 (بخش «برخورد چرخش با ستاپ‌های موجود»): با تغییر روند فقط **ستاپ‌ها** لغو می‌شوند؛
+        // «معاملهٔ باز هرگز به‌زور بسته نمی‌شود» (stage=7 این‌جا دست نمی‌خورد).
         val it = setups.iterator()
         while (it.hasNext()) {
             val s = it.next()
@@ -2293,15 +2342,10 @@ class Engine(val cfg: Settings) {
                 it.remove()
             }
         }
-        for (zb in zones) if (zb.dir == dir && zb.status == ZoneStatus.ACTIVE) {
-            zb.status = ZoneStatus.DELETED; zb.endBi = curBi; zb.endT = curT
-        }
-        for (zb in t1Zones) if (zb.dir == dir && zb.status == ZoneStatus.ACTIVE) {
-            zb.status = ZoneStatus.DELETED; zb.endBi = curBi; zb.endT = curT
-        }
-        for (zb in t2Zones) if (zb.dir == dir && zb.status == ZoneStatus.ACTIVE) {
-            zb.status = ZoneStatus.DELETED; zb.endBi = curBi; zb.endT = curT
-        }
+        // ⚠ §4-5 سند نهایی: «حذف ناحیه» **فقط** با بسته شدن یک کندل تریگر۲ از سمت دور ناحیه است
+        // («تصمیم جدید مالک»). تغییر روند باکس‌های ناحیه را پاک/خاکستری نمی‌کند؛ وگرنه هر بار
+        // روند عوض می‌شود تاریخچهٔ باکس‌های قدیمی (که سند می‌گوید نامحدود نگه داشته و ذخیره شوند)
+        // از بین می‌رفت. ابطال باکس‌ها تابع قاعدهٔ خودشان است (کلوز بیرون از سمت دور).
     }
 
     private fun addMarker(bi: Int, price: Double, kind: Int, text: String) {
