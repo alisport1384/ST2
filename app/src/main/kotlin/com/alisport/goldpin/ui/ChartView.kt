@@ -483,26 +483,22 @@ class ChartView @JvmOverloads constructor(
                     if (z.top > hi) hi = z.top
                 }
             }
-            if (showTrigger1Boxes) {
-                for (z in t1Zones) {
-                    if (z.status != ZoneStatus.ACTIVE) continue
+            fun includeTriggerBoxes(boxes: List<ZoneBox>) {
+                for (z in boxes) {
+                    if (z.status == ZoneStatus.CAP) continue
+                    val active = z.status == ZoneStatus.ACTIVE
+                    if (!active && !showDeletedStructureBoxes) continue
+                    if (!active && z.endT > 0L && z.endT < firstT) continue
                     val sBi = idxOfTime(z.createdT, z.createdBi)
-                    if (sBi <= to) {
+                    val eBi = if (active) candles.size - 1 else idxOfTime(z.endT, z.endBi)
+                    if (sBi <= to && eBi >= from) {
                         if (z.bot < lo) lo = z.bot
                         if (z.top > hi) hi = z.top
                     }
                 }
             }
-            if (showTrigger2Boxes) {
-                for (z in t2Zones) {
-                    if (z.status != ZoneStatus.ACTIVE) continue
-                    val sBi = idxOfTime(z.createdT, z.createdBi)
-                    if (sBi <= to) {
-                        if (z.bot < lo) lo = z.bot
-                        if (z.top > hi) hi = z.top
-                    }
-                }
-            }
+            if (showTrigger1Boxes) includeTriggerBoxes(t1Zones)
+            if (showTrigger2Boxes) includeTriggerBoxes(t2Zones)
         }
         if (showTradeLines) for (o in overlays) {
             val arr = doubleArrayOf(
@@ -1132,60 +1128,50 @@ class ChartView @JvmOverloads constructor(
                 canvas.drawText("Z${Fa.d(z.idx.toString())}", left + Ui.dp(context, 5f), yT + Ui.dp(context, 12.5f), pLabelTxt)
             }
         }
-        // باکس‌های تاییدشدهٔ تریگر ۱ (ولوم کم) و تریگر ۲ (ولوم زیاد) ثبت‌شده در حافظهٔ مود انتخاب‌شده
+        // باکس‌های تاییدشدهٔ تریگر ۱ (ولوم کم) و تریگر ۲ (ولوم زیاد) ثبت‌شده در حافظهٔ مود انتخاب‌شده.
+        // §4-5 سند: باکس ناحیه با باطل شدن **پاک نمی‌شود**؛ خاکستری کم‌رنگ می‌شود و تا انتهای عمرش
+        // (endT) روی چارت می‌ماند و از فایل ذخیره‌شده هم دوباره فراخوانی می‌شود.
         if (showTrigger1Boxes) {
-            for (z in t1Zones) {
-                if (z.status != ZoneStatus.ACTIVE) continue
-                val startIdx = idxOfTime(z.createdT, z.createdBi).toFloat()
-                val x1 = xOf(startIdx)
-                val x2 = xOf(rightIdx + 2f)
-                if (x2 < -barW || x1 > plotW + barW) continue
-                val left = max(min(x1, x2), -barW)
-                val right = min(max(x1, x2), plotW + barW)
-                val yT = yOf(z.top)
-                val yB = yOf(z.bot)
-                pZoneFill.color = (Palette.gold and 0x00FFFFFF) or (28 shl 24)
-                pZoneFill.style = Paint.Style.FILL
-                canvas.drawRect(left, yT, right, yB, pZoneFill)
-                pDotted.color = (Palette.gold and 0x00FFFFFF) or 0xB0000000.toInt()
-                canvas.drawLine(left, yT, right, yT, pDotted)
-                canvas.drawLine(left, yB, right, yB, pDotted)
-                if (showBoxLabels && barW > 3.5f) {
-                    pLabelBg.color = (Palette.gold and 0x00FFFFFF) or 0xB0000000.toInt()
-                    canvas.drawRoundRect(
-                        RectF(left + 2f, yT + 2f, left + Ui.dp(context, 28f), yT + Ui.dp(context, 15f)),
-                        Ui.dp(context, 3f).toFloat(), Ui.dp(context, 3f).toFloat(), pLabelBg
-                    )
-                    canvas.drawText("T1", left + Ui.dp(context, 5f), yT + Ui.dp(context, 12.5f), pLabelTxt)
-                }
-            }
+            for (z in t1Zones) drawTBox(canvas, z, Palette.gold, "T1", firstT)
         }
         if (showTrigger2Boxes) {
-            for (z in t2Zones) {
-                if (z.status != ZoneStatus.ACTIVE) continue
-                val startIdx = idxOfTime(z.createdT, z.createdBi).toFloat()
-                val x1 = xOf(startIdx)
-                val x2 = xOf(rightIdx + 2f)
-                if (x2 < -barW || x1 > plotW + barW) continue
-                val left = max(min(x1, x2), -barW)
-                val right = min(max(x1, x2), plotW + barW)
-                val yT = yOf(z.top)
-                val yB = yOf(z.bot)
-                pZoneFill.color = (Palette.accent and 0x00FFFFFF) or (28 shl 24)
-                pZoneFill.style = Paint.Style.FILL
-                canvas.drawRect(left, yT, right, yB, pZoneFill)
-                pDotted.color = (Palette.accent and 0x00FFFFFF) or 0xB0000000.toInt()
-                canvas.drawLine(left, yT, right, yT, pDotted)
-                canvas.drawLine(left, yB, right, yB, pDotted)
-                if (showBoxLabels && barW > 3.5f) {
-                    pLabelBg.color = (Palette.accent and 0x00FFFFFF) or 0xB0000000.toInt()
-                    canvas.drawRoundRect(
-                        RectF(left + 2f, yT + 2f, left + Ui.dp(context, 28f), yT + Ui.dp(context, 15f)),
-                        Ui.dp(context, 3f).toFloat(), Ui.dp(context, 3f).toFloat(), pLabelBg
-                    )
-                    canvas.drawText("T2", left + Ui.dp(context, 5f), yT + Ui.dp(context, 12.5f), pLabelTxt)
-                }
-            }
+            for (z in t2Zones) drawTBox(canvas, z, Palette.accent, "T2", firstT)
+        }
+    }
+
+    /**
+     * رسم یک باکس تریگر۱/تریگر۲:
+     *  • زنده (ACTIVE) = رنگی، کشیده تا لبهٔ راست چارت، با برچسب T1/T2؛
+     *  • باطل/مصرف‌شده = خاکستری کم‌رنگ از createdT تا endT (§4-5 سند: باکس قدیمی پاک نمی‌شود).
+     */
+    private fun drawTBox(canvas: Canvas, z: ZoneBox, liveColor: Int, tag: String, firstT: Long) {
+        if (z.status == ZoneStatus.CAP) return
+        val alive = z.status == ZoneStatus.ACTIVE
+        if (!alive && !showDeletedStructureBoxes) return
+        if (!alive && z.endT > 0L && z.endT < firstT) return
+        val startIdx = idxOfTime(z.createdT, z.createdBi).toFloat()
+        val endIdx = if (alive) rightIdx + 2f else idxOfTime(z.endT, z.endBi).toFloat()
+        val x1 = xOf(startIdx)
+        val x2 = xOf(endIdx)
+        if (x2 < -barW || x1 > plotW + barW) return
+        val left = max(min(x1, x2), -barW)
+        val right = min(max(x1, x2), plotW + barW)
+        val yT = yOf(z.top)
+        val yB = yOf(z.bot)
+        val color = if (alive) liveColor else Color.parseColor("#5A6472")
+        pZoneFill.color = (color and 0x00FFFFFF) or ((if (alive) 28 else 12) shl 24)
+        pZoneFill.style = Paint.Style.FILL
+        canvas.drawRect(left, yT, right, yB, pZoneFill)
+        pDotted.color = (color and 0x00FFFFFF) or (if (alive) 0xB0000000.toInt() else 0x55000000)
+        canvas.drawLine(left, yT, right, yT, pDotted)
+        canvas.drawLine(left, yB, right, yB, pDotted)
+        if (showBoxLabels && alive && barW > 3.5f) {
+            pLabelBg.color = (color and 0x00FFFFFF) or 0xB0000000.toInt()
+            canvas.drawRoundRect(
+                RectF(left + 2f, yT + 2f, left + Ui.dp(context, 28f), yT + Ui.dp(context, 15f)),
+                Ui.dp(context, 3f).toFloat(), Ui.dp(context, 3f).toFloat(), pLabelBg
+            )
+            canvas.drawText(tag, left + Ui.dp(context, 5f), yT + Ui.dp(context, 12.5f), pLabelTxt)
         }
     }
 

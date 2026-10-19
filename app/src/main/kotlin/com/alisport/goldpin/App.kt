@@ -81,6 +81,19 @@ class AppState {
      * (سفارش‌ها اما در همان لحظه با قیمت زنده پر می‌شوند).
      */
     var backtestFull: Boolean = true
+
+    /**
+     * کلید پیکربندیِ موتوری که باکس‌های ناحیهٔ فعلی با آن ساخته شده‌اند.
+     * §4-5 سند: ناحیه‌های ابطال‌نشده باید نگهداری/فراخوانی شوند؛ ولی فقط وقتی که همان سلسله‌مراتب
+     * تایم‌فریمی و همان استراتژی/پارامترهای پروفایل برقرار باشد — وگرنه باکس‌های مود قبلی بی‌معنا می‌شوند.
+     */
+    @Volatile
+    private var zoneKeepKey: String = ""
+
+    private fun zoneKey(): String =
+        "$symbol/${cfg.tfS}/${cfg.tfM}/${cfg.tf1}/${cfg.tf2}/${cfg.strategy}/${cfg.vpRows}/${cfg.vpVA}/" +
+            "${cfg.vpSmooth}/${cfg.distMode}/${cfg.minZoneRows}/${cfg.clearUsedZones}"
+
     /** در حال محاسبهٔ سنگین (اجرای موتور/دانلود) — رابط پیام «در حال محاسبه…» نشان می‌دهد */
     @Volatile var busy: Boolean = false
     @Volatile var busyText: String = ""
@@ -429,6 +442,19 @@ class AppState {
         synchronized(stateLock) {
         val execCandles = if (modeCandles.isNotEmpty()) modeCandles else candles
         val t0 = System.currentTimeMillis()
+        // §4-5 سند: ناحیه‌های ابطال‌نشده باید ثبت/نگهداری شوند و بعد از بازسازی موتور هم
+        // دوباره فراخوانی شوند. باکس‌هایی که پیش از پنجرهٔ دادهٔ تازه ساخته شده‌اند از خودِ
+        // داده قابل بازسازی نیستند، پس همین‌جا (پیش از reset) نگه داشته می‌شوند.
+        // اگر سلسله‌مراتب تایم‌فریمی/استراتژی/پارامترهای پروفایل عوض شده باشد، باکس‌های مود
+        // قبلی معنا ندارند و بازگردانده نمی‌شوند.
+        val key = zoneKey()
+        val keepSameConfig = key == zoneKeepKey
+        val keepZones = if (keepSameConfig) ArrayList(engine.zones) else ArrayList()
+        val keepT1 = if (keepSameConfig) ArrayList(engine.t1Zones) else ArrayList()
+        val keepT2 = if (keepSameConfig) ArrayList(engine.t2Zones) else ArrayList()
+        val keepSetups = if (keepSameConfig) ArrayList(engine.setups) else ArrayList()
+        val keepZoneSeq = engine.zoneSeq
+        zoneKeepKey = key
         Log.i(Log.CAT_ENGINE, "شروع اجرای مجدد موتور",
             "کندل‌مود=${execCandles.size} مود=${cfg.tfMode} (tf2=${com.alisport.goldpin.core.Tf.label(cfg.tf2)}) چارت=${com.alisport.goldpin.core.Tf.label(chartTfSec)} بک‌تست‌کامل=$backtestFull")
         engine.reset()
@@ -438,6 +464,7 @@ class AppState {
         engine.barCommitHook = { cd -> broker.onBar(cd, live = false) }
         val prev = Alerts.inBacktest
         Alerts.inBacktest = true
+        var carried = 0
         try {
             if (execCandles.isNotEmpty()) {
                 val structureHistory = availableStructureHistory(cfg.tfS)
@@ -447,6 +474,11 @@ class AppState {
                         "کندل ساختار=${Fa.d(seeded.toString())} شروع=${Tf.label(cfg.tfS)} ${structureHistory.firstOrNull()?.t ?: 0L}")
                 }
                 engine.feed(execCandles, lastIsClosed = backtestFull)
+                // بازگرداندن ناحیه‌های ابطال‌نشدهٔ بیرونِ این پنجره (§4-5 سند)
+                carried = engine.carryOverZones(
+                    keepZones, keepT1, keepT2, execCandles.first().t, keepZoneSeq,
+                    prevSetups = keepSetups, currentCandles = execCandles
+                )
                 val latestClosedIndex = engine.processed - 1
                 val latestClosed = execCandles.getOrNull(latestClosedIndex)
                 if (latestClosed != null) {
@@ -462,7 +494,7 @@ class AppState {
         Log.i(Log.CAT_ENGINE, "اجرای موتور تمام شد",
             "مدت=${System.currentTimeMillis() - t0}ms پردازش‌شده=${engine.processed} ستاپ=${engine.cnt.setup} برخورد=${engine.cnt.touch} " +
                 "میانی=${engine.cnt.mid} ولوم‌کم=${engine.cnt.lv} ولوم‌زیاد=${engine.cnt.hv} ورود=${engine.cnt.entry} پایان=${engine.cnt.done} " +
-                "باکس=${engine.zones.size} سفارش=${broker.orders.size} معامله=${broker.trades.size} موجودی=${Fa.n(broker.balance, 2)}")
+                "باکس=${engine.zones.size} (بازگردانده‌شده=${Fa.d(carried.toString())}) سفارش=${broker.orders.size} معامله=${broker.trades.size} موجودی=${Fa.n(broker.balance, 2)}")
         publishSnapshot()
         notifyUi()
         }
@@ -1166,6 +1198,9 @@ class AppState {
                 // انتقال وضعیت بازیابی‌شده به نمونه‌های سراسری
                 copyEngine(ld.eng, engine)
                 copyBroker(ld.broker, broker)
+                // باکس‌های ناحیهٔ بازیابی‌شده از فایل، باکس‌های معتبرِ همین پیکربندی‌اند؛ پس اگر بعداً
+                // موتور روی پنجرهٔ دادهٔ کوتاه‌تری بازسازی شد، ناحیه‌های ابطال‌نشده دوباره فراخوانی شوند (§4-5 سند).
+                zoneKeepKey = zoneKey()
                 engine.broker = broker
                 broker.engine = engine
                 engine.barCommitHook = { cd -> broker.onBar(cd, live = false) }
@@ -1301,6 +1336,7 @@ class AppState {
             structureCandles = emptyList()
             tfFeedCache.clear()
             modeFromFeed = false
+            zoneKeepKey = ""      // پاک‌سازی کامل: هیچ باکس قدیمی‌ای نباید بازگردانده شود
             broker.reset()
             engine.reset()
             engine.broker = broker; broker.engine = engine

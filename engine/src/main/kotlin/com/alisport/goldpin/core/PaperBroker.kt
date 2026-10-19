@@ -334,25 +334,7 @@ class PaperBroker(private val cfg: Settings) {
     private fun manageBar(t: Trade, cd: Candle) {
         val bull = t.dir == 1
         val sameEntryBar = cd.bi == t.entryBi
-        // §4-9 («خیلی مهم» ـ سطح oo): بعد از پرشدن سفارش، اگر یک کندل تریگر۲ کاملاً خارج از
-        // باکس HV و کاملاً آن‌سوی سطح oo (قیمت واقعی بازشدن سفارش = t.entry) بسته شود، به‌طوری
-        // که سقف/کف/باز/بستهٔ آن حتی یک تیک هم سطح oo را لمس نکرده باشد، حد ضرر یک‌بار به oo منتقل می‌شود.
-        // کندل ورود خودش مشمول نیست (در بک‌تست همان کندل برای پرشدن باید oo را لمس کرده باشد).
-        if (!sameEntryBar && !t.be && t.slAdj.isNaN()) {
-            val oo = t.entry
-            val moved = if (bull) {
-                cd.l > oo && (t.hvTop.isNaN() || cd.l > t.hvTop)
-            } else {
-                cd.h < oo && (t.hvBot.isNaN() || cd.h < t.hvBot)
-            }
-            if (moved) {
-                t.slAdj = oo
-                lg("TRADE", "کندل تریگر۲ کاملاً خارج از باکس HV و بدون لمس oo بسته شد → حد ضرر به سطح oo منتقل شد · معامله #${t.id}",
-                    "oo=${fmt(oo)} hv=${fmt(t.hvBot)}-${fmt(t.hvTop)} bar=${cd.bi}")
-                alarm(AlertKind.BE, "حد ضرر به سطح oo منتقل شد",
-                    "معامله #${t.id} · سطح oo ${fmt(oo)}")
-            }
-        }
+        // سطح حد ضررِ در جریان در **شروع** این کندل (پیش از هر انتقال تازه).
         val slLvl = if (t.be) t.entry else if (!t.slAdj.isNaN()) t.slAdj else t.sl0
 
         // §4-9 ترتیب ثابت: حد ضرر → حد سود نهایی → حد سود اول → حد سود دوم.
@@ -362,6 +344,24 @@ class PaperBroker(private val cfg: Settings) {
             if (t.be || !t.slAdj.isNaN()) t.commission = 0.0
             closeAll(t, slLvl, cd.t, cd.bi, if (t.be || !t.slAdj.isNaN()) "خروج سر‌به‌سر" else "حد ضرر")
             return
+        }
+        // §4-9 (ویرایش نهایی سند — «خیلی مهم» ـ سطح oo):
+        //   خرید: «اگر بعد از پر شدن و باز شدن سفارش یک کندل تریگر۲ خارج از سطح oo خرید بسته شد و
+        //          کاملاً بالاتر از سطح oo بسته شده بود، حد ضرر به سطح oo خرید منتقل می‌شود.»
+        //   فروش: قرینه (کلوز کاملاً پایین‌تر از سطح oo).
+        // سطح oo = رقم دقیقی که اوردر در بروکر باز شده است (§18-24) = قیمت ورود ثبت‌شدهٔ معامله.
+        // معیار فقط **کلوز** کندل بستهٔ تریگر۲ است (§3)؛ باکس HV شرط نیست و کندل ورود مشمول نیست.
+        // انتقال فقط یک‌بار و فقط وقتی انجام می‌شود که همین کندل حد ضررِ در جریان را نزده باشد.
+        if (!sameEntryBar && !t.be && t.slAdj.isNaN()) {
+            val oo = t.entry
+            val moved = if (bull) cd.c > oo else cd.c < oo
+            if (moved) {
+                t.slAdj = oo
+                lg("TRADE", "کندل تریگر۲ کاملاً آن‌سوی سطح oo بسته شد → حد ضرر به سطح oo منتقل شد · معامله #${t.id}",
+                    "oo=${fmt(oo)} close=${fmt(cd.c)} hv=${fmt(t.hvBot)}-${fmt(t.hvTop)} bar=${cd.bi}")
+                alarm(AlertKind.BE, "حد ضرر به سطح oo منتقل شد",
+                    "معامله #${t.id} · سطح oo ${fmt(oo)}")
+            }
         }
         // §4-9 «حد سود اول و قیمت ورود در یک کندل»:
         // اگر در کندل ورود هم قیمت ورود و هم حد سود اول (۰.۳۸۲ فیبو) لمس شود،

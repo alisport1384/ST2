@@ -43,7 +43,7 @@ bool  clearUsedZones = input.bool(true, "پاک کردن باکس وقتی قی�
 // §default: نامحدود باکس ناحیه (مقدار بزرگ = بی‌اثر؛ حذف فقط با کلوز از سمت دور)
 int   maxZoneBoxes = input.int(500, "حداکثر باکس ناحیه روی چارت", minval = 2, maxval = 2000, group = "② Fixed Range Volume Profile | فیکس‌رنج")
 
-int   maxSetups = input.int(6, "حداکثر ستاپ‌های هم‌زمان", minval = 1, maxval = 20, group = "③ Engine | موتور")
+int   maxSetups = input.int(1, "حداکثر ستاپ‌های هم‌زمان", minval = 1, maxval = 20, group = "③ Engine | موتور")
 // §default: ابطال میانی با Wick (سایه) — سند نهایی §4-5
 string midInvalid = input.string("Wick | سایه", "شکست تایید میانی با:", options = ["Close | بسته شدن", "Wick | سایه"], group = "③ Engine | موتور")
 string hvScan = input.string("First LV Touch | اولین برگشت به باکس ولوم کم", "شروع اسکن ولوم زیاد (تریگر۲) از:", options = ["First LV Touch | اولین برگشت به باکس ولوم کم", "LV Confirm | لحظه تایید ناحیه ولوم کم"], group = "③ Engine | موتور")
@@ -51,13 +51,14 @@ string hvMarkMode = input.string("FirstIncrease | اولین افزایش حجم
 
 string qtyMode = input.string("Risk % | ریسک ثابت", "روش تعیین حجم", options = ["Risk % | ریسک ثابت", "Equity % | درصد سرمایه"], group = "⑤ Backtest | بک‌تست")
 float riskPct  = input.float(1.0, "ریسک هر معامله (٪ سرمایه)", minval = 0.01, maxval = 100.0, step = 0.1, group = "⑤ Backtest | بک‌تست")
-// §default: اهرم ۱۰
-float maxLeverage = input.float(10.0, "حداکثر اهرم مجاز (برای محدود کردن حجم)", minval = 0.1, maxval = 100.0, step = 0.1, group = "⑤ Backtest | بک‌تست", tooltip = "حجم را طوری محدود می‌کند که سفارش به دلیل کمبود مارجین رد نشود. پیش‌فرض ۱۰.")
+// §5 سند: اهرم پیش‌فرض ۵۰۰؛ کاربر می‌تواند مقدار را تغییر دهد.
+float maxLeverage = input.float(500.0, "حداکثر اهرم مجاز (برای محدود کردن حجم)", minval = 0.1, maxval = 10000.0, step = 1.0, group = "⑤ Backtest | بک‌تست", tooltip = "سقف حجم = سرمایه × اهرم ÷ قیمت. پیش‌فرض سند: ۵۰۰.")
 float qtyPct   = input.float(100.0, "درصد سرمایه در حالت Equity %", minval = 1.0, maxval = 100.0, group = "⑤ Backtest | بک‌تست")
 bool  roundQty = input.bool(false, "گرد کردن حجم به عدد صحیح", group = "⑤ Backtest | بک‌تست")
 
 float slBufTicks = input.float(2.0, "بافر حد ضرر (تیک)", minval = 0.0, group = "④ Trade | معامله")
 float entryBufTicks = input.float(1.0, "بافر سطح سفارش (تیک)", minval = 0.0, group = "④ Trade | معامله")
+float maxSlUnits = input.float(10.0, "حداکثر فاصلهٔ حد ضرر N (واحد)", minval = 0.0, group = "④ Trade | معامله", tooltip = "§18-31 سند: اگر فاصلهٔ سطح سفارش تا حد ضرر از N بیشتر باشد، سفارش ثبت نمی‌شود؛ پیش‌فرض ۱۰.")
 float minTPunits  = input.float(10.0, "حداقل فاصله حدسود (واحد قیمتی)", minval = 0.0, group = "④ Trade | معامله", tooltip = "اگر فاصله ورود تا خط 1.272 کمتر از این عدد بود، حدسود = ورود ± همین عدد")
 bool  showTrade   = input.bool(true, "نمایش سطوح معامله (Entry/SL/TP)", group = "④ Trade | معامله")
 bool  showTable   = input.bool(true, "نمایش پنل وضعیت", group = "④ Trade | معامله")
@@ -74,6 +75,13 @@ int  sec1 = timeframe.in_seconds(tf1)
 int  sec2 = timeframe.in_seconds(tf2)
 int  chartSec = timeframe.in_seconds(timeframe.period)
 bool tfOK = chartSec == sec2
+// §18-25 تا §18-30: ساعت بازار و پنجرهٔ سفارش‌گیری بر مبنای UTC.
+int utcMinute = hour(time, "UTC") * 60 + minute(time, "UTC")
+int utcDay = dayofweek(time, "UTC")
+bool marketOpen = utcDay != dayofweek.saturday and (utcDay != dayofweek.sunday or utcMinute >= 22 * 60)
+bool orderWindow = marketOpen and utcMinute >= 90 and utcMinute < 20 * 60
+// کندلی که دقیقاً ساعت ۲۰:۰۰ UTC بسته می‌شود: سفارش‌های معلق لغو و پوزیشن با openِ کندل بعد بسته می‌شود.
+bool timeExitBar = marketOpen and hour(time_close, "UTC") == 20 and minute(time_close, "UTC") == 0
 
 // ───────────────────────────────────────────────────────────────────────────────
 //  ③ TYPES
@@ -158,6 +166,7 @@ type Setup
     float  tp2         = na
     float  tpx         = na
     bool   be          = false
+    bool   slMidDone   = false // §4-9: انتقال یک‌بارهٔ حد ضرر به سطح oo پس از کلوز آن‌سوی ورود
     bool   tp2Hit      = false
     string note        = ""
     line   l1          = na
@@ -591,7 +600,7 @@ f_dropZone(int i) =>
 // ── چرخهٔ عمر : باکس وقتی پاک می‌شود که قیمت از «سمت دور» آن بسته شود ──
 //    صعودی (باکس زیر قیمت) ← Close زیر کف باکس
 //    نزولی (باکس بالای قیمت) ← Close بالای سقف باکس
-if clearUsedZones and array.size(zDirArr) > 0
+if marketOpen and clearUsedZones and array.size(zDirArr) > 0
     for i = array.size(zDirArr) - 1 to 0
         int zdir = array.get(zDirArr, i)
         float zT = array.get(zTopArr, i)
@@ -724,7 +733,7 @@ f_cancelDir(int dir) =>
 // ───────────────────────────────────────────────────────────────────────────────
 //  ⑩ STRUCTURE CLOSE ENGINE  (کندل مهم · Ready · pin · روند · فیکس‌رنج)
 // ───────────────────────────────────────────────────────────────────────────────
-if aggS.closedNow
+if marketOpen and aggS.closedNow
     Candle sb = aggS.cl
     array.push(structBars, sb)
     if array.size(structBars) > 400
@@ -1102,16 +1111,17 @@ if aggS.closedNow
             label.delete(array.shift(vpLabels))
 
 // ── ریزکندل‌های تریگر۲ داخل کندل ساختار جاری ──
-if newS
+if marketOpen and newS
     microS.clear()
-if array.size(microS) > 3000
-    array.shift(microS)
-array.push(microS, Candle.new(bar_index, time, open, high, low, close, volume))
+if marketOpen
+    if array.size(microS) > 3000
+        array.shift(microS)
+    array.push(microS, Candle.new(bar_index, time, open, high, low, close, volume))
 
 // ───────────────────────────────────────────────────────────────────────────────
 //  ⑪ MIDDLE CLOSE ENGINE  (تایید میانی · کندل مارک‌شده · ابطال)
 // ───────────────────────────────────────────────────────────────────────────────
-if aggM.closedNow and not na(aggM.cl) and array.size(setups) > 0
+if marketOpen and aggM.closedNow and not na(aggM.cl) and array.size(setups) > 0
     Candle mc = aggM.cl
     for i = 0 to array.size(setups) - 1
         Setup s = array.get(setups, i)
@@ -1194,7 +1204,7 @@ if aggM.closedNow and not na(aggM.cl) and array.size(setups) > 0
 //     قاعده یک‌بارمصرف : باکس فقط یک‌بار برگشت و خروج دارد
 // ───────────────────────────────────────────────────────────────────────────────
 var float prevT1Vol = na
-if agg1.closedNow and not na(agg1.cl) and array.size(setups) > 0
+if marketOpen and agg1.closedNow and not na(agg1.cl) and array.size(setups) > 0
     Candle q1 = agg1.cl
     for i = 0 to array.size(setups) - 1
         Setup s = array.get(setups, i)
@@ -1288,7 +1298,7 @@ prevT1Vol := agg1.closedNow ? agg1.cl.v : prevT1Vol
 // ───────────────────────────────────────────────────────────────────────────────
 //  ⑬ TRIGGER-2 (CHART) ENGINE : ناحیه ساختار · ناحیه ولوم زیاد · ورود · مدیریت
 // ───────────────────────────────────────────────────────────────────────────────
-if array.size(setups) > 0
+if marketOpen and array.size(setups) > 0
     for i = 0 to array.size(setups) - 1
         Setup s = array.get(setups, i)
         bool bull = s.dir == 1
@@ -1299,7 +1309,8 @@ if array.size(setups) > 0
             bool closeBreak = bull ? (not na(s.priceExpiryRef) and close > s.priceExpiryRef) : (not na(s.priceExpiryRef) and close < s.priceExpiryRef)
             int nBars = math.max(1, math.round(secS / sec2))
             bool barExpire = not na(s.armBi) and (bar_index - s.armBi) >= nBars
-            bool entryTouched = bull ? low <= s.hvH : high >= s.hvL
+            // سطح سفارش در سند = HV لبه + بافر؛ لمس خودِ باکس HV برای پرشدن کافی نیست.
+            bool entryTouched = bull ? low <= s.entry : high >= s.entry
             bool hvViol = bull ? low < s.hvL : high > s.hvH
             if barExpire or openBreak or (not entryTouched and closeBreak)
                 string expRsn = barExpire ? "گذشت یک کندل ساختار" : "عبور باز/کلوز از پین مخالف"
@@ -1317,7 +1328,7 @@ if array.size(setups) > 0
                 s.l4 := na; s.l5 := na; s.l6 := na; s.l7 := na; s.l8 := na; s.l9 := na; s.l10 := na
                 label.new(bar_index, close, "انقضا · " + expRsn, xloc.bar_index, yloc.price, color.new(color.orange, 30), label.style_label_left, color.white, size.tiny)
             else if entryTouched
-                s.entry := bull ? s.hvH : s.hvL
+                // s.entry همان سطح سفارش = HV لبه ± بافر است.
                 s.rearmAllowed := false
                 s.stage := 7
                 s.entryBi := bar_index
@@ -1454,7 +1465,8 @@ if array.size(setups) > 0
                     //   stage=6 می‌رویم.
                     float eRef = bull ? s.hvH + entryBufTicks * syminfo.mintick : math.max(syminfo.mintick, s.hvL - entryBufTicks * syminfo.mintick)
                     s.sl := bull ? s.hvL - slBufTicks * syminfo.mintick : s.hvH + slBufTicks * syminfo.mintick
-                    float a0 = bull ? HH : LL
+                    // §18-32 سند: جدیدترین HH = بالاترین pinBE بعد از صعود؛ LL = پایین‌ترین pinBU بعد از نزول.
+                    float a0 = bull ? highestBE : lowestBUpin
                     float a1 = s.midRef
                     bool haveFib = not na(a0) and not na(a1) and (bull ? a0 > a1 : a0 < a1)
                     float tp1loc = na
@@ -1504,8 +1516,16 @@ if array.size(setups) > 0
                                 hasActiveOrder := true
                     bool isRearm = not na(s.prevEntry)
                     bool rearmOK = not isRearm
-                    bool canArm = rearmOK and not hasActiveOrder and not entryPending and strategy.position_size == 0
-                    if not canArm
+                    float slDistance = math.abs(eRef - s.sl)
+                    bool withinSlLimit = slDistance <= maxSlUnits
+                    bool canArm = orderWindow and rearmOK and not hasActiveOrder and not entryPending and strategy.position_size == 0
+                    if not orderWindow
+                        // §18-26/29/30: خارج پنجره فقط سفارش‌گیری/مسلح‌شدن متوقف است؛ HV و ستاپ می‌مانند.
+                        s.note := "منتظر پنجرهٔ سفارش‌گیری ۰۱:۳۰ تا ۲۰:۰۰ UTC"
+                    else if not withinSlLimit
+                        // §18-31: HV/ستاپ می‌ماند، اما روی این HV سفارش ثبت نمی‌شود؛ N فقط فیلتر سفارش است.
+                        s.note := "سفارش رد شد · SL>N (" + str.tostring(slDistance, format.mintick) + " > " + str.tostring(maxSlUnits, format.mintick) + ")"
+                    else if not canArm
                         s.hvBi := na
                         s.runMax := volume
                         f_delLine(s.l6)
@@ -1518,6 +1538,7 @@ if array.size(setups) > 0
                         s.tpx := tpxloc
                         s.entry := eRef
                         s.be := false
+                        s.slMidDone := false
                         s.tp2Hit := false
                         s.stage := 6
                         cHV += 1
@@ -1654,6 +1675,16 @@ if array.size(setups) > 0
                         done := true
                         px := s.entry
                         note := "خروج سر‌به‌سر"
+            // §4-9 ویرایش نهایی: بعد از کندل ورود، کلوزِ تریگر۲ کاملاً آن‌سوی سطح oo
+            // (خرید: close > oo؛ فروش: close < oo) حد ضرر را یک‌بار به خود oo می‌برد.
+            // تصمیم فقط با کلوز است؛ هیچ شرطی برای بیرون‌بودن سایه از باکس HV وجود ندارد.
+            if not done and not sameBar and not s.be and not s.slMidDone and (bull ? close > s.entry : close < s.entry)
+                s.sl := s.entry
+                s.slMidDone := true
+                if not na(trSetup) and trSetup == s
+                    trSl := s.entry
+                label.new(bar_index, s.entry, "حدضرر → سطح oo", xloc.bar_index, yloc.price,
+                    color.new(color.orange, 20), bull ? label.style_label_down : label.style_label_up, color.white, size.tiny)
             if done
                 lastResult := note
                 s.note := note
@@ -1682,7 +1713,7 @@ bool setupAlive = not na(trSetup) and (trSetup.stage == 6 or trSetup.stage == 7)
 bool flatNow = strategy.position_size == 0
 
 // ① لغو سفارش ورود : فقط وقتی خود ستاپ باطل یا منقضی شده باشد
-if flatNow and entryPending and not setupAlive
+if entryPending and (not marketOpen or not orderWindow or not setupAlive)
     strategy.cancel("L")
     strategy.cancel("S")
     entryPending := false
@@ -1690,7 +1721,7 @@ if flatNow and entryPending and not setupAlive
 // ② تمدید سفارش ورود لیمیت و خروج‌های وابسته هر کندل (تا در کندل ورود نیز حدضرر/حدسود فعال باشد)
 //   ۷-۸: سفارش در همان کندل مسلح شدن (bar_index == entryBar) پر نمی‌شود — مطابق
 //   §۲-۸ «برگشت به لبه» از کندل بعد.
-if flatNow and entryPending and setupAlive and not na(trEntry) and bar_index > entryBar
+if marketOpen and orderWindow and flatNow and entryPending and setupAlive and not na(trEntry) and bar_index > entryBar
     if trDir == 1
         strategy.entry("L", strategy.long, qty = trQ1 + trQ2 + trQ3, limit = trEntry, comment = "PinReady-L")
         strategy.exit("X1", from_entry = "L", qty = trQ1, limit = trTp1, stop = trSl)
@@ -1703,12 +1734,12 @@ if flatNow and entryPending and setupAlive and not na(trEntry) and bar_index > e
         strategy.exit("X3", from_entry = "S", qty = trQ3, limit = trTp, stop = trSl)
 
 // ③ تشخیص پر شدن ورود
-if not inPos and strategy.position_size != 0
+if marketOpen and not inPos and strategy.position_size != 0
     inPos := true
     entryPending := false
 
 // ④ مدیریت پوزیشن : ثبت دوبارهٔ خروج‌ها روی هر کندل + سر‌به‌سر
-if inPos and not na(trSl) and not na(trTp)
+if marketOpen and inPos and not na(trSl) and not na(trTp)
     bool pLong = strategy.position_size > 0
     if not trTp1Done and not na(trTp1) and (pLong ? high >= trTp1 : low <= trTp1)
         trTp1Done := true
@@ -1716,6 +1747,12 @@ if inPos and not na(trSl) and not na(trTp)
         be1 := true
     if not trTp2Done and not na(trTp2) and (pLong ? high >= trTp2 : low <= trTp2)
         trTp2Done := true
+    // اگر موتور سیگنال، کندل بسته‌شده را (پس از کندل ورود) بالای/پایین oo پذیرفت،
+    // سفارش حد ضرر بعدی به قیمت واقعی ورود منتقل می‌شود. فقط یک‌بار، مستقل از TP1.
+    if not be1 and not na(trSetup) and not trSetup.slMidDone and bar_index > trSetup.entryBi and (pLong ? close > trEntry : close < trEntry)
+        trSetup.slMidDone := true
+        trSetup.sl := trEntry
+        trSl := trEntry
     float stopLvl = be1 ? trEntry : trSl
     if pLong
         if not trTp1Done
@@ -1729,10 +1766,20 @@ if inPos and not na(trSl) and not na(trTp)
         if not trTp2Done
             strategy.exit("X2", from_entry = "S", qty = trQ2, limit = trTp2, stop = stopLvl)
         strategy.exit("X3", from_entry = "S", qty = trQ3, limit = trTp, stop = stopLvl)
-    // اگر ستاپ دیگر معتبر نیست ولی پوزیشن باز است → خروج همگام (سپر ایمنی)
-    if not setupAlive
-        strategy.close_all(comment = "sync-close")
-        inPos := false
+    // §4-9 و §10: ابطال ستاپ، تغییر روند یا LV پس از ورود پوزیشن را نمی‌بندد؛
+    // سفارش‌های SL/TP بالا تنها خروج‌های پوزیشن‌اند (به‌جز خروج زمان‌دار ۲۰:۰۰ UTC).
+
+// §18-27: در بسته‌شدن کندلی که به ۲۰:۰۰ UTC می‌رسد، سفارش معلق لغو و پوزیشن باز بسته می‌شود.
+// با process_orders_on_close=false سفارش بازار در تیک بعدی، یعنی open ساعت ۲۰:۰۰ اجرا می‌شود.
+if timeExitBar
+    strategy.cancel("L")
+    strategy.cancel("S")
+    entryPending := false
+    if not na(trSetup)
+        trSetup.stage := 8
+        trSetup.note := "پایان زمان · ۲۰:۰۰ UTC"
+        trSetup.rearmAllowed := false
+    strategy.close_all(comment = "پایان زمان (۲۰:۰۰ UTC)")
 
 // ⑤ پایان معامله
 if inPos and strategy.position_size == 0

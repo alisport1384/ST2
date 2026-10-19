@@ -41,7 +41,7 @@ bool  clearUsedZones = input.bool(true, "پاک کردن باکس وقتی قی�
 // §default: نامحدود باکس ناحیه (مقدار بزرگ = بی‌اثر؛ حذف باکس‌ها فقط با کلوز از سمت دور)
 int   maxZoneBoxes = input.int(500, "حداکثر باکس ناحیه روی چارت", minval = 2, maxval = 2000, group = "② Fixed Range Volume Profile | فیکس‌رنج")
 
-int   maxSetups = input.int(6, "حداکثر ستاپ‌های هم‌زمان", minval = 1, maxval = 20, group = "③ Engine | موتور")
+int   maxSetups = input.int(1, "حداکثر ستاپ‌های هم‌زمان", minval = 1, maxval = 20, group = "③ Engine | موتور")
 // §default: ابطال میانی با Wick (سایه) — سند نهایی §4-5
 string midInvalid = input.string("Wick | سایه", "شکست تایید میانی با:", options = ["Close | بسته شدن", "Wick | سایه"], group = "③ Engine | موتور")
 string hvScan = input.string("First LV Touch | اولین برگشت به باکس ولوم کم", "شروع اسکن ولوم زیاد (تریگر۲) از:", options = ["First LV Touch | اولین برگشت به باکس ولوم کم", "LV Confirm | لحظه تایید ناحیه ولوم کم"], group = "③ Engine | موتور")
@@ -49,6 +49,7 @@ string hvMarkMode = input.string("FirstIncrease | اولین افزایش حجم
 
 float slBufTicks = input.float(2.0, "بافر حد ضرر (تیک)", minval = 0.0, group = "④ Trade | معامله")
 float entryBufTicks = input.float(1.0, "بافر سطح سفارش (تیک)", minval = 0.0, group = "④ Trade | معامله")
+float maxSlUnits = input.float(10.0, "حداکثر فاصلهٔ حد ضرر N (واحد)", minval = 0.0, group = "④ Trade | معامله", tooltip = "§18-31 سند: سفارش با SL>N ثبت نمی‌شود؛ پیش‌فرض ۱۰.")
 float minTPunits  = input.float(10.0, "حداقل فاصله حدسود (واحد قیمتی)", minval = 0.0, group = "④ Trade | معامله", tooltip = "اگر فاصله ورود تا خط 1.272 کمتر از این عدد بود، حدسود = ورود ± همین عدد")
 bool  showTrade   = input.bool(true, "نمایش سطوح معامله (Entry/SL/TP)", group = "④ Trade | معامله")
 bool  showTable   = input.bool(true, "نمایش پنل وضعیت", group = "④ Trade | معامله")
@@ -149,6 +150,7 @@ type Setup
     float  tp2         = na
     float  tpx         = na
     bool   be          = false
+    bool   slMidDone   = false // §4-9: انتقال یک‌بارهٔ حد ضرر به سطح oo با کلوز آن‌سوی ورود
     bool   tp2Hit      = false
     string note        = ""
     line   l1          = na
@@ -1379,11 +1381,15 @@ if array.size(setups) > 0
                     f_delLine(s.l7)
                     s.l6 := na
                     s.l7 := na
+                else if conf and math.abs((bull ? s.hvH + entryBufTicks * syminfo.mintick : math.max(syminfo.mintick, s.hvL - entryBufTicks * syminfo.mintick)) - (bull ? s.hvL - slBufTicks * syminfo.mintick : s.hvH + slBufTicks * syminfo.mintick)) > maxSlUnits
+                    // §18-31: ناحیهٔ HV/ستاپ حفظ می‌شود؛ فقط این سفارش به‌دلیل SL>N رد می‌شود.
+                    s.note := "سفارش رد شد · SL>N"
                 else if conf
                     // ✔ ناحیه ولوم زیاد تایید شد
                     float eRef = bull ? s.hvH + entryBufTicks * syminfo.mintick : math.max(syminfo.mintick, s.hvL - entryBufTicks * syminfo.mintick)
                     s.sl := bull ? s.hvL - slBufTicks * syminfo.mintick : s.hvH + slBufTicks * syminfo.mintick
-                    float a0 = bull ? HH : LL
+                    // §18-32 سند: لنگر صفر = بالاترین pinBE پس از روند صعودی / پایین‌ترین pinBU پس از روند نزولی.
+                    float a0 = bull ? highestBE : lowestBUpin
                     float a1 = s.midRef
                     bool haveFib = not na(a0) and not na(a1) and (bull ? a0 > a1 : a0 < a1)
                     if haveFib
@@ -1425,6 +1431,7 @@ if array.size(setups) > 0
                                     s.tp2 := na
                     s.entry := eRef
                     s.be := false
+                    s.slMidDone := false
                     s.tp2Hit := false
                     s.stage := 6
                     cHV += 1
@@ -1522,6 +1529,15 @@ if array.size(setups) > 0
                         done := true
                         px := s.entry
                         note := "خروج سر‌به‌سر"
+            // §4-9 ویرایش نهایی: بعد از کندل ورود، کلوز تریگر۲ آن‌سوی oo حد ضرر را یک‌بار به oo منتقل می‌کند.
+            if not done and not sameBar and not s.be and not s.slMidDone and (bull ? close > s.entry : close < s.entry)
+                s.sl := s.entry
+                s.slMidDone := true
+                if not na(s.l9)
+                    line.set_xy1(s.l9, bar_index, s.entry)
+                    line.set_xy2(s.l9, bar_index, s.entry)
+                    line.set_color(s.l9, color.new(color.orange, 0))
+                label.new(bar_index, s.entry, "حدضرر → سطح oo", xloc.bar_index, yloc.price, color.new(color.orange, 20), bull ? label.style_label_down : label.style_label_up, color.white, size.tiny)
             if done
                 lastResult := note
                 s.note := note

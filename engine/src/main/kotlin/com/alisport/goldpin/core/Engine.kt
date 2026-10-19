@@ -75,9 +75,9 @@ class Settings {
      * §18-31 سند: سفارش‌هایی که فاصلهٔ حد ضررشان از سطح سفارش بیشتر از N است ثبت نمی‌شوند
      * (سفارش باطل است؛ علت: SL>N). HV و ستاپ سر جایشان می‌مانند و ستاپ تا پر/منقضی/باطل‌شدن
      * HV ادامه دارد، ولی روی آن HV سفارشی ثبت نمی‌شود و در بک‌تست هم سفارشی حساب نمی‌شود.
-     * N در تنظیمات قابل تغییر است؛ پیش‌فرض سند: ۳ واحد قیمت.
+     * N در تنظیمات قابل تغییر است؛ **پیش‌فرض سند: ۱۰ واحد قیمت** (§18-31 ویرایش نهایی).
      */
-    var maxSlUnits: Double = 3.0
+    var maxSlUnits: Double = 10.0
 
     var useRiskPct: Boolean = true
     var riskPct: Double = 1.0
@@ -1051,6 +1051,140 @@ class Engine(val cfg: Settings) {
         zones.add(ZoneBox(zoneSeq++, dir, z.idx, z.top, z.bot, sb.bi, sb.t, z.loIdx, z.hiIdx, sb.bi, sb.t, status))
     }
 
+    /**
+     * §4-5 سند: «**تعداد ناحیه‌ها نامحدود است.** ناحیه‌هایی که باطل نشده‌اند باید ثبت شوند و روی
+     * حافظه‌ی گوشی ذخیره شوند، تا در تایم‌فریم‌های کوچک‌تر دوباره فراخوانی شوند.»
+     *
+     * بازسازی موتور روی یک پنجرهٔ تاریخچهٔ کوتاه‌تر نباید ناحیه‌های قدیمی را از حافظه/چارت حذف کند.
+     * این متد باکس‌های ساختار، LV و HV را از وضعیت قبلی برمی‌گرداند و ستاپ‌های ساختاریِ هنوز
+     * استفاده‌نشده (تا پیش از مسلح‌شدن) را هم نگه می‌دارد. ستاپی که قبلاً به سفارش رسیده (stage 6/7)
+     * هرگز از نو ساخته نمی‌شود؛ قاعدهٔ سند می‌گوید برای هر LV فقط یک سفارش مجاز است.
+     *
+     * باکس‌های داخل پنجره را موتور از داده می‌سازد؛ باکس‌های قبلی با هویت زمانی/قیمتی یکتا می‌شوند،
+     * نه با شناسهٔ محلی که بعد از reset از صفر شروع می‌شود. برای ناحیهٔ فعال، کندل‌های پنجرهٔ تازه
+     * نیز بررسی می‌شوند تا کلوزِ باطل‌کننده‌ای که بعد از [fromT] رخ داده جا نماند.
+     *
+     * @return تعداد باکس‌های بازگردانده‌شده
+     */
+    fun carryOverZones(
+        prevZones: List<ZoneBox>,
+        prevT1: List<ZoneBox>,
+        prevT2: List<ZoneBox>,
+        fromT: Long,
+        prevZoneSeq: Long = -1L,
+        prevSetups: List<Setup> = emptyList(),
+        currentCandles: List<Candle> = emptyList()
+    ): Int {
+        if (fromT <= 0L) return 0
+        val allOld = prevZones + prevT1 + prevT2
+        val nextZoneId = maxOf(
+            zoneSeq,
+            prevZoneSeq,
+            (allOld.maxOfOrNull { it.id + 1L } ?: 0L)
+        )
+        zoneSeq = nextZoneId
+
+        val structureIds = HashMap<Long, Long>()
+        val t1Ids = HashMap<Long, Long>()
+        val t2Ids = HashMap<Long, Long>()
+        var n = 0
+        n += carryZoneList(prevZones, zones, fromT, structureIds, currentCandles, checkStructureInvalidation = true)
+        n += carryZoneList(prevT1, t1Zones, fromT, t1Ids, currentCandles, checkStructureInvalidation = false)
+        n += carryZoneList(prevT2, t2Zones, fromT, t2Ids, currentCandles, checkStructureInvalidation = false)
+
+        val firstBi = currentCandles.firstOrNull()?.bi ?: -1
+        val lastBi = currentCandles.lastOrNull()?.bi ?: -1
+        val oldStructure = prevZones.filter { it.createdT in 1 until fromT && it.status != ZoneStatus.CAP }
+        for (oldZone in oldStructure) {
+            val restored = zones.firstOrNull { sameZone(it, oldZone) } ?: continue
+            if (restored.status != ZoneStatus.ACTIVE) continue
+            val oldSetup = prevSetups.firstOrNull {
+                it.dir == oldZone.dir && it.zIdx == oldZone.idx &&
+                    (it.zT == oldZone.createdT || (it.zT <= 0L && it.zBi == oldZone.createdBi)) &&
+                    it.zTop == oldZone.top && it.zBot == oldZone.bot
+            }
+            if (oldSetup == null) {
+                // فایل قدیمی/محدود که فقط باکس را داشت: باکس معتبر را به یک ستاپ تازهٔ منتظر برخورد تبدیل کن.
+                if (setups.none { it.zT == restored.createdT && it.dir == restored.dir && it.zTop == restored.top && it.zBot == restored.bot }) {
+                    val s = Setup(setupSeq++, restored.dir, 0, restored.top, restored.bot, restored.idx, -1)
+                    s.zT = restored.createdT
+                    s.note = "ناحیهٔ قدیمیِ بازیابی‌شده · منتظر برخورد"
+                    setups.add(s)
+                }
+            } else if (oldSetup.stage in 0..5 && !oldSetup.zGone) {
+                if (setups.any { it.zT == restored.createdT && it.dir == restored.dir && it.zTop == restored.top && it.zBot == restored.bot }) continue
+                val copy = oldSetup.copyWithId(setupSeq++)
+                // ایندکس‌های محلیِ سری قبلی پس از دانلود/بازیابی معنی ندارند؛ state و timestampها
+                // حفظ می‌شوند و همهٔ مقایسه‌های کندلی بعدی از کندل تازهٔ بعد از بازسازی ادامه می‌یابند.
+                copy.zBi = -1
+                copy.touchBi = -1
+                copy.midBi = -1
+                copy.midConfirmBi = if (!copy.midRef.isNaN()) lastBi else -1
+                copy.markBi = if (oldSetup.markBi >= 0) maxOf(0, firstBi) else -1
+                copy.lvBi = if (oldSetup.lvBi >= 0) maxOf(0, firstBi) else -1
+                copy.lvConfBi = if (oldSetup.lvConfBi >= 0) lastBi else -1
+                copy.hvBi = if (oldSetup.hvBi >= 0) maxOf(0, firstBi) else -1
+                copy.hvScanBi = -1
+                copy.hvConfBi = -1
+                copy.armBi = -1
+                copy.entryBi = -1
+                copy.orderId = -1L
+                copy.lvZoneId = t1Ids[oldSetup.lvZoneId] ?: -1L
+                copy.hvZoneId = t2Ids[oldSetup.hvZoneId] ?: -1L
+                if (copy.zT <= 0L) copy.zT = restored.createdT
+                setups.add(copy)
+            }
+            // stage 6/7: باکس باقی می‌ماند، اما برای LV قبلی سفارش/معاملهٔ تکراری ایجاد نمی‌شود.
+        }
+        setupSeq = maxOf(setupSeq, (prevSetups.maxOfOrNull { it.id + 1L } ?: 0L))
+        if (n > 0) {
+            cnt.zoneCount = zones.size
+            lg("ZONE", "باکس‌ها و ستاپ‌های قدیمیِ پنجرهٔ داده بازیابی شدند (§4-5 سند)",
+                "تعداد=$n ساختار=${zones.size} تریگر۱=${t1Zones.size} تریگر۲=${t2Zones.size} ستاپ=${setups.size} از=$fromT")
+        }
+        return n
+    }
+
+    private fun sameZone(a: ZoneBox, b: ZoneBox): Boolean =
+        a.dir == b.dir && a.idx == b.idx && a.createdT == b.createdT && a.top == b.top && a.bot == b.bot
+
+    private fun carryZoneList(
+        src: List<ZoneBox>,
+        dst: ArrayList<ZoneBox>,
+        fromT: Long,
+        idMap: MutableMap<Long, Long>,
+        currentCandles: List<Candle>,
+        checkStructureInvalidation: Boolean
+    ): Int {
+        var n = 0
+        for (z in src) {
+            if (z.createdT <= 0L || z.createdT >= fromT || z.status == ZoneStatus.CAP) continue
+            val existing = dst.firstOrNull { sameZone(it, z) }
+            if (existing != null) {
+                idMap[z.id] = existing.id
+                continue
+            }
+            val copy = ZoneBox(
+                zoneSeq++, z.dir, z.idx, z.top, z.bot, -1, z.createdT, z.loIdx, z.hiIdx,
+                -1, z.endT, z.status
+            )
+            if (checkStructureInvalidation && copy.status == ZoneStatus.ACTIVE && cfg.clearUsedZones) {
+                val broken = currentCandles.firstOrNull { bar ->
+                    bar.t >= fromT && if (copy.dir == 1) bar.c < copy.bot else bar.c > copy.top
+                }
+                if (broken != null) {
+                    copy.status = ZoneStatus.DELETED
+                    copy.endBi = broken.bi
+                    copy.endT = broken.t
+                }
+            }
+            dst.add(copy)
+            idMap[z.id] = copy.id
+            n++
+        }
+        return n
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //  ⑪ موتور میانی (تایید میانی · کندل مارک‌شده · ابطال)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1792,18 +1926,6 @@ class Engine(val cfg: Settings) {
             //   ترتیب محافظه‌کارانه، مطابق §۴-۹ و PaperBroker.manageBar:
             //   حد ضرر → حد سود نهایی → حد سود اول → حد سود دوم.
             if (s.stage == 7 && !s.sl.isNaN() && !s.tpx.isNaN()) {
-                // §4-9 (سطح oo): کندل تریگر۲ بعد از کندل ورود که کاملاً خارج از باکس HV و
-                // بدون حتی یک تیک لمسِ سطح oo بسته شود ⇒ حد ضرر یک‌بار به oo (= ورود) می‌رود.
-                if (!s.be && !s.slMidDone && curBi > s.entryBi && !s.entry.isNaN()) {
-                    val ooMoved = if (bull) low > s.entry && low > s.hvH else high < s.entry && high < s.hvL
-                    if (ooMoved) {
-                        s.sl = s.entry
-                        s.slMidDone = true
-                        addMarker(curBi, s.entry, 8, "حدضرر → سطح oo")
-                        lg("TRADE", "کندل کاملاً خارج از باکس HV و بدون لمس oo بسته شد → حدضرر به سطح oo منتقل شد · ستاپ #${s.id}",
-                            "oo=${f2(s.entry)} bar=$curBi")
-                    }
-                }
                 var done = false
                 var px = Double.NaN
                 var note = ""
@@ -1840,6 +1962,24 @@ class Engine(val cfg: Settings) {
                     }
                 }
                 val hitStopE = if (bull) low <= s.sl else high >= s.sl
+                // §4-9 (ویرایش نهایی سند — «خیلی مهم»، سطح oo):
+                //   خرید: «اگر بعد از پر شدن و باز شدن سفارش یک کندل تریگر۲ خارج از سطح oo خرید بسته شد
+                //          و کاملاً بالاتر از سطح oo بسته شده بود، حد ضرر به سطح oo خرید منتقل می‌شود.»
+                //   فروش: قرینه (کلوز کاملاً پایین‌تر از سطح oo).
+                // معیار فقط **کلوز** کندل بستهٔ تریگر۲ است (§3: همهٔ تصمیم‌ها با کلوز) و باکس HV دیگر
+                // شرط انتقال نیست؛ کندلِ ورود خودش مشمول این قاعده نیست و انتقال فقط یک‌بار انجام می‌شود.
+                // ⚠ ترتیب §4-9 ثابت است (حد ضرر اول): اگر همین کندل حد ضررِ در جریان را زده باشد،
+                //   انتقال oo انجام نمی‌شود و معامله با همان حد ضرر بسته می‌شود.
+                if (!hitStopE && !s.be && !s.slMidDone && curBi > s.entryBi && !s.entry.isNaN()) {
+                    val ooMoved = if (bull) close > s.entry else close < s.entry
+                    if (ooMoved) {
+                        s.sl = s.entry
+                        s.slMidDone = true
+                        addMarker(curBi, s.entry, 8, "حدضرر → سطح oo")
+                        lg("TRADE", "کندل تریگر۲ کاملاً آن‌سوی سطح oo بسته شد → حدضرر به سطح oo منتقل شد · ستاپ #${s.id}",
+                            "oo=${f2(s.entry)} close=${f2(close)} bar=$curBi")
+                    }
+                }
                 val hitFinalE = if (bull) high >= s.tpx else low <= s.tpx
                 if (MarketHours.isOrderTimeExit(cd.t)) {
                     // §18-27 سند: رأس ۲۰:۰۰ UTC معاملهٔ باز با قیمت لحظهٔ ۲۰:۰۰ (بازشدن
@@ -1905,8 +2045,10 @@ class Engine(val cfg: Settings) {
         // §4-8 سند: سطح سفارش = سقف باکس + ۱ تیک بافر (خرید) / کف باکس − ۱ تیک بافر (فروش)
         val eRef = entryLevel(s, bull)
         s.sl = if (bull) s.hvL - cfg.slBufTicks * cfg.mintick else s.hvH + cfg.slBufTicks * cfg.mintick
-        // §4-8 / §18-5: لنگر صفر فیبوناچی = HH (خرید) / LL (فروش)؛ لنگر ۱۰۰٪ = سطح تایید میانی
-        val a0 = if (bull) HH else LL
+        // §4-8 / §18-5 / §18-32: لنگر صفر فیبوناچی = جدیدترین HH یعنی بالاترین pinBE بعد از تغییر
+        // روند به صعودی (خرید) / پایین‌ترین pinBU بعد از تغییر روند به نزولی (فروش)؛
+        // لنگر ۱۰۰٪ = سطح تایید میانی (کف برای خرید، سقف برای فروش).
+        val a0 = fibAnchor(bull)
         val a1 = s.midRef
         // استراتژی ۲: بدون فیبو؛ حد سود نهایی فقط «ورود ± tpUnits» (TP1/TP2 ندارد) — همان مسیر «فیبوی نامعتبر» سند.
         val targets = if (cfg.strategy == Strategy.NO_TREND)
@@ -2101,14 +2243,26 @@ class Engine(val cfg: Settings) {
         lastBEpinLo = Double.NaN
     }
 
-    /** §18-5: رسم فیبوناچی ریتریسمنت از HH (خرید) / LL (فروش) تا کف/سقف تایید میانی. */
+    /**
+     * §18-32 سند: لنگر صفر فیبوناچی = **جدیدترین HH**، یعنی «صعودی‌ترین/بالاترین pinBE بعد از
+     * تغییر روند به صعودی» (خرید) و قرینه‌اش «نزولی‌ترین/پایین‌ترین pinBU بعد از تغییر روند به
+     * نزولی» (فروش).
+     *
+     * این همان [highestBE]/[lowestBUpin] است: در هر شروع/چرخش روند بازمقداردهی می‌شود و با هر
+     * pinBE/pinBU تازهٔ هم‌جهت به سمت اکسترمم خودش حرکت می‌کند. برخلاف برچسب ساختاری HH/LL که
+     * با شکست سطح پاک (NaN) می‌شود و تا ثبت پین بعدی فیبو را بی‌دلیل نامعتبر می‌کرد.
+     * §4-8 سند هم لنگر صفر را «بالاترین سقف (HH)» می‌نامد که با همین تعریف می‌خواند.
+     */
+    fun fibAnchor(bull: Boolean): Double = if (bull) highestBE else lowestBUpin
+
+    /** §18-5 و §18-32: رسم فیبوناچی ریتریسمنت از جدیدترین HH (خرید) / LL (فروش) تا کف/سقف تایید میانی. */
     private fun updateSetupFib(s: Setup) {
         if (cfg.strategy == Strategy.NO_TREND || s.midRef.isNaN()) {
             clearSetupFib(s)
             return
         }
         val bull = s.dir == 1
-        val a0 = if (bull) HH else LL
+        val a0 = fibAnchor(bull)
         val a1 = s.midRef
         val valid = !a0.isNaN() && !a1.isNaN() && (if (bull) a0 > a1 else a0 < a1)
         if (!valid) {
@@ -2298,6 +2452,29 @@ class Setup(
     var fib1272 = Double.NaN
     var fibValid = false
     val bull: Boolean get() = dir == 1
+
+    /** کپی کامل وضعیت ستاپ با شناسهٔ تازه؛ برای حفظ ستاپ‌های ناحیه‌های قدیمی هنگام بازسازی سری قیمت. */
+    fun copyWithId(newId: Long): Setup = Setup(newId, dir, stage, zTop, zBot, zIdx, zBi).also { c ->
+        c.zT = zT
+        c.touchBi = touchBi; c.touchMidStart = touchMidStart; c.touchT = touchT
+        c.midRef = midRef; c.midBi = midBi; c.midT = midT; c.midConfirmBi = midConfirmBi
+        c.markH = markH; c.markL = markL; c.markBi = markBi
+        c.lvH = lvH; c.lvL = lvL; c.lvBi = lvBi; c.lvT = lvT
+        c.lvConfBi = lvConfBi; c.lvConfT = lvConfT; c.lvZoneId = lvZoneId
+        c.hvH = hvH; c.hvL = hvL; c.hvBi = hvBi; c.hvT = hvT; c.hvScanBi = hvScanBi
+        c.hvConfBi = hvConfBi; c.hvConfT = hvConfT; c.hvZoneId = hvZoneId
+        c.slBlockedHvBi = slBlockedHvBi
+        c.runMax = runMax; c.zGone = zGone; c.zUsed = zUsed
+        c.lvTouched = lvTouched; c.lvUsed = lvUsed; c.lvReEntered = lvReEntered; c.lvUses = lvUses
+        c.slMidDone = slMidDone
+        c.entry = entry; c.sl = sl; c.tp1 = tp1; c.tp2 = tp2; c.tpx = tpx
+        c.be = be; c.tp2Hit = tp2Hit; c.note = note; c.orderId = orderId
+        c.armBi = armBi; c.armT = armT; c.armsSinceS = armsSinceS; c.prevEntry = prevEntry
+        c.rearmAllowed = rearmAllowed; c.priceExpiryRef = priceExpiryRef
+        c.entryBi = entryBi; c.entryT = entryT
+        c.fib0 = fib0; c.fib1 = fib1; c.fib382 = fib382; c.fib500 = fib500
+        c.fib1272 = fib1272; c.fibValid = fibValid
+    }
 }
 
 

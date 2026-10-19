@@ -13,6 +13,7 @@ class SpecRevTest {
         assertEquals(500.0, c.maxLeverage)
         assertEquals(1.0, c.entryBufTicks)
         assertEquals(1, c.maxSetups)
+        assertEquals(10.0, c.maxSlUnits, "§18-31 ویرایش نهایی: N پیش‌فرض ۱۰ است")
 
         val mmCfg = Settings().apply { mmMode = MoneyMode.MIXED; initialEquity = 1000.0 }
         val mm = MoneyManager(mmCfg)
@@ -25,6 +26,19 @@ class SpecRevTest {
     }
 
     @Test
+    fun `doc 18-32 fib anchor uses the trend-extreme pin rather than cleared HH or LL label`() {
+        val e = Engine(Settings())
+        e.trend = 1
+        e.HH = Double.NaN // برچسب HH ممکن است هنگام شکست به NaN برگردد، اما لنگر روند باقی است.
+        e.highestBE = 2_150.0
+        assertEquals(2_150.0, e.fibAnchor(bull = true), 1e-9)
+        e.trend = -1
+        e.LL = Double.NaN
+        e.lowestBUpin = 1_850.0
+        assertEquals(1_850.0, e.fibAnchor(bull = false), 1e-9)
+    }
+
+    @Test
     fun `old save files migrate to document defaults and plateau peak builds zone`() {
         val c = Settings().apply { maxLeverage = 10.0; entryBufTicks = 2.0; maxSetups = 6 }
         val e = Engine(c); val b = PaperBroker(c); e.broker = b; b.engine = e
@@ -33,6 +47,17 @@ class SpecRevTest {
         val l = Store.load(old).cfg
         assertEquals(500.0, l.maxLeverage); assertEquals(1.0, l.entryBufTicks); assertEquals(1, l.maxSetups)
         assertEquals(10.0, Store.load(j).cfg.maxLeverage)
+
+        // مهاجرت rev2: مقدار قدیمی پیش‌فرض N=3 به پیش‌فرض جدید N=10؛ مقدار سفارشی حفظ شود.
+        val prevN = Settings().apply { maxSlUnits = 3.0 }
+        val prevEngine = Engine(prevN); val prevBroker = PaperBroker(prevN)
+        val prevJson = Store.save(prevN, prevEngine, prevBroker, emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":2")
+        assertEquals(10.0, Store.load(prevJson).cfg.maxSlUnits)
+        prevN.maxSlUnits = 7.0
+        val customJson = Store.save(prevN, Engine(prevN), PaperBroker(prevN), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":2")
+        assertEquals(7.0, Store.load(customJson).cfg.maxSlUnits)
 
         val rv = doubleArrayOf(50.0, 50.0, 40.0, 30.0, 35.0, 20.0, 10.0)
         val p = Profile(rv, 1000.0, 10.0, Double.NaN, Double.NaN, Double.NaN)
@@ -408,7 +433,7 @@ class SpecRevTest {
     }
 
     @Test
-    fun `doc 4-9 oo level moves stop once candle closes fully outside HV without touching oo`() {
+    fun `doc 4-9 oo level moves stop on a post-entry close beyond oo without HV condition`() {
         val cfg = Settings().apply { initialEquity = 100000.0; maxSlUnits = 1_000_000.0 }
         val b = PaperBroker(cfg)
         val t0 = 1_699_948_800_000L // سه‌شنبه 2023-11-14 ساعت 08:00 UTC — داخل پنجرهٔ سفارش‌گیری (§18-26 سند)
@@ -425,12 +450,13 @@ class SpecRevTest {
         assertEquals(1, b.openTrades.size)
         val tr = b.openTrades[0]
         assertTrue(tr.slAdj.isNaN(), "کندل ورود نباید حد ضرر را به oo ببرد")
-        // کندلی که هنوز باکس HV را لمس می‌کند (کف 2009 < سقف باکس) ⇒ انتقال ممنوع
-        b.onBar(Candle(2, t0 + 120_000L, 2011.0, 2012.0, 2009.0, 2011.5, 100.0))
-        assertTrue(tr.slAdj.isNaN())
-        // کندل کاملاً خارج از باکس و کاملاً بالای oo بدون لمس آن ⇒ حد ضرر = oo
-        b.onBar(Candle(3, t0 + 180_000L, 2011.0, 2014.0, 2010.5, 2013.5, 100.0))
-        assertEquals(2010.01, tr.slAdj, 1e-9, "حد ضرر باید دقیقاً به سطح oo منتقل شود (§4-9)")
+        // مساوی‌بودن کلوز با oo کافی نیست؛ مقایسهٔ سند اکید است.
+        b.onBar(Candle(2, t0 + 120_000L, 2011.0, 2012.0, 2009.0, 2010.01, 100.0))
+        assertTrue(tr.slAdj.isNaN(), "کلوز مساوی oo نباید انتقال را فعال کند")
+        // کندل وارد باکس HV می‌شود و سایه‌اش زیر oo می‌رود، ولی کلوز بالای oo است.
+        // سند نهایی فقط کلوز بالای oo را می‌خواهد؛ شرط خروج کامل از باکس HV حذف شده است.
+        b.onBar(Candle(3, t0 + 180_000L, 2011.0, 2012.0, 2009.0, 2011.5, 100.0))
+        assertEquals(2010.01, tr.slAdj, 1e-9, "کلوز بالای oo باید حد ضرر را دقیقاً به oo منتقل کند (§4-9)")
         // ذخیره/بازیابی: لبه‌های HV و slAdj باید برگردند
         val e = Engine(cfg)
         val loaded = Store.load(Store.save(cfg, e, b, emptyList()))

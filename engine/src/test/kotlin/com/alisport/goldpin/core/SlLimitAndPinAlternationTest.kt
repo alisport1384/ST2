@@ -7,8 +7,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * ۱) §18-31 سند: سفارشی که فاصلهٔ حد ضررش از N بیشتر است ثبت نمی‌شود (پیش‌فرض N=3)؛
- *    HV و ستاپ می‌مانند ولی روی آن HV سفارشی نیست.
+ * ۱) §18-31 سند: سفارشی که فاصلهٔ حد ضررش از N بیشتر است ثبت نمی‌شود (پیش‌فرض N=10؛
+ *    مثال خود سند N=3)؛ HV و ستاپ می‌مانند ولی روی آن HV سفارشی نیست.
  * ۲) تناوب مارکرهای pinBU/pinBE (§18-1/§18-3/§18-4): روی چارت هرگز دو «کندل مهم
  *    بالاترین/پایین‌ترین» هم‌جهت پشت‌سرهم نیست. رگرشن عکس‌های مالک: پین هم‌جهت تازه
  *    وضعیت پین قبلی را بازنویسی می‌کرد و مارکر پینِ ازیادرفته برای همیشه می‌ماند.
@@ -21,7 +21,7 @@ class SlLimitAndPinAlternationTest {
     fun `doc 18-31 broker refuses order when stop distance exceeds N (doc example) and allows at exactly N`() {
         val t = ms("2026-10-19T08:00:00Z")   // دوشنبه، داخل پنجرهٔ سفارش‌گیری
         // مثال خود سند: N=3، سطح سفارش 4173، کف ناحیه 4168 ⇒ فاصلهٔ حد ضرر 5 > 3 ⇒ سفارش باطل است
-        val b = PaperBroker(Settings())
+        val b = PaperBroker(Settings().apply { maxSlUnits = 3.0 })
         val sDoc = Setup(1L, 1, 6, 4170.0, 4160.0, 1, 0).apply {
             hvH = 4172.99; hvL = 4168.0; sl = 4167.98
             tp1 = 4180.0; tp2 = 4190.0; tpx = 4220.0; entry = 4173.0
@@ -33,8 +33,13 @@ class SlLimitAndPinAlternationTest {
         assertTrue(b.lastError?.contains("18-31") == true, "lastError=${b.lastError}")
         assertEquals(0, b.pendingOrders.size)
 
-        // دقیقاً برابر N مجاز است («بیشتر از N» باطل است)
-        val b2 = PaperBroker(Settings())
+        // پیش‌فرض سند ویرایش نهایی N=10 است؛ مثال با فاصلهٔ 5 باید پذیرفته شود.
+        assertEquals(10.0, Settings().maxSlUnits)
+        val bDefault = PaperBroker(Settings())
+        assertTrue(bDefault.registerLimit(sDoc, Candle(0, t, 4174.0, 4175.0, 4173.5, 4174.5, 100.0)))
+
+        // دقیقاً برابر N مجاز است («بیشتر از N» باطل است) — اینجا N=3 را صریحاً تنظیم می‌کنیم.
+        val b2 = PaperBroker(Settings().apply { maxSlUnits = 3.0 })
         val sExact = Setup(2L, 1, 6, 165.0, 155.0, 1, 0).apply {
             hvH = 169.99; hvL = 167.0; sl = 167.0
             tp1 = 180.0; tp2 = 190.0; tpx = 220.0; entry = 170.0

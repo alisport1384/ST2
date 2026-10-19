@@ -7,7 +7,7 @@ package com.alisport.goldpin.core
 // ═══════════════════════════════════════════════════════════════════════════════
 object Store {
     /** نسخهٔ هم‌ترازی تنظیمات با سند؛ فایل‌های با مقدار کمتر هنگام بارگذاری به پیش‌فرض‌های سند مهاجرت می‌کنند. */
-    const val SPEC_REV = 2
+    const val SPEC_REV = 3
 
 
     const val FORMAT = 3
@@ -100,7 +100,9 @@ object Store {
         // استراتژی انتخابی: فایل‌های قدیمی کلید ندارند ⇒ استراتژی ۱ (سند) می‌ماند.
         if (m.containsKey("strategy") && Strategy.valid(m["strategy"].asI())) c.strategy = m["strategy"].asI()
         if (m.containsKey("tpUnits")) c.tpUnits = m["tpUnits"].asD()
-        // §18-31 سند: سقف فاصلهٔ حد ضرر (N)؛ فایل‌های قدیمی کلید ندارند ⇒ پیش‌فرض سند (۳) می‌ماند.
+        // §18-31 سند نهایی: سقف فاصلهٔ حد ضرر (N)؛ پیش‌فرض ویرایش جدید ۱۰ واحد است.
+        // برای حفظ تنظیمات سفارشی، فایل قدیمی‌ای که N را از مقدار پیش‌فرض قبلی (۳) تغییر داده
+        // باشد حفظ می‌شود؛ مقدار قدیمیِ پیش‌فرض ۳ به پیش‌فرض جدید ۱۰ مهاجرت می‌کند.
         if (m.containsKey("maxSlUnits")) c.maxSlUnits = m["maxSlUnits"].asD()
         if (m.containsKey("mmMode")) c.mmMode = m["mmMode"].asI()
         if (m.containsKey("minLotAuto")) c.minLotAuto = m["minLotAuto"].asB()
@@ -123,8 +125,15 @@ object Store {
         if (m.containsKey("lostResetAtFinalTp")) c.lostResetAtFinalTp = m["lostResetAtFinalTp"].asB()
         // مهاجرت به سند فعلی: فایل‌های قبل از specRev=۲ مقدارهای قدیمی اهرم/بافر سفارش/حداکثر ستاپ را داشتند
         // (۱۰ / ۲ تیک / ۶). سند: اهرم ۵۰۰ (§۵) ، بافر سفارش ۱ تیک (§۴-۸) ، حداکثر ستاپ ۱ (§۱۸-۱۹).
-        if (!m.containsKey("specRev") || m["specRev"].asI() < SPEC_REV) {
+        val savedSpecRev = if (m.containsKey("specRev")) m["specRev"].asI() else 0
+        if (savedSpecRev < 2) {
             c.maxLeverage = 500.0; c.entryBufTicks = 1.0; c.maxSetups = 1
+        }
+        // §18-31: سند نهایی مقدار پیش‌فرض N را از ۳ به ۱۰ تغییر داده است.
+        // فایل‌های rev 0–2 که مقدار ۳ را فقط به‌عنوان پیش‌فرض قبلی ذخیره کرده‌اند مهاجرت می‌شوند؛
+        // مقادیر سفارشی دیگر حفظ می‌شوند.
+        if (savedSpecRev < 3 && (!m.containsKey("maxSlUnits") || m["maxSlUnits"].asD() == 3.0)) {
+            c.maxSlUnits = 10.0
         }
         return c
     }
