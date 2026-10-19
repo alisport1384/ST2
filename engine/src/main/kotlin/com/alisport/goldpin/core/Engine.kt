@@ -630,7 +630,11 @@ class Engine(val cfg: Settings) {
                         highestBE = top; lowestBUpin = bot
                         tempBoxTop = Double.NaN; tempBoxBot = Double.NaN
                         HH = Double.NaN; HL = Double.NaN
-                        // در شروع روند صعودی، pinBU پایهٔ HL بعدی می‌ماند و منتظر اولین pinBE (HH) هستیم
+                        // در شروع روند صعودی، pinBU پایهٔ HL بعدی می‌ماند و منتظر اولین pinBE (HH) هستیم.
+                        // pinBE موقت با همین شکست مصرف شده است: طبق سند «بعد از تعیین روند tempbox پاک
+                        // می‌شود» و این پین دیگر وجود ندارد، پس مارکرش هم دور ریخته می‌شود (§18-4)؛
+                        // وگرنه روی چارت کنار pinBE بعدی (HH) دو «کندل مهم بالاترین» پشت‌سرهم می‌ماند.
+                        removePinMarker(MarkerKind.PIN_BE, top)
                         beActive = false
                         buActive = true
                         if (buSeq < beSeq) buSeq = ++pinSeq
@@ -645,7 +649,9 @@ class Engine(val cfg: Settings) {
                         highestBE = top; lowestBUpin = bot
                         tempBoxTop = Double.NaN; tempBoxBot = Double.NaN
                         LL = Double.NaN; LH = Double.NaN
-                        // در شروع روند نزولی، pinBE پایهٔ LH بعدی می‌ماند و منتظر اولین pinBU (LL) هستیم
+                        // در شروع روند نزولی، pinBE پایهٔ LH بعدی می‌ماند و منتظر اولین pinBU (LL) هستیم.
+                        // قرینهٔ حالت صعودی: pinBU موقت با همین شکست مصرف شده و مارکرش دور ریخته می‌شود (§18-4).
+                        removePinMarker(MarkerKind.PIN_BU, bot)
                         buActive = false
                         beActive = true
                         if (beSeq < buSeq) beSeq = ++pinSeq
@@ -1961,9 +1967,30 @@ class Engine(val cfg: Settings) {
         if (a.h > b.h || (a.h == b.h && a.l < b.l)) Triple(a.h, a.l, a.bi) else Triple(b.h, b.l, b.bi)
 
     /**
+     * پاک‌کردن مارکرِ یک پین از روی چارت (§18-4 سند نهایی: «IC، Ready، pin که به‌خاطر
+     * توالی اجازه ندارند یا به‌خاطر قوانین باطل شدند **کاملاً دور ریخته می‌شوند**»).
+     *
+     * پیش‌تر وضعیت پین پاک می‌شد ولی مارکر «کندل مهم …» آن برای همیشه روی چارت می‌ماند؛
+     * پس بعد از هر ابطال، پین هم‌جهت بعدی ثبت می‌شد و روی چارت چند مارکر هم‌جهتِ پشت‌سرهم
+     * (مثلاً سه «کندل مهم بالاترین» بدون «پایین‌ترین» میانشان) دیده می‌شد، در حالی که طبق
+     * §18-1/§18-3 چنین توالی‌ای وجود ندارد. مارکر با (kind, price) و **آخرین** مورد منطبق
+     * پیدا می‌شود — همان روشی که [addStructLabel] برای یافتن مارکر پین به کار می‌برد؛
+     * پین زنده همیشه تازه‌ترین مارکرِ هم‌قیمت و هم‌جهت است.
+     */
+    private fun removePinMarker(kind: Int, price: Double) {
+        if (price.isNaN()) return
+        val idx = markers.indexOfLast { it.kind == kind && it.price == price }
+        if (idx >= 0) markers.removeAt(idx)
+    }
+
+    /**
      * پاک‌کردن کامل pinBU بعد از ابطال/شکست بدون توالی (§4-1 سند نهایی).
+     * «کامل» یعنی مارکر چارت آن هم دور ریخته می‌شود (§18-4) — همهٔ فراخواننده‌های این
+     * تابع مسیر ابطال یا مصرف‌شدن پین در چرخش روندند؛ برگشت HH/HL به پین (شکست HH/LL)
+     * از این تابع نمی‌گذرد و مارکر پین در آن مسیر سر جایش می‌ماند.
      */
     private fun clearBUpin() {
+        removePinMarker(MarkerKind.PIN_BU, lastBUpin)
         buActive = false
         buSeq = -1
         lastBUpin = Double.NaN
@@ -1973,6 +2000,7 @@ class Engine(val cfg: Settings) {
 
     /** قرینهٔ کامل برای pinBE. */
     private fun clearBEpin() {
+        removePinMarker(MarkerKind.PIN_BE, lastBEpin)
         beActive = false
         beSeq = -1
         lastBEpin = Double.NaN
