@@ -595,8 +595,14 @@ class ChartView @JvmOverloads constructor(
     //  لمس
     // ══════════════════════════════════════════════════════════════════════════
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+        // ⚠ پیش‌تر هر تغییر اندازه (باز شدن/بستن پنل‌ها، تغییر ارتفاع نوار پایین،
+        // چرخش صفحه) `resetView()` صدا می‌زد و زوم/جابه‌جایی کاربر را بی‌خبر پاک می‌کرد؛
+        // کاربر با هر تغییر چیدمان، دوباره روی «آخرین کندل با عرض پیش‌فرض» پرت می‌شد.
+        // حالا فقط اولین اندازه‌گیری نما را بازنشانی می‌کند؛ بعد از آن فقط مقیاس قیمت
+        // با اندازهٔ جدید هم‌تراز می‌شود و زوم/موقعیت کاربر حفظ می‌شود.
+        val firstLayout = chartW <= 0 || chartH <= 0
         chartW = w; chartH = h
-        resetView()
+        if (firstLayout) resetView() else { sanitizeView(); applyAutoPrice(); invalidate() }
         super.onSizeChanged(w, h, ow, oh)
     }
 
