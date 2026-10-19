@@ -17,6 +17,7 @@ fun main(args: Array<String>) {
     var maxRows = Int.MAX_VALUE
     var strategy = Strategy.DOC
     var tpUnits = 10.0
+    var maxSlUnits = -1.0
     var maxSetups = -1
     var i = 0
     while (i < args.size) {
@@ -29,6 +30,7 @@ fun main(args: Array<String>) {
             "--max" -> maxRows = args[++i].toInt()
             "--strategy" -> strategy = args[++i].toInt()          // ۱ = سند (پیش‌فرض) · ۲ = بدون روند، حد سود ثابت
             "--tp-units" -> tpUnits = args[++i].toDouble()        // استراتژی ۲: حد سود (واحد قیمت)، پیش‌فرض ۱۰
+            "--max-sl-units" -> maxSlUnits = args[++i].toDouble() // §18-31 سند: سقف فاصلهٔ حد ضرر N (پیش‌فرض سند ۳)
             "--max-setups" -> maxSetups = args[++i].toInt()
         }
         i++
@@ -51,19 +53,26 @@ fun main(args: Array<String>) {
         val h = p[2].toDoubleOrNull() ?: return null
         val l = p[3].toDoubleOrNull() ?: return null
         val c = p[4].toDoubleOrNull() ?: return null
-        var v = if (hasVolume && p.size >= 6) (p[5].toDoubleOrNull() ?: 0.0) else 0.0
-        if (vol == "synthetic" || (vol == "auto" && v <= 0.0)) {
-            // حجم مصنوعی: دامنهٔ کندل (رگرسیون سرانگشتی وقتی فید حجم ندارد)
-            v = (h - l) * 1000.0 + 1.0
-        }
+        val v = if (hasVolume && p.size >= 6) (p[5].toDoubleOrNull() ?: 0.0) else 0.0
         return Candle(0, t, o, h, l, c, v)
     }
+    val rawCandles = ArrayList<Candle>()
     for (ln in lines) {
         val cd = parseRow(ln)
         if (cd == null) { if (ln.isNotBlank()) skipped++; continue }
-        candles.add(Candle(bi++, cd.t, cd.o, cd.h, cd.l, cd.c, cd.v))
-        if (candles.size >= maxRows) break
+        rawCandles.add(Candle(bi++, cd.t, cd.o, cd.h, cd.l, cd.c, cd.v))
+        if (rawCandles.size >= maxRows) break
     }
+    // §6 سند: حجم صفر به موتور نمی‌رسد؛ اگر بیش از ۹۰٪ کندل‌ها حجم صفر داشته باشند حجم ساختگی
+    // از روی دامنهٔ کندل ساخته می‌شود، وگرنه کندل‌های صفرحجم با همان حجم صفر به موتور می‌روند.
+    val zeroVol = rawCandles.count { !(it.v > 0.0) }
+    val synthetic = vol == "synthetic" || (vol == "auto" && rawCandles.isNotEmpty() &&
+        zeroVol.toLong() * 10L > rawCandles.size.toLong() * 9L)
+    for (cd in rawCandles) {
+        val v = if (synthetic) (cd.h - cd.l) * 1000.0 + 1.0 else cd.v
+        candles.add(Candle(cd.bi, cd.t, cd.o, cd.h, cd.l, cd.c, v))
+    }
+    if (synthetic && vol != "synthetic") println("حجم ساختگی است (§6 سند: بیش از ۹۰٪ کندل‌ها حجم صفر داشتند)")
     if (candles.isEmpty()) { println("هیچ کندل معتبری در $csv پیدا نشد (قالب: timestamp,open,high,low,close[,volume])"); return }
     println("استراتژی: ${Strategy.label(strategy)}")
     println("کندل‌های بارگذاری‌شده: ${candles.size}   حجم واقعی: ${hasVolume && vol != "synthetic"}   ردیف ردشده: $skipped")
@@ -72,6 +81,7 @@ fun main(args: Array<String>) {
         this.vpRows = rows; this.vpSmooth = smooth; this.tfMode = tfMode
         if (Strategy.valid(strategy)) this.strategy = strategy
         this.tpUnits = tpUnits
+        if (maxSlUnits >= 0) this.maxSlUnits = maxSlUnits
         if (maxSetups > 0) this.maxSetups = maxSetups
     }
     val t2 = TF_MODES.first { it.idx == tfMode }

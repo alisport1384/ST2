@@ -62,7 +62,7 @@ object Store {
         "hvScanFirstTouch" to c.hvScanFirstTouch, "hvMarkFirstIncrease" to c.hvMarkFirstIncrease,
         "rejectCandleNext" to c.rejectCandleNext,
         "mintick" to c.mintick, "slBufTicks" to c.slBufTicks, "entryBufTicks" to c.entryBufTicks, "minTPunits" to c.minTPunits,
-        "strategy" to c.strategy, "tpUnits" to c.tpUnits,
+        "strategy" to c.strategy, "tpUnits" to c.tpUnits, "maxSlUnits" to c.maxSlUnits,
         "useRiskPct" to c.useRiskPct, "riskPct" to c.riskPct, "equityPct" to c.equityPct,
         "maxLeverage" to c.maxLeverage, "levModel" to 2, "roundQty" to c.roundQty,
         "contractSize" to c.contractSize, "initialEquity" to c.initialEquity,
@@ -100,6 +100,8 @@ object Store {
         // استراتژی انتخابی: فایل‌های قدیمی کلید ندارند ⇒ استراتژی ۱ (سند) می‌ماند.
         if (m.containsKey("strategy") && Strategy.valid(m["strategy"].asI())) c.strategy = m["strategy"].asI()
         if (m.containsKey("tpUnits")) c.tpUnits = m["tpUnits"].asD()
+        // §18-31 سند: سقف فاصلهٔ حد ضرر (N)؛ فایل‌های قدیمی کلید ندارند ⇒ پیش‌فرض سند (۳) می‌ماند.
+        if (m.containsKey("maxSlUnits")) c.maxSlUnits = m["maxSlUnits"].asD()
         if (m.containsKey("mmMode")) c.mmMode = m["mmMode"].asI()
         if (m.containsKey("minLotAuto")) c.minLotAuto = m["minLotAuto"].asB()
         if (m.containsKey("minLotManual")) c.minLotManual = m["minLotManual"].asD()
@@ -269,6 +271,9 @@ object Store {
         e.prevT1Vol = m["prevT1Vol"].asD(); e.prevChartVol = m["prevChartVol"].asD()
         e.zoneSeq = m["zoneSeq"].asL(); e.setupSeq = m["setupSeq"].asL(); e.processed = m["processed"].asI()
         e.curBi = m["curBi"].asI(); e.curT = m["curT"].asL()
+        // پاک‌سازی مارکرهای پینِ مردهٔ ذخیره‌های قدیمی (§18-4): ذخیره‌هایی که پیش از اصلاح
+        // تناوب مارکرها ساخته شده‌اند ممکن است دو مارکر هم‌جهتِ پشت‌سرهم داشته باشند.
+        e.prunePinMarkerAlternation()
         return e
     }
 
@@ -277,7 +282,7 @@ object Store {
         "zIdx" to s.zIdx, "zBi" to s.zBi, "zT" to s.zT, "touchBi" to s.touchBi, "touchMidStart" to s.touchMidStart,
         "midRef" to s.midRef, "midBi" to s.midBi, "midT" to s.midT, "markH" to s.markH, "markL" to s.markL, "markBi" to s.markBi,
         "lvH" to s.lvH, "lvL" to s.lvL, "lvBi" to s.lvBi, "lvT" to s.lvT, "lvConfBi" to s.lvConfBi, "lvConfT" to s.lvConfT, "lvZoneId" to s.lvZoneId,
-        "hvH" to s.hvH, "hvL" to s.hvL, "hvBi" to s.hvBi, "hvT" to s.hvT, "hvScanBi" to s.hvScanBi, "hvConfBi" to s.hvConfBi, "hvConfT" to s.hvConfT, "hvZoneId" to s.hvZoneId,
+        "hvH" to s.hvH, "hvL" to s.hvL, "hvBi" to s.hvBi, "hvT" to s.hvT, "hvScanBi" to s.hvScanBi, "hvConfBi" to s.hvConfBi, "hvConfT" to s.hvConfT, "hvZoneId" to s.hvZoneId, "slBlockedHvBi" to s.slBlockedHvBi,
         "midConfirmBi" to s.midConfirmBi, "runMax" to s.runMax, "zGone" to s.zGone, "zUsed" to s.zUsed, "touchT" to s.touchT,
         "lvTouched" to s.lvTouched, "lvUsed" to s.lvUsed, "lvReEntered" to s.lvReEntered, "lvUses" to s.lvUses, "slMidDone" to s.slMidDone,
         "entry" to s.entry, "sl" to s.sl, "tp1" to s.tp1, "tp2" to s.tp2, "tpx" to s.tpx,
@@ -298,6 +303,7 @@ object Store {
         s.hvH = m["hvH"].asD(); s.hvL = m["hvL"].asD(); s.hvBi = m["hvBi"].asI(); s.hvT = m["hvT"].asL()
         s.hvScanBi = m["hvScanBi"].asI(); s.hvConfBi = m["hvConfBi"].asI(); s.hvConfT = m["hvConfT"].asL()
         s.hvZoneId = if (m.containsKey("hvZoneId")) m["hvZoneId"].asL() else -1L
+        s.slBlockedHvBi = if (m.containsKey("slBlockedHvBi")) m["slBlockedHvBi"].asI() else -1
         s.midConfirmBi = m["midConfirmBi"].asI(); s.runMax = m["runMax"].asD(); s.zGone = m["zGone"].asB()
         s.zUsed = m["zUsed"].asB(); s.touchT = m["touchT"].asL()
         s.lvTouched = m["lvTouched"].asB(); s.lvUsed = m["lvUsed"].asB(); s.lvReEntered = m["lvReEntered"].asB()
@@ -334,7 +340,7 @@ object Store {
         // §۲۰: وضعیت مدیریت زیان (فایل‌های قدیمی این کلیدها را ندارند ⇒ ۰)
         o["mmLost"] = b.mm.lost; o["mmCmsnLost"] = b.mm.cmsnLost; o["mmNaked"] = b.mm.nakedCapital()
         // ۱۹ ستون اول مثل قبل؛ ستون ۲۰ و ۲۱ (§۲۰): توضیح محاسبهٔ حجم، فاز ManageCM
-        o["orders"] = b.orders.map { listOf(it.id, it.setupId, it.dir, it.type, it.price, it.sl, it.tp1, it.tp2, it.tpX, it.qty, it.zoneTop, it.zoneBot, it.placedT, it.placedBi, it.status, it.filledT ?: 0L, it.filledBi ?: -1, it.closedT ?: 0L, it.cancelReason ?: "", it.mmNote, it.mmCm) }
+        o["orders"] = b.orders.map { listOf(it.id, it.setupId, it.dir, it.type, it.price, it.sl, it.tp1, it.tp2, it.tpX, it.qty, it.zoneTop, it.zoneBot, it.placedT, it.placedBi, it.status, it.filledT ?: 0L, it.filledBi ?: -1, it.closedT ?: 0L, it.cancelReason ?: "", it.mmNote, it.mmCm, it.hvTop, it.hvBot) }
         o["trades"] = b.trades.map { t ->
             linkedMapOf<String, Any?>(
                 "id" to t.id, "orderId" to t.orderId, "setupId" to t.setupId, "dir" to t.dir,
@@ -343,6 +349,7 @@ object Store {
                 "zoneTop" to t.zoneTop, "zoneBot" to t.zoneBot, "contractSize" to t.contractSize,
                 "exitT" to (t.exitT ?: 0L), "exitBi" to (t.exitBi ?: -1), "exitPx" to (t.exitPx ?: Double.NaN),
                 "reason" to t.reason, "be" to t.be, "slAdj" to t.slAdj,
+                "hvTop" to t.hvTop, "hvBot" to t.hvBot,
                 "commission" to t.commission, "mmCm" to t.mmCm,
                 "fills" to t.fills.map { listOf(it.t, it.bi, it.price, it.qty, it.kind, it.pnl) }
             )
@@ -373,6 +380,7 @@ object Store {
             or.closedT = if (l[17].asL() == 0L) null else l[17].asL()
             or.cancelReason = l[18].asS().ifEmpty { null }
             if (l.size >= 21) { or.mmNote = l[19].asS(); or.mmCm = l[20].asB() }
+            if (l.size >= 23) { or.hvTop = l[21].asD(); or.hvBot = l[22].asD() }
             b.orders.add(or)
         }
         for (x in m["trades"].asList()) {
@@ -386,6 +394,8 @@ object Store {
                 tr.fills.add(Fill(l[0].asL(), l[1].asI(), l[2].asD(), l[3].asD(), l[4].asS(), l[5].asD()))
             }
             if (t.containsKey("slAdj")) tr.slAdj = t["slAdj"].asD()
+            if (t.containsKey("hvTop")) tr.hvTop = t["hvTop"].asD()
+            if (t.containsKey("hvBot")) tr.hvBot = t["hvBot"].asD()
             if (t.containsKey("commission")) tr.commission = t["commission"].asD()
             if (t.containsKey("mmCm")) tr.mmCm = t["mmCm"].asB()
             if (t["exitT"].asL() != 0L) {

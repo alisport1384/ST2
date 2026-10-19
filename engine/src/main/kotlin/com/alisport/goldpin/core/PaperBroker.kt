@@ -112,6 +112,17 @@ class PaperBroker(private val cfg: Settings) {
 
     /** ثبت سفارش لیمیت — §4-8 و §18-12/§18-13: حداکثر ۱ سفارش معلق در هر لحظه؛ معاملهٔ باز مانع سفارش جدید نیست. */
     fun registerLimit(s: Setup, bar: Candle): Boolean {
+        if (MarketHours.isClosed(bar.t)) {
+            lastError = "بازار تعطیل است (تعطیلات شنبه و یکشنبه) — سفارش ثبت نمی‌شود"
+            return false
+        }
+        // §18-26/§18-29/§18-30 سند: سفارش‌گیری و مسلح‌شدن فقط از ۰۱:۳۰ تا ۲۰:۰۰ UTC مجاز است.
+        // رد شدن این‌جا ستاپ را نمی‌کشد؛ موتور مارک HV را پاک می‌کند و ستاپ فعال می‌ماند تا
+        // اولین تأیید تازهٔ HV بعد از ۰۱:۳۰ طبق برنامه مسلح شود.
+        if (!MarketHours.isOrderWindow(bar.t)) {
+            lastError = "خارج از پنجرهٔ سفارش‌گیری (۰۱:۳۰ تا ۲۰:۰۰ UTC) — سفارش ثبت نمی‌شود (§18-26 سند)"
+            return false
+        }
         val activeCount = activeCount()
         if (cfg.strategy == Strategy.NO_TREND) {
             // استراتژی ۲: خرید و فروش هم‌زمان مجازند؛ از هر جهت فقط یک سفارش (معلق یا باز).
@@ -130,6 +141,13 @@ class PaperBroker(private val cfg: Settings) {
         }
         // §4-8 سند: سطح سفارش = سقف باکس HV + ۱ تیک بافر (خرید) / کف باکس HV − ۱ تیک بافر (فروش)
         val entryPx = cfg.entryLevel(s.bull, s.hvH, s.hvL)
+        // §18-31 سند: سفارشی که فاصلهٔ حد ضررش از سطح سفارش بیشتر از N است ثبت نمی‌شود و
+        // باطل است (علت: SL>N)؛ در بک‌تست هم سفارشی حساب نمی‌شود. گارد اصلی در موتور است
+        // (HV و ستاپ می‌مانند)؛ این‌جا خط دفاع دوم برای ثبت مستقیم است.
+        if (!s.sl.isNaN() && abs(entryPx - s.sl) > cfg.maxSlUnits) {
+            lastError = "فاصلهٔ حد ضرر از سطح سفارش (${fmt(abs(entryPx - s.sl))}) بیشتر از N=${fmt(cfg.maxSlUnits)} است — سفارش ثبت نمی‌شود (SL>N، §18-31 سند)"
+            return false
+        }
         var mmNote = ""
         var mmCm = false
         val qty: Double
@@ -160,6 +178,8 @@ class PaperBroker(private val cfg: Settings) {
         )
         o.mmNote = mmNote
         o.mmCm = mmCm
+        o.hvTop = s.hvH
+        o.hvBot = s.hvL
         s.orderId = o.id
         orders.add(o)
         pendings.add(o)
@@ -211,6 +231,23 @@ class PaperBroker(private val cfg: Settings) {
 
     /** پردازش یک کندل برای همهٔ سفارش‌ها و پوزیشن‌های باز. */
     fun onBar(cd: Candle, live: Boolean = false) {
+        // تعطیلات شنبه و یکشنبه: در بازار بسته هیچ سفارشی پر و هیچ معامله‌ای مدیریت نمی‌شود.
+        if (MarketHours.isClosed(cd.t)) return
+        // §18-27 سند: رأس ۲۰:۰۰ UTC تمامی معاملات باز بسته و نتایج محاسبه و ثبت می‌شوند
+        // (دلیل: پایان زمان) و سفارش‌های معلق هم لغو می‌شوند تا شبانه پر نشوند.
+        // قیمت بستن = قیمت لحظهٔ ۲۰:۰۰ = بازشدن اولین کندلِ ساعت ۲۰:۰۰ به بعد؛ این خروج
+        // بر هر بررسی حد ضرر/حد سود/پرشدنِ همان کندل مقدم است.
+        if (MarketHours.isOrderTimeExit(cd.t)) {
+            for (p in ArrayList(pendings)) {
+                if (p.status == OrderStatus.PENDING)
+                    cancel(p, "پایان زمان (رأس ۲۰:۰۰ UTC)", cd.t, cd.bi, OrderStatus.CANCELLED_EXPIRED)
+            }
+            for (t in ArrayList(opens)) {
+                if (t.open) closeAll(t, cd.o, cd.t, cd.bi, "پایان زمان")
+            }
+            refreshEquity(cd)
+            return
+        }
         // ① پر شدن سفارش‌های لیمیت (روی یک کپی از pendings تا در fillEntry تغییرات لیست به iteration آسیب نزند)
         val pendingSnapshot = ArrayList(pendings)
         for (p in pendingSnapshot) {
@@ -239,6 +276,11 @@ class PaperBroker(private val cfg: Settings) {
      * @return تعداد سفارش‌های پرشده
      */
     fun onLiveCandle(forming: Candle): Int {
+        // آخر هفته حتی اگر منبع قیمت لحظه‌ای عدد بدهد، بازار بسته است و سفارشی پر نمی‌شود.
+        if (MarketHours.isClosed(forming.t)) return 0
+        // §18-26/§18-27 سند: از رأس ۲۰:۰۰ UTC تا فعال‌شدن دوبارهٔ سفارش‌گیری در ۰۱:۳۰ هیچ
+        // سفارشی با قیمت زنده پر نمی‌شود (سفارش‌های معلق رأس ۲۰:۰۰ لغو شده‌اند).
+        if (!MarketHours.isOrderWindow(forming.t)) return 0
         if (pendings.isEmpty()) return 0
         var n = 0
         for (p in ArrayList(pendings)) {
@@ -274,6 +316,8 @@ class PaperBroker(private val cfg: Settings) {
         )
         tr.fills.add(Fill(cd.t, cd.bi, o.price, o.qty, "ENTRY", 0.0))
         tr.mmCm = o.mmCm
+        tr.hvTop = o.hvTop
+        tr.hvBot = o.hvBot
         // §۲۰ cmsn: اسپرد تحمیلی هر معامله هنگام ورود تعیین و روی خودِ معامله ثبت می‌شود (در مود خاموش ۰ است)؛
         // از سود/زیان همین معامله کم می‌شود و با بسته شدن کامل وارد موجودی (Capital) می‌گردد.
         val cmsn = mm.commissionFor(o.qty)
@@ -290,6 +334,25 @@ class PaperBroker(private val cfg: Settings) {
     private fun manageBar(t: Trade, cd: Candle) {
         val bull = t.dir == 1
         val sameEntryBar = cd.bi == t.entryBi
+        // §4-9 («خیلی مهم» ـ سطح oo): بعد از پرشدن سفارش، اگر یک کندل تریگر۲ کاملاً خارج از
+        // باکس HV و کاملاً آن‌سوی سطح oo (قیمت واقعی بازشدن سفارش = t.entry) بسته شود، به‌طوری
+        // که سقف/کف/باز/بستهٔ آن حتی یک تیک هم سطح oo را لمس نکرده باشد، حد ضرر یک‌بار به oo منتقل می‌شود.
+        // کندل ورود خودش مشمول نیست (در بک‌تست همان کندل برای پرشدن باید oo را لمس کرده باشد).
+        if (!sameEntryBar && !t.be && t.slAdj.isNaN()) {
+            val oo = t.entry
+            val moved = if (bull) {
+                cd.l > oo && (t.hvTop.isNaN() || cd.l > t.hvTop)
+            } else {
+                cd.h < oo && (t.hvBot.isNaN() || cd.h < t.hvBot)
+            }
+            if (moved) {
+                t.slAdj = oo
+                lg("TRADE", "کندل تریگر۲ کاملاً خارج از باکس HV و بدون لمس oo بسته شد → حد ضرر به سطح oo منتقل شد · معامله #${t.id}",
+                    "oo=${fmt(oo)} hv=${fmt(t.hvBot)}-${fmt(t.hvTop)} bar=${cd.bi}")
+                alarm(AlertKind.BE, "حد ضرر به سطح oo منتقل شد",
+                    "معامله #${t.id} · سطح oo ${fmt(oo)}")
+            }
+        }
         val slLvl = if (t.be) t.entry else if (!t.slAdj.isNaN()) t.slAdj else t.sl0
 
         // §4-9 ترتیب ثابت: حد ضرر → حد سود نهایی → حد سود اول → حد سود دوم.
@@ -300,16 +363,12 @@ class PaperBroker(private val cfg: Settings) {
             closeAll(t, slLvl, cd.t, cd.bi, if (t.be || !t.slAdj.isNaN()) "خروج سر‌به‌سر" else "حد ضرر")
             return
         }
-        val hitFinal = if (bull) cd.h >= t.tpX else cd.l <= t.tpX
-        if (hitFinal) {
-            closeAll(t, t.tpX, cd.t, cd.bi, "حد سود نهایی (1.272)")
-            return
-        }
-
         // §4-9 «حد سود اول و قیمت ورود در یک کندل»:
         // اگر در کندل ورود هم قیمت ورود و هم حد سود اول (۰.۳۸۲ فیبو) لمس شود،
         // ورود ثبت می‌شود، حد سود اول ناحیهٔ ۰.۵ فیبو و حد سود نهایی ۱.۲۷۲ فیبو محاسبه می‌شود
         // و ۵۰٪ معامله در ۰.۵ فیبو (با انتقال حد ضرر به نقطهٔ ورود پس از لمس ۰.۵) و ۵۰٪ باقی در ۱.۲۷۲ بسته می‌شود.
+        // این تبدیل باید پیش از سنجش پله‌ها و حد سود نهایی انجام شود تا اگر همان کندل تا
+        // حد سود نهایی هم رفت، پله‌ها با سطوح درست (۰.۵ و ۱.۲۷۲) ثبت شوند.
         if (sameEntryBar && !t.tp1.isNaN() && !t.tp2.isNaN()) {
             val touched382OnEntry = if (bull) cd.h >= t.tp1 else cd.l <= t.tp1
             if (touched382OnEntry) {
@@ -327,6 +386,29 @@ class PaperBroker(private val cfg: Settings) {
         val isTwoStep = t.tp2.isNaN()
         val q1 = t.qty * (if (isTwoStep) 0.50 else 0.33)
         val q2 = t.qty * 0.33
+        fun crossedLevel(level: Double): Boolean = if (bull) cd.h >= level else cd.l <= level
+        fun remainingQty(): Double = t.qty - t.fills.filter { it.kind != "ENTRY" }.sumOf { it.qty }
+
+        val hitFinal = if (bull) cd.h >= t.tpX else cd.l <= t.tpX
+        if (hitFinal) {
+            // §4-9: معامله سه پله دارد و هر پله در سطح خودش بسته و در گزارش ثبت می‌شود.
+            // قیمت برای رسیدن به حد سود نهایی ناچار از سطح‌های TP1 و TP2 گذشته است؛ پس اگر
+            // پله‌ای در کندل‌های قبلی ثبت نشده، در همین کندل و پیش از بستن باقی‌مانده در
+            // حد سود نهایی ثبتش می‌کنیم (۳۳٪/۳۳٪ و باقی‌مانده در ۱.۲۷۲ — یا ۵۰٪/۵۰٪ دوپله‌ای).
+            // پیش‌تر کل حجم باقی‌مانده یکجا با TPX بسته می‌شد: در گزارش سفارش‌ها TP1/TP2
+            // دیده نمی‌شدند و سود هم با قیمت نهاییِ کل حجم بیش‌ازحد حساب می‌شد.
+            if (!t.tp1.isNaN() && t.fills.none { it.kind == "TP1" } && crossedLevel(t.tp1)) {
+                t.be = true
+                t.commission = 0.0
+                addExit(t, cd, t.tp1, min(q1, remainingQty()), "TP1")
+            }
+            if (!t.tp2.isNaN() && t.fills.none { it.kind == "TP2" } && crossedLevel(t.tp2)) {
+                addExit(t, cd, t.tp2, min(q2, remainingQty()), "TP2")
+            }
+            closeAll(t, t.tpX, cd.t, cd.bi, "حد سود نهایی (1.272)")
+            return
+        }
+
         val tp1Done = t.fills.any { it.kind == "TP1" }
         val remaining = t.qty - t.fills.filter { it.kind != "ENTRY" }.sumOf { it.qty }
         if (!tp1Done && !t.tp1.isNaN()) {

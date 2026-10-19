@@ -71,6 +71,14 @@ class Settings {
     /** استراتژی ۲: حد سود نهایی = ورود ± این مقدار (واحد قیمت). پیش‌فرض ۱۰. */
     var tpUnits: Double = 10.0
 
+    /**
+     * §18-31 سند: سفارش‌هایی که فاصلهٔ حد ضررشان از سطح سفارش بیشتر از N است ثبت نمی‌شوند
+     * (سفارش باطل است؛ علت: SL>N). HV و ستاپ سر جایشان می‌مانند و ستاپ تا پر/منقضی/باطل‌شدن
+     * HV ادامه دارد، ولی روی آن HV سفارشی ثبت نمی‌شود و در بک‌تست هم سفارشی حساب نمی‌شود.
+     * N در تنظیمات قابل تغییر است؛ پیش‌فرض سند: ۳ واحد قیمت.
+     */
+    var maxSlUnits: Double = 3.0
+
     var useRiskPct: Boolean = true
     var riskPct: Double = 1.0
     var equityPct: Double = 100.0
@@ -130,6 +138,7 @@ class Settings {
         it.rejectCandleNext = rejectCandleNext
         it.mintick = mintick; it.slBufTicks = slBufTicks; it.entryBufTicks = entryBufTicks; it.minTPunits = minTPunits
         it.strategy = strategy; it.tpUnits = tpUnits
+        it.maxSlUnits = maxSlUnits
         it.useRiskPct = useRiskPct; it.riskPct = riskPct; it.equityPct = equityPct
         it.maxLeverage = maxLeverage; it.roundQty = roundQty
         it.contractSize = contractSize; it.initialEquity = initialEquity
@@ -290,7 +299,12 @@ class Engine(val cfg: Settings) {
         while (i <= lastIdx) {
             val cd = candles[i]
             val isLast = i == lastIdx
-            if (!isLast || lastIsClosed) {
+            if (MarketHours.isClosed(cd.t)) {
+                // تعطیلات شنبه و یکشنبه (ساعت استاندارد بازار): کندل آخر هفته هیچ تصمیمی
+                // نمی‌سازد و وارد تجمیع هم نمی‌شود؛ فقط شمارنده جلو می‌رود تا دوباره دیده نشود.
+                // سشن یکشنبه‌شب (از ۲۲:۰۰ UTC) باز است و جزئی از دوشنبه حساب می‌شود.
+                processed = i + 1
+            } else if (!isLast || lastIsClosed) {
                 processClosed(cd, i, candles.getOrNull(i - 1))
                 processed = i + 1
             } else {
@@ -442,6 +456,16 @@ class Engine(val cfg: Settings) {
                                 s.stage = 8
                                 s.note = "ناحیهٔ ساختار مصرف شد (یک کندل ساختار پس از لمس) — بدون تایید میانی"
                                 events.add("[${s.id}] ناحیهٔ ساختار مصرف شد — ستاپ غیرفعال")
+                            } else if (!MarketHours.isOrderWindow(cd.t) && s.stage < 7) {
+                                // §18-28 سند: ناحیهٔ ساختاری که در زمان غیرفعال بودن سفارش‌گیری
+                                // (۲۰:۰۰ تا ۰۱:۳۰ UTC) باطل/مصرف شود حذف می‌شود — برخلاف §18-14
+                                // ستاپش تا صبح زنده نمی‌ماند و همان شب خاتمه می‌یابد تا بعد از
+                                // ۰۱:۳۰ روی این ناحیه هیچ ستاپ/سفارش تازه‌ای ساخته نشود.
+                                if (s.stage == 6) broker?.onSetupInvalidated(s, curT, curBi)
+                                s.zGone = true
+                                s.stage = 8
+                                s.note = "ناحیهٔ ساختار خارج از پنجرهٔ سفارش‌گیری مصرف شد — ستاپ خاتمه یافت (§18-28 سند)"
+                                events.add("[${s.id}] ناحیهٔ ساختار خارج از پنجرهٔ سفارش‌گیری مصرف شد — ستاپ خاتمه یافت (§18-28)")
                             } else {
                                 s.note = "ناحیهٔ ساختار مصرف شد — ستاپ تا ابطال تایید میانی فعال است"
                                 events.add("[${s.id}] ناحیهٔ ساختار مصرف شد؛ ستاپ تا ابطال تایید میانی فعال می‌ماند")
@@ -630,7 +654,11 @@ class Engine(val cfg: Settings) {
                         highestBE = top; lowestBUpin = bot
                         tempBoxTop = Double.NaN; tempBoxBot = Double.NaN
                         HH = Double.NaN; HL = Double.NaN
-                        // در شروع روند صعودی، pinBU پایهٔ HL بعدی می‌ماند و منتظر اولین pinBE (HH) هستیم
+                        // در شروع روند صعودی، pinBU پایهٔ HL بعدی می‌ماند و منتظر اولین pinBE (HH) هستیم.
+                        // pinBE موقت با همین شکست مصرف شده است: طبق سند «بعد از تعیین روند tempbox پاک
+                        // می‌شود» و این پین دیگر وجود ندارد، پس مارکرش هم دور ریخته می‌شود (§18-4)؛
+                        // وگرنه روی چارت کنار pinBE بعدی (HH) دو «کندل مهم بالاترین» پشت‌سرهم می‌ماند.
+                        removePinMarker(MarkerKind.PIN_BE, top)
                         beActive = false
                         buActive = true
                         if (buSeq < beSeq) buSeq = ++pinSeq
@@ -645,7 +673,9 @@ class Engine(val cfg: Settings) {
                         highestBE = top; lowestBUpin = bot
                         tempBoxTop = Double.NaN; tempBoxBot = Double.NaN
                         LL = Double.NaN; LH = Double.NaN
-                        // در شروع روند نزولی، pinBE پایهٔ LH بعدی می‌ماند و منتظر اولین pinBU (LL) هستیم
+                        // در شروع روند نزولی، pinBE پایهٔ LH بعدی می‌ماند و منتظر اولین pinBU (LL) هستیم.
+                        // قرینهٔ حالت صعودی: pinBU موقت با همین شکست مصرف شده و مارکرش دور ریخته می‌شود (§18-4).
+                        removePinMarker(MarkerKind.PIN_BU, bot)
                         buActive = false
                         beActive = true
                         if (beSeq < buSeq) beSeq = ++pinSeq
@@ -705,24 +735,30 @@ class Engine(val cfg: Settings) {
                         "کلوز ${f2(sb.c)} زیر کف HL ${f2(oldHL)} بسته شد")
                 } else {
                     // ۲) ادامهٔ روند صعودی: بسته شدن بالای HH ⇒ برگشت HH به pinBE و HL به pinBU
+                    //    (§روند سند: «HH به pinBE برمی‌گردد و HL به pinBU برمی‌گردد» — پین‌ها پاک نمی‌شوند،
+                    //     فقط برچسب ساختاری برداشته می‌شود و توالی با pinBU بعدی ادامه می‌یابد.)
+                    var hhBroke = false
                     if (!HH.isNaN() && sb.c > HH) {
+                        hhBroke = true
+                        removeStructLabel("HH", HH); removeStructLabel("HL", HL)
+                        HH = Double.NaN; HL = Double.NaN
                         if (buSeq < beSeq) {
-                            clearBEpin()
-                            removeStructLabel("HH", HH); removeStructLabel("HL", HL)
-                            HH = Double.NaN; HL = Double.NaN
+                            // pinBE هنوز آخرین پین است: همان به‌عنوان pinBE می‌ماند و HL به pinBU قبلی برمی‌گردد؛
+                            // پین بعدی طبق توالی pinBU است.
                             if (!hlPinLo.isNaN()) {
                                 lastBUpin = hlPinLo; lastBUpinRef = hlPinRef; lastBUpinHi = hlPinHi
                                 buActive = true; buSeq = hlPinSeq
                             }
-                            expectedReady = -1
+                            beActive = true
+                            expectedReady = 1
                         } else {
-                            removeStructLabel("HH", HH); removeStructLabel("HL", HL)
-                            HH = Double.NaN; HL = Double.NaN
+                            // pinBU بعد از HH ثبت شده است: هر دو پین سر جای خود می‌مانند و پین بعدی pinBE است.
                             expectedReady = -1
                         }
                     }
                     // ۳) ابطال pinBE بدون ثبت pinBU بعد از آن: HH و HL پاک می‌شوند و HL به pinBU برمی‌گردد
-                    if (!readyBeNow && beActive && !lastBEpinRef.isNaN() && buSeq <= beSeq) {
+                    //    (در کندل شکست HH ابطال پین سنجیده نمی‌شود؛ آن رویداد تابع قاعدهٔ ادامهٔ روند است.)
+                    if (!hhBroke && !readyBeNow && beActive && !lastBEpinRef.isNaN() && buSeq <= beSeq) {
                         val crossedRef = sb.o > lastBEpinRef || sb.c > lastBEpinRef
                         val crossedHigh = !lastBEpin.isNaN() && (sb.o > lastBEpin || sb.c > lastBEpin)
                         if (crossedRef || crossedHigh) {
@@ -784,24 +820,29 @@ class Engine(val cfg: Settings) {
                         "کلوز ${f2(sb.c)} بالای سقف LH ${f2(oldLH)} بسته شد")
                 } else {
                     // ۲) ادامهٔ روند نزولی: بسته شدن زیر LL ⇒ برگشت LL به pinBU و LH به pinBE
+                    //    (§روند سند: «LL به pinBU برمی‌گردد و LH به pinBE برمی‌گردد» — پین‌ها پاک نمی‌شوند.)
+                    var llBroke = false
                     if (!LL.isNaN() && sb.c < LL) {
+                        llBroke = true
+                        removeStructLabel("LL", LL); removeStructLabel("LH", LH)
+                        LL = Double.NaN; LH = Double.NaN
                         if (beSeq < buSeq) {
-                            clearBUpin()
-                            removeStructLabel("LL", LL); removeStructLabel("LH", LH)
-                            LL = Double.NaN; LH = Double.NaN
+                            // pinBU هنوز آخرین پین است: همان به‌عنوان pinBU می‌ماند و LH به pinBE قبلی برمی‌گردد؛
+                            // پین بعدی طبق توالی pinBE است.
                             if (!lhPinHi.isNaN()) {
                                 lastBEpin = lhPinHi; lastBEpinRef = lhPinRef; lastBEpinLo = lhPinLo
                                 beActive = true; beSeq = lhPinSeq
                             }
-                            expectedReady = 1
+                            buActive = true
+                            expectedReady = -1
                         } else {
-                            removeStructLabel("LL", LL); removeStructLabel("LH", LH)
-                            LL = Double.NaN; LH = Double.NaN
+                            // pinBE بعد از LL ثبت شده است: هر دو پین سر جای خود می‌مانند و پین بعدی pinBU است.
                             expectedReady = 1
                         }
                     }
                     // ۳) ابطال pinBU بدون ثبت pinBE بعد از آن: LL و LH پاک می‌شوند و LH به pinBE برمی‌گردد
-                    if (!readyBuNow && buActive && !lastBUpinRef.isNaN() && beSeq <= buSeq) {
+                    //    (در کندل شکست LL ابطال پین سنجیده نمی‌شود؛ آن رویداد تابع قاعدهٔ ادامهٔ روند است.)
+                    if (!llBroke && !readyBuNow && buActive && !lastBUpinRef.isNaN() && beSeq <= buSeq) {
                         val crossedRef = sb.o < lastBUpinRef || sb.c < lastBUpinRef
                         val crossedLow = !lastBUpin.isNaN() && (sb.o < lastBUpin || sb.c < lastBUpin)
                         if (crossedRef || crossedLow) {
@@ -823,8 +864,8 @@ class Engine(val cfg: Settings) {
                                 "ref=${f2(oldRef)} lo=${f2(oldPin)} o=${f2(sb.o)} c=${f2(sb.c)}")
                         }
                     }
-                    // ۴) ابطال pinBE بدون ثبت pinBU بعد از آن
-                    if (!readyBeNow && beActive && !lastBEpinRef.isNaN() && buSeq <= beSeq) {
+                    // ۴) ابطال pinBE بدون ثبت pinBU بعد از آن (در کندل شکست LL سنجیده نمی‌شود)
+                    if (!llBroke && !readyBeNow && beActive && !lastBEpinRef.isNaN() && buSeq <= beSeq) {
                         val crossedRef = sb.o > lastBEpinRef || sb.c > lastBEpinRef
                         val crossedHigh = !lastBEpin.isNaN() && (sb.o > lastBEpin || sb.c > lastBEpin)
                         val closedAbovePin = !lastBEpin.isNaN() && sb.c > lastBEpin
@@ -1508,7 +1549,24 @@ class Engine(val cfg: Settings) {
                 val lvThirdTouch = !s.lvUsed && s.lvBi >= 0 && s.lvConfBi >= 0 &&
                         s.lvUses >= 2 && low <= s.lvH && high >= s.lvL
 
-                if (lvThirdTouch) {
+                if (MarketHours.isOrderTimeExit(cd.t)) {
+                    // §18-27 سند: رأس ۲۰:۰۰ UTC سفارش معلق لغو می‌شود (دلیل: پایان زمان) تا
+                    // شبانه پر نشود؛ این خروج بر پرشدن در همین کندل هم مقدم است.
+                    closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
+                    closeT1Box(s, ZoneStatus.CONSUMED, curBi, curT)
+                    if (s.touchT > 0L) markStructureZoneStatus(s, ZoneStatus.CONSUMED, curBi, curT)
+                    s.lvUsed = true
+                    s.rearmAllowed = false
+                    s.stage = 8
+                    s.note = "سفارش منقضی — پایان زمان"
+                    events.add("[${s.id}] سفارش رأس ۲۰:۰۰ UTC لغو شد — پایان زمان (§18-27 سند)")
+                    broker?.onSetupExpired(s, curT, curBi, "پایان زمان (رأس ۲۰:۰۰ UTC)")
+                    s.orderId = -1
+                    s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.runMax = Double.NaN
+                    lg("ENGINE", "سفارش معلق رأس ۲۰:۰۰ UTC لغو شد — پایان زمان · ستاپ #${s.id}",
+                        "bar=$curBi")
+                    continue
+                } else if (lvThirdTouch) {
                     // §4-7: در صورتی که برای بار سوم قیمت حتی یک تیک باکس LV را لمس کرد باکس باطل می‌شود، سفارش معلق لغو و ستاپ غیرفعال می‌شود.
                     s.lvUsed = true
                     s.rearmAllowed = false
@@ -1734,67 +1792,68 @@ class Engine(val cfg: Settings) {
             //   ترتیب محافظه‌کارانه، مطابق §۴-۹ و PaperBroker.manageBar:
             //   حد ضرر → حد سود نهایی → حد سود اول → حد سود دوم.
             if (s.stage == 7 && !s.sl.isNaN() && !s.tpx.isNaN()) {
+                // §4-9 (سطح oo): کندل تریگر۲ بعد از کندل ورود که کاملاً خارج از باکس HV و
+                // بدون حتی یک تیک لمسِ سطح oo بسته شود ⇒ حد ضرر یک‌بار به oo (= ورود) می‌رود.
+                if (!s.be && !s.slMidDone && curBi > s.entryBi && !s.entry.isNaN()) {
+                    val ooMoved = if (bull) low > s.entry && low > s.hvH else high < s.entry && high < s.hvL
+                    if (ooMoved) {
+                        s.sl = s.entry
+                        s.slMidDone = true
+                        addMarker(curBi, s.entry, 8, "حدضرر → سطح oo")
+                        lg("TRADE", "کندل کاملاً خارج از باکس HV و بدون لمس oo بسته شد → حدضرر به سطح oo منتقل شد · ستاپ #${s.id}",
+                            "oo=${f2(s.entry)} bar=$curBi")
+                    }
+                }
                 var done = false
                 var px = Double.NaN
                 var note = ""
                 val entrySameBar = (s.entryBi == curBi)
-                if (bull) {
-                    if (low <= s.sl) { done = true; px = s.sl; note = if (s.be || s.slMidDone) "خروج سر‌به‌سر" else "حد ضرر" }
-                    else if (high >= s.tpx) { done = true; px = s.tpx; note = "حد سود نهایی (1.272)" }
-                    else {
-                        // §4-9: اگر در کندل ورود هم حد سود اول (۰.۳۸۲ فیبو) و هم قیمت ورود لمس شود،
-                        // ورود ثبت می‌شود، حد سود اول ۰.۵ فیبو و حد سود نهایی ۱.۲۷۲ فیبو محاسبه می‌شود (۵۰٪/۵۰٪)
-                        // و حد ضرر بعد از لمس ۰.۵ فیبو به نقطهٔ ورود منتقل می‌شود.
-                        if (entrySameBar && !s.tp1.isNaN() && !s.tp2.isNaN() && high >= s.tp1) {
-                            s.tp1 = s.tp2
-                            s.tp2 = Double.NaN
-                            lg("TRADE", "لمس هم‌زمان ورود و ۰.۳۸۲ فیبو در یک کندل → حد سود اول به ۰.۵ فیبو منتقل شد · ستاپ #${s.id}",
-                                "tp1=${f2(s.tp1)} bar=$curBi")
-                        }
-                        if (!s.be && !s.tp1.isNaN() && high >= s.tp1) {
-                            s.be = true; s.sl = s.entry
-                            val tp1Lbl = if (s.tp2.isNaN()) "TP1 (50%)" else "TP1 (38%)"
-                            val tp1Fa = if (s.tp2.isNaN()) "TP1 (۵۰٪)" else "TP1 (۳۸٪)"
-                            addMarker(curBi, s.entry, 8, "$tp1Lbl ✔ · حدضرر = سر‌به‌سر")
-                            lg("TRADE", "$tp1Fa لمس شد → حدضرر به سر‌به‌سر منتقل شد · ستاپ #${s.id}",
-                                "tp1=${f2(s.tp1)} bar=$curBi")
-                            alarm(AlertKind.TP1, "$tp1Fa لمس شد", "ستاپ #${s.id} · حدضرر به سر‌به‌سر منتقل شد · ${f2(s.tp1)}")
-                        }
-                        if (s.be && !s.tp2Hit && !s.tp2.isNaN() && high >= s.tp2) {
-                            s.tp2Hit = true
-                            addMarker(curBi, s.tp2, 8, "TP2 (50%) ✔")
-                            lg("TRADE", "TP2 (۵۰٪) لمس شد · ستاپ #${s.id}", "tp2=${f2(s.tp2)} bar=$curBi")
-                            alarm(AlertKind.TP2, "TP2 (۵۰٪) لمس شد", "ستاپ #${s.id} · قیمت ${f2(s.tp2)}")
-                        }
-                        if (!entrySameBar && s.be && low <= s.entry) { done = true; px = s.entry; note = "خروج سر‌به‌سر" }
+                // §4-9: پله‌های TP1/TP2 در هر کندلی که سطحشان رد شده ثبت می‌شوند — از جمله
+                // کندلی که تا حد سود نهایی رفته است (قیمت برای رسیدن به ۱.۲۷۲ ناچار از
+                // ۰.۳۸۲ و ۰.۵ گذشته). پیش‌تر شاخهٔ «حد سود نهایی» پیش از این پله‌ها معامله را
+                // می‌بست و TP1/TP2 نه روی چارت مارک می‌شدند و نه در گزارش سفارش‌ها می‌آمدند.
+                fun crossedTp(level: Double): Boolean = if (bull) high >= level else low <= level
+                fun markTpLegs() {
+                    // §4-9: اگر در کندل ورود هم حد سود اول (۰.۳۸۲ فیبو) و هم قیمت ورود لمس شود،
+                    // ورود ثبت می‌شود، حد سود اول ۰.۵ فیبو و حد سود نهایی ۱.۲۷۲ فیبو محاسبه می‌شود (۵۰٪/۵۰٪)
+                    // و حد ضرر بعد از لمس ۰.۵ فیبو به نقطهٔ ورود منتقل می‌شود.
+                    if (entrySameBar && !s.tp1.isNaN() && !s.tp2.isNaN() && crossedTp(s.tp1)) {
+                        s.tp1 = s.tp2
+                        s.tp2 = Double.NaN
+                        lg("TRADE", "لمس هم‌زمان ورود و ۰.۳۸۲ فیبو در یک کندل → حد سود اول به ۰.۵ فیبو منتقل شد · ستاپ #${s.id}",
+                            "tp1=${f2(s.tp1)} bar=$curBi")
                     }
+                    if (!s.be && !s.tp1.isNaN() && crossedTp(s.tp1)) {
+                        s.be = true; s.sl = s.entry
+                        val tp1Lbl = if (s.tp2.isNaN()) "TP1 (50%)" else "TP1 (38%)"
+                        val tp1Fa = if (s.tp2.isNaN()) "TP1 (۵۰٪)" else "TP1 (۳۸٪)"
+                        addMarker(curBi, s.entry, 8, "$tp1Lbl ✔ · حدضرر = سر‌به‌سر")
+                        lg("TRADE", "$tp1Fa لمس شد → حدضرر به سر‌به‌سر منتقل شد · ستاپ #${s.id}",
+                            "tp1=${f2(s.tp1)} bar=$curBi")
+                        alarm(AlertKind.TP1, "$tp1Fa لمس شد", "ستاپ #${s.id} · حدضرر به سر‌به‌سر منتقل شد · ${f2(s.tp1)}")
+                    }
+                    if (s.be && !s.tp2Hit && !s.tp2.isNaN() && crossedTp(s.tp2)) {
+                        s.tp2Hit = true
+                        addMarker(curBi, s.tp2, 8, "TP2 (50%) ✔")
+                        lg("TRADE", "TP2 (۵۰٪) لمس شد · ستاپ #${s.id}", "tp2=${f2(s.tp2)} bar=$curBi")
+                        alarm(AlertKind.TP2, "TP2 (۵۰٪) لمس شد", "ستاپ #${s.id} · قیمت ${f2(s.tp2)}")
+                    }
+                }
+                val hitStopE = if (bull) low <= s.sl else high >= s.sl
+                val hitFinalE = if (bull) high >= s.tpx else low <= s.tpx
+                if (MarketHours.isOrderTimeExit(cd.t)) {
+                    // §18-27 سند: رأس ۲۰:۰۰ UTC معاملهٔ باز با قیمت لحظهٔ ۲۰:۰۰ (بازشدن
+                    // همین کندل) بسته و نتیجه محاسبه و ثبت می‌شود — دلیل: پایان زمان.
+                    // این خروج بر حد ضرر/حد سودِ داخل همین کندل مقدم است.
+                    done = true; px = open; note = "پایان زمان"
+                } else if (hitStopE) { done = true; px = s.sl; note = if (s.be || s.slMidDone) "خروج سر‌به‌سر" else "حد ضرر" }
+                else if (hitFinalE) {
+                    markTpLegs()
+                    done = true; px = s.tpx; note = "حد سود نهایی (1.272)"
                 } else {
-                    if (high >= s.sl) { done = true; px = s.sl; note = if (s.be || s.slMidDone) "خروج سر‌به‌سر" else "حد ضرر" }
-                    else if (low <= s.tpx) { done = true; px = s.tpx; note = "حد سود نهایی (1.272)" }
-                    else {
-                        if (entrySameBar && !s.tp1.isNaN() && !s.tp2.isNaN() && low <= s.tp1) {
-                            s.tp1 = s.tp2
-                            s.tp2 = Double.NaN
-                            lg("TRADE", "لمس هم‌زمان ورود و ۰.۳۸۲ فیبو در یک کندل → حد سود اول به ۰.۵ فیبو منتقل شد · ستاپ #${s.id}",
-                                "tp1=${f2(s.tp1)} bar=$curBi")
-                        }
-                        if (!s.be && !s.tp1.isNaN() && low <= s.tp1) {
-                            s.be = true; s.sl = s.entry
-                            val tp1Lbl = if (s.tp2.isNaN()) "TP1 (50%)" else "TP1 (38%)"
-                            val tp1Fa = if (s.tp2.isNaN()) "TP1 (۵۰٪)" else "TP1 (۳۸٪)"
-                            addMarker(curBi, s.entry, 8, "$tp1Lbl ✔ · حدضرر = سر‌به‌سر")
-                            lg("TRADE", "$tp1Fa لمس شد → حدضرر به سر‌به‌سر منتقل شد · ستاپ #${s.id}",
-                                "tp1=${f2(s.tp1)} bar=$curBi")
-                            alarm(AlertKind.TP1, "$tp1Fa لمس شد", "ستاپ #${s.id} · حدضرر به سر‌به‌سر منتقل شد · ${f2(s.tp1)}")
-                        }
-                        if (s.be && !s.tp2Hit && !s.tp2.isNaN() && low <= s.tp2) {
-                            s.tp2Hit = true
-                            addMarker(curBi, s.tp2, 8, "TP2 (50%) ✔")
-                            lg("TRADE", "TP2 (۵۰٪) لمس شد · ستاپ #${s.id}", "tp2=${f2(s.tp2)} bar=$curBi")
-                            alarm(AlertKind.TP2, "TP2 (۵۰٪) لمس شد", "ستاپ #${s.id} · قیمت ${f2(s.tp2)}")
-                        }
-                        if (!entrySameBar && s.be && high >= s.entry) { done = true; px = s.entry; note = "خروج سر‌به‌سر" }
-                    }
+                    markTpLegs()
+                    val backToEntry = if (bull) low <= s.entry else high >= s.entry
+                    if (!entrySameBar && s.be && backToEntry) { done = true; px = s.entry; note = "خروج سر‌به‌سر" }
                 }
                 if (done) {
                     lastResult = note
@@ -1827,11 +1886,22 @@ class Engine(val cfg: Settings) {
      */
     private fun clearHvMark(s: Setup) {
         s.hvBi = -1; s.hvT = 0L; s.runMax = Double.NaN
+        s.slBlockedHvBi = -1
         if (s.stage == 5) s.stage = 4
     }
 
     /** لحظهٔ مسلح شدن (تایید ناحیهٔ ولوم زیاد) → محاسبهٔ SL/TP و ثبت سفارش ورود. */
     private fun armSetup(s: Setup, cd: Candle, bull: Boolean) {
+        // §18-26/§18-29/§18-30 سند: سفارش‌گیری و مسلح‌شدن فقط از ۰۱:۳۰ تا ۲۰:۰۰ UTC مجاز است.
+        // تأیید HV در خارج از پنجره دور ریخته می‌شود (مارک پاک و اسکن ادامه دارد) ولی ستاپ،
+        // نواحی و بقیهٔ قوانین طبق برنامه فعال می‌مانند؛ اولین تأیید تازهٔ HV بعد از ۰۱:۳۰
+        // طبق برنامه مسلح می‌شود.
+        if (!MarketHours.isOrderWindow(cd.t)) {
+            clearHvMark(s)
+            lg("ENGINE", "مسلح‌شدن ستاپ #${s.id} انجام نشد — خارج از پنجرهٔ سفارش‌گیری (۰۱:۳۰ تا ۲۰:۰۰ UTC)؛ ستاپ فعال می‌ماند و اسکن ولوم زیاد ادامه دارد (§18-26 سند)",
+                "bar=$curBi")
+            return
+        }
         // §4-8 سند: سطح سفارش = سقف باکس + ۱ تیک بافر (خرید) / کف باکس − ۱ تیک بافر (فروش)
         val eRef = entryLevel(s, bull)
         s.sl = if (bull) s.hvL - cfg.slBufTicks * cfg.mintick else s.hvH + cfg.slBufTicks * cfg.mintick
@@ -1845,6 +1915,19 @@ class Engine(val cfg: Settings) {
         s.tp1 = targets.tp1
         s.tp2 = targets.tp2
         s.tpx = targets.tpx
+        // §18-31 سند: سفارشی که فاصلهٔ حد ضررش از سطح سفارش بیشتر از N است ثبت نمی‌شود و
+        // سفارش باطل است (علت: SL>N). HV مطابق ستاپ می‌ماند و ستاپ تا پر/منقضی/باطل‌شدن HV
+        // ادامه دارد، ولی روی این HV سفارشی ثبت نمی‌شود و در بک‌تست هم حسابی ندارد.
+        val slDist = abs(eRef - s.sl)
+        if (slDist > cfg.maxSlUnits) {
+            if (s.slBlockedHvBi != s.hvBi) {
+                s.slBlockedHvBi = s.hvBi
+                lg("ENGINE", "سفارش ستاپ #${s.id} ثبت نمی‌شود — فاصلهٔ حد ضرر از سطح سفارش (${f2(slDist)}) بیشتر از N=${f2(cfg.maxSlUnits)} است (SL>N، §18-31 سند)؛ HV و ستاپ ادامه دارند",
+                    "entry=${f2(eRef)} sl=${f2(s.sl)} bar=$curBi")
+            }
+            return
+        }
+        s.slBlockedHvBi = -1
         // §4-8: فقط و فقط یک سفارش برای هر LV امکان‌پذیر است چه سفارش پر شود چه فعال نشود چه باطل شود.
         if (!s.prevEntry.isNaN()) {
             clearHvMark(s)
@@ -1938,9 +2021,69 @@ class Engine(val cfg: Settings) {
         if (a.h > b.h || (a.h == b.h && a.l < b.l)) Triple(a.h, a.l, a.bi) else Triple(b.h, b.l, b.bi)
 
     /**
+     * پاک‌کردن مارکرِ یک پین از روی چارت (§18-4 سند نهایی: «IC، Ready، pin که به‌خاطر
+     * توالی اجازه ندارند یا به‌خاطر قوانین باطل شدند **کاملاً دور ریخته می‌شوند**»).
+     *
+     * پیش‌تر وضعیت پین پاک می‌شد ولی مارکر «کندل مهم …» آن برای همیشه روی چارت می‌ماند؛
+     * پس بعد از هر ابطال، پین هم‌جهت بعدی ثبت می‌شد و روی چارت چند مارکر هم‌جهتِ پشت‌سرهم
+     * (مثلاً سه «کندل مهم بالاترین» بدون «پایین‌ترین» میانشان) دیده می‌شد، در حالی که طبق
+     * §18-1/§18-3 چنین توالی‌ای وجود ندارد. مارکر با (kind, price) و **آخرین** مورد منطبق
+     * پیدا می‌شود — همان روشی که [addStructLabel] برای یافتن مارکر پین به کار می‌برد؛
+     * پین زنده همیشه تازه‌ترین مارکرِ هم‌قیمت و هم‌جهت است.
+     */
+    private fun removePinMarker(kind: Int, price: Double) {
+        if (price.isNaN()) return
+        val idx = markers.indexOfLast { it.kind == kind && it.price == price }
+        if (idx >= 0) {
+            markers.removeAt(idx)
+            prunePinMarkerAlternation()
+        }
+    }
+
+    /**
+     * تناوب سخت مارکرهای pinBU/pinBE روی چارت (§18-1/§18-3/§18-4 سند): در دنبالهٔ
+     * مارکرهای پین هرگز دو مارکر هم‌جهت پشت‌سرهم نباید دیده شود.
+     *
+     * چرا با وجود حذف مارکرِ پینِ باطل‌شده باز هم دو هم‌جهت پشت‌سرهم می‌ماند؟
+     * وقتی پین هم‌جهت تازه‌ای Ready می‌شود، وضعیت پین قبلی همان جهت بازنویسی می‌شود
+     * (lastBUpin/lastBEpin) و موتور دیگر آن پین قدیمی را ردیابی نمی‌کند؛ اگر بعداً پین
+     * مخالفِ بین آن دو باطل شود و مارکرش (درست) حذف شود، مارکر پین قدیمیِ ازیادرفته
+     * برای همیشه روی چارت می‌ماند و کنار پین هم‌جهت بعدی «دو کندل مهم بالاترین/پایین‌ترین
+     * پشت‌سرهم» دیده می‌شود — همان ایراد عکس‌های مالک. طبق §18-4 چنین پینی مرده است و
+     * باید کاملاً دور ریخته شود؛ این تابع پس از هر ثبت/حذف مارکر پین، از هر جفت هم‌جهتِ
+     * چسبیده، آن‌که پینِ زندهٔ فعلی نیست را دور می‌ریزد (اگر هیچ‌کدام زنده نبود، قدیمی‌تر
+     * دور ریخته می‌شود چون پین تازه جای آن را گرفته است). در بارگذاری وضعیت ذخیره‌شده هم
+     * صدا زده می‌شود تا مارکرهای مردهٔ ذخیره‌های قدیمی پاک‌سازی شوند.
+     */
+    fun prunePinMarkerAlternation() {
+        fun isLivePin(m: Marker): Boolean =
+            (m.kind == MarkerKind.PIN_BU && buActive && m.price == lastBUpin) ||
+                (m.kind == MarkerKind.PIN_BE && beActive && m.price == lastBEpin)
+        var prevIdx = -1
+        var i = 0
+        while (i < markers.size) {
+            val m = markers[i]
+            if (m.kind != MarkerKind.PIN_BU && m.kind != MarkerKind.PIN_BE) { i++; continue }
+            if (prevIdx >= 0 && markers[prevIdx].kind == m.kind) {
+                val victim = if (isLivePin(markers[prevIdx]) && !isLivePin(m)) i else prevIdx
+                markers.removeAt(victim)
+                prevIdx = -1
+                i = 0
+                continue
+            }
+            prevIdx = i
+            i++
+        }
+    }
+
+    /**
      * پاک‌کردن کامل pinBU بعد از ابطال/شکست بدون توالی (§4-1 سند نهایی).
+     * «کامل» یعنی مارکر چارت آن هم دور ریخته می‌شود (§18-4) — همهٔ فراخواننده‌های این
+     * تابع مسیر ابطال یا مصرف‌شدن پین در چرخش روندند؛ برگشت HH/HL به پین (شکست HH/LL)
+     * از این تابع نمی‌گذرد و مارکر پین در آن مسیر سر جایش می‌ماند.
      */
     private fun clearBUpin() {
+        removePinMarker(MarkerKind.PIN_BU, lastBUpin)
         buActive = false
         buSeq = -1
         lastBUpin = Double.NaN
@@ -1950,6 +2093,7 @@ class Engine(val cfg: Settings) {
 
     /** قرینهٔ کامل برای pinBE. */
     private fun clearBEpin() {
+        removePinMarker(MarkerKind.PIN_BE, lastBEpin)
         beActive = false
         beSeq = -1
         lastBEpin = Double.NaN
@@ -2054,6 +2198,8 @@ class Engine(val cfg: Settings) {
 
     private fun addMarkerAtTime(t: Long, bi: Int, price: Double, kind: Int, text: String) {
         markers.add(Marker(t, bi, price, kind, text))
+        // ثبت هر پین تازه، فرصت دور ریختن مارکر پین هم‌جهتِ مردهٔ قبلی است (§18-4).
+        if (kind == MarkerKind.PIN_BU || kind == MarkerKind.PIN_BE) prunePinMarkerAlternation()
         // توالی پین‌ها و شروع/چرخش روند تاریخچه‌اند و نباید با سقف مارکرهای
         // جزئی حذف شوند؛ فقط مارکرهای رخدادهای پرتکرار قدیمی‌تر trim می‌شوند.
         while (markers.size > 2000) {
@@ -2110,6 +2256,8 @@ class Setup(
     var markH = Double.NaN; var markL = Double.NaN; var markBi = -1
     var lvH = Double.NaN; var lvL = Double.NaN; var lvBi = -1; var lvT = 0L; var lvConfBi = -1; var lvConfT = 0L; var lvZoneId = -1L
     var hvH = Double.NaN; var hvL = Double.NaN; var hvBi = -1; var hvT = 0L; var hvScanBi = -1; var hvConfBi = -1; var hvConfT = 0L; var hvZoneId = -1L
+    /** §18-31 سند: ایندکس HVای که به‌علت SL>N سفارش رویش ثبت نشد؛ تا وقتی همان HV برقرار است تلاش مجدد/لاگ تکراری نداریم. */
+    var slBlockedHvBi = -1
     var midConfirmBi = -1
     var runMax = Double.NaN
     var zGone = false

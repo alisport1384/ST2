@@ -1,6 +1,7 @@
 package com.alisport.goldpin.data
 
 import com.alisport.goldpin.core.Candle
+import com.alisport.goldpin.core.MarketHours
 import com.alisport.goldpin.core.Tf
 import com.alisport.goldpin.util.Fa
 import com.alisport.goldpin.util.Log
@@ -381,7 +382,7 @@ object Feed {
     }
 
     /**
-     * §6 سند: زنجیرهٔ منابع قیمت لحظه‌ای زنده (۱. Binance · ۲. KuCoin · ۳. Swissquote + پشتیبان‌ها).
+     * §6 سند: زنجیرهٔ منابع قیمت لحظه‌ای زنده: gold-api ← Swissquote ← CoinGecko؛ اولین پاسخ معتبر استفاده می‌شود.
      * در صورت نیامدن قیمت زنده، زنجیره در چارچوب بودجهٔ زمانی به طور مداوم تکرار می‌شود تا منبع دریافت گردد.
      */
     fun spotPrice(
@@ -392,17 +393,9 @@ object Feed {
         var round = 0
         while (round < maxOf(1, maxRounds)) {
             round++
-            binanceSpot()?.let {
-                Log.d(Log.CAT_FEED, "قیمت لحظه‌ای از Binance", com.alisport.goldpin.util.Fa.n(it, 2))
-                return it to "Binance"
-            }
-            if (System.currentTimeMillis() >= deadline) {
-                Log.w(Log.CAT_FEED, "بودجهٔ قیمت لحظه‌ای تمام شد", "دور=$round")
-                return null to "کند/ناموفق"
-            }
-            kucoinSpot()?.let {
-                Log.d(Log.CAT_FEED, "قیمت لحظه‌ای از KuCoin", com.alisport.goldpin.util.Fa.n(it, 2))
-                return it to "KuCoin"
+            goldApiSpot()?.let {
+                Log.d(Log.CAT_FEED, "قیمت لحظه‌ای از gold-api", com.alisport.goldpin.util.Fa.n(it, 2))
+                return it to "gold-api"
             }
             if (System.currentTimeMillis() >= deadline) {
                 Log.w(Log.CAT_FEED, "بودجهٔ قیمت لحظه‌ای تمام شد", "دور=$round")
@@ -411,14 +404,6 @@ object Feed {
             swissquoteSpot()?.let {
                 Log.d(Log.CAT_FEED, "قیمت لحظه‌ای از Swissquote", com.alisport.goldpin.util.Fa.n(it, 2))
                 return it to "Swissquote"
-            }
-            if (System.currentTimeMillis() >= deadline) {
-                Log.w(Log.CAT_FEED, "بودجهٔ قیمت لحظه‌ای تمام شد", "دور=$round")
-                return null to "کند/ناموفق"
-            }
-            goldApiSpot()?.let {
-                Log.d(Log.CAT_FEED, "قیمت لحظه‌ای از gold-api", com.alisport.goldpin.util.Fa.n(it, 2))
-                return it to "gold-api"
             }
             if (System.currentTimeMillis() >= deadline) {
                 Log.w(Log.CAT_FEED, "بودجهٔ قیمت لحظه‌ای تمام شد", "دور=$round")
@@ -495,6 +480,9 @@ object Feed {
         var curBucket = Long.MIN_VALUE
         var o = 0.0; var h = 0.0; var l = 0.0; var c = 0.0; var v = 0.0; var t = 0L
         for (cd in src) {
+            // ساعت استاندارد بازار: کندل‌های تعطیلات شنبه و یکشنبه در هیچ تایم‌فریمی ساخته
+            // نمی‌شوند؛ سشن یکشنبه‌شب (از ۲۲:۰۰ UTC) با باکت روزانه/هفتگی جزئی از دوشنبه است.
+            if (MarketHours.isClosed(cd.t)) continue
             val b = Tf.bucket(targetSec, cd.t)
             if (b != curBucket) {
                 if (curBucket != Long.MIN_VALUE) out.add(Candle(out.size, t, o, h, l, c, v))

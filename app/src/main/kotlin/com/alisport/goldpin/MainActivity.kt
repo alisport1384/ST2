@@ -1175,6 +1175,8 @@ class MainActivity : Activity() {
         v.addView(numRow("بافر حدضرر (تیک)", s.cfg.slBufTicks) { s.cfg.slBufTicks = it; s.rebuildAsync() })
         // §4-8 سند: «سطح سفارش = سقف/کف باکس HV ± ۲ تیک بافر … تعداد تیک بافر قابل تغییر است»
         v.addView(numRow("بافر سطح سفارش (تیک)", s.cfg.entryBufTicks) { s.cfg.entryBufTicks = it; s.rebuildAsync() })
+        // §18-31 سند: سفارش با فاصلهٔ حد ضرر بیشتر از N ثبت نمی‌شود (SL>N)؛ پیش‌فرض ۳
+        v.addView(numRow("حداکثر فاصلهٔ حد ضرر N (واحد)", s.cfg.maxSlUnits) { s.cfg.maxSlUnits = it; s.rebuildAsync() })
         if (s.cfg.strategy == Strategy.NO_TREND) {
             // استراتژی ۲: حد سود فقط «واحد» است (بدون فیبو و بدون TP1/TP2)؛ پیش‌فرض ۱۰
             v.addView(numRow("حد سود (واحد) — استراتژی ۲", s.cfg.tpUnits) { s.cfg.tpUnits = it; s.rebuildAsync() })

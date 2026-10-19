@@ -138,6 +138,9 @@ class Order(
     var mmNote: String = ""
     /** §20 Mixed: این سفارش در فاز ManageCM (Capital > M) حجم‌گذاری شده است؟ (فقط آن معاملات cmsnLost را می‌سازند) */
     var mmCm: Boolean = false
+    /** §4-9: لبه‌های باکس HV هنگام مسلح‌شدن؛ برای قاعدهٔ انتقال حد ضرر به سطح oo لازم‌اند. */
+    var hvTop: Double = Double.NaN
+    var hvBot: Double = Double.NaN
 }
 
 class Fill(
@@ -178,6 +181,9 @@ class Trade(
     /** §20 Mixed: این معامله در فاز ManageCM (Capital > M) حجم‌گذاری شده بود؟ */
     var mmCm: Boolean = false
 ) {
+    /** §4-9: لبه‌های باکس HV این معامله؛ برای قاعدهٔ انتقال حد ضرر به سطح oo (قیمت واقعی بازشدن سفارش). */
+    var hvTop: Double = Double.NaN
+    var hvBot: Double = Double.NaN
     val open: Boolean get() = exitT == null
     val risk: Double get() = if (sl0 != 0.0) kotlin.math.abs(entry - sl0) else 0.0
 
@@ -316,11 +322,82 @@ object Tf {
         return bucket(sec, t) != bucket(sec, prevT)
     }
 
-    /** شروع باکت زمانی (بر مبنای UTC). */
+    const val DAY_MS = 86_400_000L
+
+    /** روز هفتهٔ UTC با مبدأ دوشنبه: ۰=دوشنبه … ۴=جمعه، ۵=شنبه، ۶=یکشنبه (روز epoch، ۱۹۷۰-۰۱-۰۱، پنجشنبه بود). */
+    fun utcDowMonday0(t: Long): Int = Math.floorMod(Math.floorDiv(t, DAY_MS) + 3L, 7L).toInt()
+
+    /**
+     * شروع «روز معاملاتی» استاندارد (UTC): روزهای دوشنبه تا جمعه همان روز تقویمی‌اند؛
+     * شنبه و یکشنبه تعطیل‌اند و سشن یکشنبه‌شب (بازگشایی بازار، از ۲۲:۰۰ UTC) جزئی از
+     * روز معاملاتی دوشنبه است — پس هر مهر زمانی در شنبه/یکشنبه به دوشنبهٔ بعد می‌افتد
+     * و هیچ کندل روزانه/هفتگیِ شنبه یا یکشنبه ساخته نمی‌شود.
+     */
+    fun tradingDayStart(t: Long): Long {
+        val dayStart = Math.floorDiv(t, DAY_MS) * DAY_MS
+        return when (utcDowMonday0(t)) {
+            5 -> dayStart + 2 * DAY_MS   // شنبه → دوشنبهٔ بعد
+            6 -> dayStart + DAY_MS       // یکشنبه (سشن بازگشایی) → دوشنبه
+            else -> dayStart
+        }
+    }
+
+    /**
+     * شروع باکت زمانی.
+     * تایم‌فریم‌های زیر روزانه: کفِ UTC معمولی. روزانه: [tradingDayStart].
+     * هفتگی: **دوشنبهٔ ۰۰:۰۰ UTC** هفتهٔ معاملاتی (استاندارد بازار؛ هفته از دوشنبه تا
+     * جمعه و تعطیلات شنبه و یکشنبه) — نه پنجشنبهٔ epoch که کف‌گیری سادهٔ ۷روزه می‌داد.
+     */
     fun bucket(sec: Int, t: Long): Long {
+        if (sec == D1) return tradingDayStart(t)
+        if (sec == W1) {
+            val td = tradingDayStart(t)
+            return td - utcDowMonday0(td) * DAY_MS
+        }
         val ms = sec * 1000L
         return Math.floorDiv(t, ms) * ms
     }
+}
+
+/**
+ * ساعت استاندارد بازار طلا (XAUUSD/GC) — تعطیلات **شنبه و یکشنبه**:
+ * بازار تمام شنبه و یکشنبه تا بازگشایی یکشنبه‌شب (**۲۲:۰۰ UTC**) بسته است؛ از ۲۲:۰۰
+ * یکشنبه UTC سشن دوشنبه شروع می‌شود (همان داده‌ای که فیدها می‌دهند: یکشنبه فقط ۲۲ تا ۲۴).
+ * وقتی بازار بسته است هیچ تصمیم استراتژی، ثبت/پرشدن سفارش و مدیریت معامله‌ای انجام
+ * نمی‌شود — حتی اگر منبع قیمت لحظه‌ای (اسپات نمایشی) در آخر هفته عددی بدهد.
+ */
+object MarketHours {
+    const val SUNDAY_OPEN_HOUR_UTC = 22
+
+    fun isOpen(t: Long): Boolean = when (Tf.utcDowMonday0(t)) {
+        5 -> false                                              // شنبه: تمام روز تعطیل
+        6 -> (t % Tf.DAY_MS) >= SUNDAY_OPEN_HOUR_UTC * 3_600_000L  // یکشنبه: فقط از ۲۲:۰۰ UTC (سشن دوشنبه)
+        else -> true                                            // دوشنبه تا جمعه
+    }
+
+    fun isClosed(t: Long): Boolean = !isOpen(t)
+
+    // ── پنجرهٔ سفارش‌گیری (§18-26 تا §18-30 سند) ─────────────────────────────
+    // ستاپ فقط از ۰۱:۳۰ تا ۲۰:۰۰ UTC مجاز به سفارش‌گیری و مسلح‌شدن است؛ رأس ۲۰:۰۰
+    // همهٔ معاملات باز بسته و سفارش‌های معلق لغو می‌شوند (دلیل: پایان زمان) و رأس
+    // ۰۱:۳۰ سفارش‌گیری دوباره طبق برنامه فعال می‌شود. خارج از این پنجره فقط
+    // «سفارش‌گیری و مسلح‌شدن» غیرفعال است — ستاپ، نواحی و بقیهٔ قوانین طبق برنامه
+    // ادامه دارند (§18-29)؛ ولی ناحیه‌ای که در این بازه باطل شود دیگر ستاپ/سفارش
+    // نمی‌سازد و ستاپِ در جریان رویش همان شب خاتمه می‌یابد (§18-28).
+    const val ORDER_START_MIN_UTC = 90        // ۰۱:۳۰ UTC
+    const val ORDER_END_MIN_UTC = 20 * 60     // ۲۰:۰۰ UTC
+
+    /** دقیقهٔ روز به وقت UTC (۰ تا ۱۴۳۹). */
+    fun minuteOfDayUtc(t: Long): Int = ((t % Tf.DAY_MS) / 60_000L).toInt()
+
+    /** آیا الان داخل پنجرهٔ مجاز سفارش‌گیری/مسلح‌شدن هستیم؟ [۰۱:۳۰، ۲۰:۰۰) UTC — §18-26 و §18-30. */
+    fun isOrderWindow(t: Long): Boolean {
+        val m = minuteOfDayUtc(t)
+        return m >= ORDER_START_MIN_UTC && m < ORDER_END_MIN_UTC
+    }
+
+    /** از رأس ۲۰:۰۰ UTC به بعد: لحظهٔ «پایان زمان» — بستن همهٔ معاملات و لغو سفارش‌های معلق (§18-27). */
+    fun isOrderTimeExit(t: Long): Boolean = minuteOfDayUtc(t) >= ORDER_END_MIN_UTC
 }
 
 /** پنج مود تایم‌فریمی (پیش‌فرض = مود ۱ : ساختار ۱ ساعته). */
