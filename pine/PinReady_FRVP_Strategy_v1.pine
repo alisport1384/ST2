@@ -1774,6 +1774,9 @@ if marketOpen and inPos and not na(trSl) and not na(trTp)
 if timeExitBar
     strategy.cancel("L")
     strategy.cancel("S")
+    strategy.cancel("X1")
+    strategy.cancel("X2")
+    strategy.cancel("X3")
     entryPending := false
     if not na(trSetup)
         trSetup.stage := 8
