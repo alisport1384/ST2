@@ -1,5 +1,7 @@
 package com.alisport.goldpin.core
 
+import kotlin.math.abs
+
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -88,6 +90,14 @@ class DocRulesUnitTest {
         // سطح سفارش هرگز منفی نمی‌شود (سند: «سطح سفارش همیشه عددی مثبت است»)
         assertEquals(0.02, cfg.entryLevel(false, 0.05, 0.03), 1e-9)
         assertEquals(0.01, cfg.entryLevel(false, 0.02, 0.005), 1e-9, "کفِ سطح سفارش = یک تیک")
+        // §18-31 سند (مثال خودِ سند — commit afdb624): سطح سفارش ۴۱۷۳ ، کف ناحیه ۴۱۶۸ ، N=3
+        // ⇒ SL = کف − ۲ تیک = ۴۱۶۷٫۹۸ ⇒ فاصله = ۵٫۰۲ > ۳ ⇒ سفارش ثبت نمی‌شود (SL>N).
+        val exEntry = cfg.entryLevel(true, 4172.99, 4168.0)
+        assertEquals(4173.0, exEntry, 1e-9, "سطح سفارش خرید = سقف باکس + ۱ تیک")
+        val exSl = 4168.0 - cfg.slBufTicks * cfg.mintick
+        assertEquals(4167.98, exSl, 1e-9, "حد ضرر خرید = کف ناحیه − ۲ تیک")
+        assertTrue(abs(exEntry - exSl) > cfg.maxSlUnits, "در مثال سند، فاصلهٔ SL باید بیشتر از N=3 باشد")
+        assertEquals(3.0, cfg.maxSlUnits, 1e-9, "N پیش‌فرض سند = ۳")
         // حد ضرر = کف ناحیه − ۲ تیک (خرید) / سقف ناحیه + ۲ تیک (فروش)
         assertEquals(89.98, 90.0 - cfg.slBufTicks * cfg.mintick, 1e-9)
         assertEquals(100.02, 100.0 + cfg.slBufTicks * cfg.mintick, 1e-9)
