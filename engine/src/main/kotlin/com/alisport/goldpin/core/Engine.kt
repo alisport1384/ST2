@@ -447,6 +447,16 @@ class Engine(val cfg: Settings) {
                                 s.stage = 8
                                 s.note = "ناحیهٔ ساختار مصرف شد (یک کندل ساختار پس از لمس) — بدون تایید میانی"
                                 events.add("[${s.id}] ناحیهٔ ساختار مصرف شد — ستاپ غیرفعال")
+                            } else if (!MarketHours.isOrderWindow(cd.t) && s.stage < 7) {
+                                // §18-28 سند: ناحیهٔ ساختاری که در زمان غیرفعال بودن سفارش‌گیری
+                                // (۲۰:۰۰ تا ۰۱:۳۰ UTC) باطل/مصرف شود حذف می‌شود — برخلاف §18-14
+                                // ستاپش تا صبح زنده نمی‌ماند و همان شب خاتمه می‌یابد تا بعد از
+                                // ۰۱:۳۰ روی این ناحیه هیچ ستاپ/سفارش تازه‌ای ساخته نشود.
+                                if (s.stage == 6) broker?.onSetupInvalidated(s, curT, curBi)
+                                s.zGone = true
+                                s.stage = 8
+                                s.note = "ناحیهٔ ساختار خارج از پنجرهٔ سفارش‌گیری مصرف شد — ستاپ خاتمه یافت (§18-28 سند)"
+                                events.add("[${s.id}] ناحیهٔ ساختار خارج از پنجرهٔ سفارش‌گیری مصرف شد — ستاپ خاتمه یافت (§18-28)")
                             } else {
                                 s.note = "ناحیهٔ ساختار مصرف شد — ستاپ تا ابطال تایید میانی فعال است"
                                 events.add("[${s.id}] ناحیهٔ ساختار مصرف شد؛ ستاپ تا ابطال تایید میانی فعال می‌ماند")
@@ -1530,7 +1540,24 @@ class Engine(val cfg: Settings) {
                 val lvThirdTouch = !s.lvUsed && s.lvBi >= 0 && s.lvConfBi >= 0 &&
                         s.lvUses >= 2 && low <= s.lvH && high >= s.lvL
 
-                if (lvThirdTouch) {
+                if (MarketHours.isOrderTimeExit(cd.t)) {
+                    // §18-27 سند: رأس ۲۰:۰۰ UTC سفارش معلق لغو می‌شود (دلیل: پایان زمان) تا
+                    // شبانه پر نشود؛ این خروج بر پرشدن در همین کندل هم مقدم است.
+                    closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
+                    closeT1Box(s, ZoneStatus.CONSUMED, curBi, curT)
+                    if (s.touchT > 0L) markStructureZoneStatus(s, ZoneStatus.CONSUMED, curBi, curT)
+                    s.lvUsed = true
+                    s.rearmAllowed = false
+                    s.stage = 8
+                    s.note = "سفارش منقضی — پایان زمان"
+                    events.add("[${s.id}] سفارش رأس ۲۰:۰۰ UTC لغو شد — پایان زمان (§18-27 سند)")
+                    broker?.onSetupExpired(s, curT, curBi, "پایان زمان (رأس ۲۰:۰۰ UTC)")
+                    s.orderId = -1
+                    s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.runMax = Double.NaN
+                    lg("ENGINE", "سفارش معلق رأس ۲۰:۰۰ UTC لغو شد — پایان زمان · ستاپ #${s.id}",
+                        "bar=$curBi")
+                    continue
+                } else if (lvThirdTouch) {
                     // §4-7: در صورتی که برای بار سوم قیمت حتی یک تیک باکس LV را لمس کرد باکس باطل می‌شود، سفارش معلق لغو و ستاپ غیرفعال می‌شود.
                     s.lvUsed = true
                     s.rearmAllowed = false
@@ -1805,7 +1832,12 @@ class Engine(val cfg: Settings) {
                 }
                 val hitStopE = if (bull) low <= s.sl else high >= s.sl
                 val hitFinalE = if (bull) high >= s.tpx else low <= s.tpx
-                if (hitStopE) { done = true; px = s.sl; note = if (s.be || s.slMidDone) "خروج سر‌به‌سر" else "حد ضرر" }
+                if (MarketHours.isOrderTimeExit(cd.t)) {
+                    // §18-27 سند: رأس ۲۰:۰۰ UTC معاملهٔ باز با قیمت لحظهٔ ۲۰:۰۰ (بازشدن
+                    // همین کندل) بسته و نتیجه محاسبه و ثبت می‌شود — دلیل: پایان زمان.
+                    // این خروج بر حد ضرر/حد سودِ داخل همین کندل مقدم است.
+                    done = true; px = open; note = "پایان زمان"
+                } else if (hitStopE) { done = true; px = s.sl; note = if (s.be || s.slMidDone) "خروج سر‌به‌سر" else "حد ضرر" }
                 else if (hitFinalE) {
                     markTpLegs()
                     done = true; px = s.tpx; note = "حد سود نهایی (1.272)"
@@ -1850,6 +1882,16 @@ class Engine(val cfg: Settings) {
 
     /** لحظهٔ مسلح شدن (تایید ناحیهٔ ولوم زیاد) → محاسبهٔ SL/TP و ثبت سفارش ورود. */
     private fun armSetup(s: Setup, cd: Candle, bull: Boolean) {
+        // §18-26/§18-29/§18-30 سند: سفارش‌گیری و مسلح‌شدن فقط از ۰۱:۳۰ تا ۲۰:۰۰ UTC مجاز است.
+        // تأیید HV در خارج از پنجره دور ریخته می‌شود (مارک پاک و اسکن ادامه دارد) ولی ستاپ،
+        // نواحی و بقیهٔ قوانین طبق برنامه فعال می‌مانند؛ اولین تأیید تازهٔ HV بعد از ۰۱:۳۰
+        // طبق برنامه مسلح می‌شود.
+        if (!MarketHours.isOrderWindow(cd.t)) {
+            clearHvMark(s)
+            lg("ENGINE", "مسلح‌شدن ستاپ #${s.id} انجام نشد — خارج از پنجرهٔ سفارش‌گیری (۰۱:۳۰ تا ۲۰:۰۰ UTC)؛ ستاپ فعال می‌ماند و اسکن ولوم زیاد ادامه دارد (§18-26 سند)",
+                "bar=$curBi")
+            return
+        }
         // §4-8 سند: سطح سفارش = سقف باکس + ۱ تیک بافر (خرید) / کف باکس − ۱ تیک بافر (فروش)
         val eRef = entryLevel(s, bull)
         s.sl = if (bull) s.hvL - cfg.slBufTicks * cfg.mintick else s.hvH + cfg.slBufTicks * cfg.mintick

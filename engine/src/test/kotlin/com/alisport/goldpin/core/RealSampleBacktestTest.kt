@@ -71,6 +71,15 @@ class RealSampleBacktestTest {
         assertTrue(weekendFills.isEmpty(), "پرشدن در تعطیلات آخر هفته نباید رخ داده باشد: $weekendFills")
         assertTrue(eng.structBars.none { MarketHours.isClosed(it.t) }, "کندل ساختار روی زمان تعطیل بازار نباید باشد")
 
+        // §18-26/§18-27 سند: هیچ ورودی خارج از پنجرهٔ سفارش‌گیری (۰۱:۳۰ تا ۲۰:۰۰ UTC) و
+        // هیچ پرشدنی بعد از رأس ۲۰:۰۰ نباید باشد؛ معاملات رأس ۲۰:۰۰ با «پایان زمان» بسته می‌شوند.
+        val allFills = broker.trades.flatMap { it.fills }
+        val outsideEntries = allFills.filter { it.kind == "ENTRY" && !MarketHours.isOrderWindow(it.t) }
+        assertTrue(outsideEntries.isEmpty(), "ورود خارج از پنجرهٔ سفارش‌گیری نباید رخ داده باشد: $outsideEntries")
+        val afterEnd = allFills.filter { MarketHours.minuteOfDayUtc(it.t) > MarketHours.ORDER_END_MIN_UTC }
+        assertTrue(afterEnd.isEmpty(), "پرشدن بعد از رأس ۲۰:۰۰ UTC نباید رخ داده باشد: $afterEnd")
+        println("بسته‌شدن با پایان زمان در نمونه: ${closed.count { it.reason.contains("پایان زمان") }} معامله")
+
         // هر معاملهٔ رسیده به حد سود نهایی: پله‌های معتبر TP1/TP2 باید در گزارش باشند (§4-9)
         for (tr in finalTp) {
             val kinds = tr.fills.map { it.kind }

@@ -116,6 +116,13 @@ class PaperBroker(private val cfg: Settings) {
             lastError = "بازار تعطیل است (تعطیلات شنبه و یکشنبه) — سفارش ثبت نمی‌شود"
             return false
         }
+        // §18-26/§18-29/§18-30 سند: سفارش‌گیری و مسلح‌شدن فقط از ۰۱:۳۰ تا ۲۰:۰۰ UTC مجاز است.
+        // رد شدن این‌جا ستاپ را نمی‌کشد؛ موتور مارک HV را پاک می‌کند و ستاپ فعال می‌ماند تا
+        // اولین تأیید تازهٔ HV بعد از ۰۱:۳۰ طبق برنامه مسلح شود.
+        if (!MarketHours.isOrderWindow(bar.t)) {
+            lastError = "خارج از پنجرهٔ سفارش‌گیری (۰۱:۳۰ تا ۲۰:۰۰ UTC) — سفارش ثبت نمی‌شود (§18-26 سند)"
+            return false
+        }
         val activeCount = activeCount()
         if (cfg.strategy == Strategy.NO_TREND) {
             // استراتژی ۲: خرید و فروش هم‌زمان مجازند؛ از هر جهت فقط یک سفارش (معلق یا باز).
@@ -219,6 +226,21 @@ class PaperBroker(private val cfg: Settings) {
     fun onBar(cd: Candle, live: Boolean = false) {
         // تعطیلات شنبه و یکشنبه: در بازار بسته هیچ سفارشی پر و هیچ معامله‌ای مدیریت نمی‌شود.
         if (MarketHours.isClosed(cd.t)) return
+        // §18-27 سند: رأس ۲۰:۰۰ UTC تمامی معاملات باز بسته و نتایج محاسبه و ثبت می‌شوند
+        // (دلیل: پایان زمان) و سفارش‌های معلق هم لغو می‌شوند تا شبانه پر نشوند.
+        // قیمت بستن = قیمت لحظهٔ ۲۰:۰۰ = بازشدن اولین کندلِ ساعت ۲۰:۰۰ به بعد؛ این خروج
+        // بر هر بررسی حد ضرر/حد سود/پرشدنِ همان کندل مقدم است.
+        if (MarketHours.isOrderTimeExit(cd.t)) {
+            for (p in ArrayList(pendings)) {
+                if (p.status == OrderStatus.PENDING)
+                    cancel(p, "پایان زمان (رأس ۲۰:۰۰ UTC)", cd.t, cd.bi, OrderStatus.CANCELLED_EXPIRED)
+            }
+            for (t in ArrayList(opens)) {
+                if (t.open) closeAll(t, cd.o, cd.t, cd.bi, "پایان زمان")
+            }
+            refreshEquity(cd)
+            return
+        }
         // ① پر شدن سفارش‌های لیمیت (روی یک کپی از pendings تا در fillEntry تغییرات لیست به iteration آسیب نزند)
         val pendingSnapshot = ArrayList(pendings)
         for (p in pendingSnapshot) {
@@ -249,6 +271,9 @@ class PaperBroker(private val cfg: Settings) {
     fun onLiveCandle(forming: Candle): Int {
         // آخر هفته حتی اگر منبع قیمت لحظه‌ای عدد بدهد، بازار بسته است و سفارشی پر نمی‌شود.
         if (MarketHours.isClosed(forming.t)) return 0
+        // §18-26/§18-27 سند: از رأس ۲۰:۰۰ UTC تا فعال‌شدن دوبارهٔ سفارش‌گیری در ۰۱:۳۰ هیچ
+        // سفارشی با قیمت زنده پر نمی‌شود (سفارش‌های معلق رأس ۲۰:۰۰ لغو شده‌اند).
+        if (!MarketHours.isOrderWindow(forming.t)) return 0
         if (pendings.isEmpty()) return 0
         var n = 0
         for (p in ArrayList(pendings)) {

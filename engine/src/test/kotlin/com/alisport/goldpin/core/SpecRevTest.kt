@@ -28,7 +28,7 @@ class SpecRevTest {
     fun `old save files migrate to document defaults and plateau peak builds zone`() {
         val c = Settings().apply { maxLeverage = 10.0; entryBufTicks = 2.0; maxSetups = 6 }
         val e = Engine(c); val b = PaperBroker(c); e.broker = b; b.engine = e
-        val j = Store.save(c, e, b, listOf(Candle(0, 0L, 1.0, 2.0, 0.5, 1.5, 10.0)))
+        val j = Store.save(c, e, b, listOf(Candle(0, 28_800_000L, 1.0, 2.0, 0.5, 1.5, 10.0)))
         val old = j.replace("\"specRev\"", "\"zz_specRev\"")
         val l = Store.load(old).cfg
         assertEquals(500.0, l.maxLeverage); assertEquals(1.0, l.entryBufTicks); assertEquals(1, l.maxSetups)
@@ -85,7 +85,7 @@ class SpecRevTest {
             tp2 = after382Buy.tp2 // NaN
             tpx = after382Buy.tpx // 213.6
         }
-        val t0 = 1_700_000_000_000L
+        val t0 = 1_699_948_800_000L // سه‌شنبه 2023-11-14 ساعت 08:00 UTC — داخل پنجرهٔ سفارش‌گیری (§18-26 سند)
         assertTrue(b.registerLimit(s, Candle(1, t0, 170.5, 171.0, 170.2, 170.8, 100.0)))
         // پر شدن سفارش روی 170.00
         b.onBar(Candle(2, t0 + 60_000L, 170.5, 171.0, 169.8, 170.5, 100.0))
@@ -165,10 +165,10 @@ class SpecRevTest {
             entry = 2012.01; sl = 2008.98; tp1 = 2020.0; tp2 = 2025.0; tpx = 2060.0
         }
         e.setups.add(sExp)
-        val c0 = Candle(0, 0L, 2010.0, 2013.0, 2010.0, 2012.5, 100.0)
+        val c0 = Candle(0, 28_800_000L, 2010.0, 2013.0, 2010.0, 2012.5, 100.0)
         assertTrue(b.registerLimit(sExp, c0))
         // بار ۱: کلوز بالای HH (2051 > 2050) بدون لمس ورود ⇒ انقضای سفارش
-        val c1 = Candle(1, 60_000L, 2040.0, 2052.0, 2039.0, 2051.0, 100.0)
+        val c1 = Candle(1, 28_860_000L, 2040.0, 2052.0, 2039.0, 2051.0, 100.0)
         val bars = mutableListOf(c0, c1)
         e.processed = 1
         e.feed(bars, lastIsClosed = true)
@@ -187,7 +187,7 @@ class SpecRevTest {
         }
         e.setups.add(sLv3)
         assertTrue(b.registerLimit(sLv3, c1))
-        val c2 = Candle(2, 120_000L, 2031.5, 2032.5, 2031.0, 2031.8, 100.0) // لمس کف باکس LV (2032.0..2036.0) برای بار سوم!
+        val c2 = Candle(2, 28_920_000L, 2031.5, 2032.5, 2031.0, 2031.8, 100.0) // لمس کف باکس LV (2032.0..2036.0) برای بار سوم!
         bars.add(c2)
         e.feed(bars, lastIsClosed = true)
         b.onBar(c2)
@@ -246,17 +246,17 @@ class SpecRevTest {
         var bi = 0
         // کندل ساختار 0 (0..240s): صعودی 2000..2020 -> ثبت ناحیه
         for (m in 0 until 5) {
-            bars.add(Candle(bi++, m * 60_000L, 2002.0 + m * 3.0, 2005.0 + m * 3.5, 2000.0 + m * 3.0, 2004.0 + m * 3.5, 100.0 + (m % 2) * 80.0))
+            bars.add(Candle(bi++, 28_800_000L + m * 60_000L, 2002.0 + m * 3.0, 2005.0 + m * 3.5, 2000.0 + m * 3.0, 2004.0 + m * 3.5, 100.0 + (m % 2) * 80.0))
         }
         // کندل ساختار 1 (300..540s): لمس ناحیهٔ کندل 0 و تشکیل تایید میانی با کف 2005.0
-        bars.add(Candle(bi++, 300_000L, 2018.0, 2019.0, 2005.0, 2017.0, 150.0))
+        bars.add(Candle(bi++, 29_100_000L, 2018.0, 2019.0, 2005.0, 2017.0, 150.0))
         for (m in 1 until 5) {
-            bars.add(Candle(bi++, 300_000L + m * 60_000L, 2017.0, 2019.0, 2016.0, 2018.0, 120.0))
+            bars.add(Candle(bi++, 29_100_000L + m * 60_000L, 2017.0, 2019.0, 2016.0, 2018.0, 120.0))
         }
         // شروع کندل ساختار 2 (600s): باعث بسته شدن کندل ساختار 1 می‌شود
-        bars.add(Candle(bi++, 600_000L, 2018.0, 2019.0, 2017.0, 2018.5, 100.0))
+        bars.add(Candle(bi++, 29_400_000L, 2018.0, 2019.0, 2017.0, 2018.5, 100.0))
         // کندل دنباله
-        bars.add(Candle(bi, 660_000L, 2018.5, 2019.0, 2018.0, 2018.5, 100.0))
+        bars.add(Candle(bi, 29_460_000L, 2018.5, 2019.0, 2018.0, 2018.5, 100.0))
 
         e.runAll(bars)
         val touchedSetups = e.setups.filter { it.touchT > 0L }
@@ -272,8 +272,8 @@ class SpecRevTest {
         // چون ناحیهٔ ساختار قبلاً با یک بار لمس در کندل ساختار 1 باطل شده بود، ستاپ باید کامل باطل شود (stage=8) و تایید میانی جدید نگیرد!
         bars.removeAt(bars.lastIndex)
         val breakBi = bars.size
-        bars.add(Candle(breakBi, 660_000L, 2018.0, 2018.5, 2004.0, 2016.0, 100.0))
-        bars.add(Candle(breakBi + 1, 720_000L, 2016.0, 2017.0, 2015.0, 2016.5, 100.0))
+        bars.add(Candle(breakBi, 29_460_000L, 2018.0, 2018.5, 2004.0, 2016.0, 100.0))
+        bars.add(Candle(breakBi + 1, 29_520_000L, 2016.0, 2017.0, 2015.0, 2016.5, 100.0))
         e.runAll(bars)
         for (s in e.setups.filter { it.touchT > 0L }) {
             assertEquals(8, s.stage, "پس از باطل شدن تایید میانیِ ناحیهٔ مصرف‌شده، ستاپ باید کامل باطل شود (§18-14 و §18-21)")
@@ -298,17 +298,17 @@ class SpecRevTest {
 
         // یک ستاپ خرید که ناحیهٔ ساختار 2000..2010 را در ابتدای کندل میانی 15m (t=0..840s) لمس کرده است
         val s = Setup(1L, 1, 1, 2010.0, 2000.0, 1, -1).apply {
-            zT = 0L
+            zT = 28_800_000L
             touchBi = 0
-            touchT = 0L
-            touchMidStart = 0L
+            touchT = 28_800_000L
+            touchMidStart = 28_800_000L
         }
         e.setups.add(s)
 
         val bars = ArrayList<Candle>()
         var bi = 0
         fun addM1(o: Double, h: Double, l: Double, c: Double, v: Double) {
-            bars.add(Candle(bi, bi * 60_000L, o, h, l, c, v))
+            bars.add(Candle(bi, 28_800_000L + bi * 60_000L, o, h, l, c, v))
             bi++
         }
 
@@ -373,26 +373,26 @@ class SpecRevTest {
         assertEquals(1990.0, loaded.eng.zoneRefL, 1e-9)
 
         val s = Setup(1L, 1, 1, 2010.0, 2000.0, 1, -1).apply {
-            zT = 0L; touchBi = 0; touchT = 0L; touchMidStart = 0L
+            zT = 28_800_000L; touchBi = 0; touchT = 28_800_000L; touchMidStart = 28_800_000L
         }
         e.setups.add(s)
 
         val bars = listOf(
             // کندل میانی ۵ دقیقه‌ای (0..4):
             // 0: کف تایید میانی = 2001.0 (حجم 200)
-            Candle(0, 0L, 2008.0, 2009.0, 2001.0, 2005.0, 200.0),
+            Candle(0, 28_800_000L, 2008.0, 2009.0, 2001.0, 2005.0, 200.0),
             // 1: کندل حجم کم اول (50 < 200، کف=2004، سقف=2006) اما در کندل 2 باطل می‌شود (کف 2003.5 < 2004)
-            Candle(1, 60_000L, 2005.0, 2006.0, 2004.0, 2005.5, 50.0),
+            Candle(1, 28_860_000L, 2005.0, 2006.0, 2004.0, 2005.5, 50.0),
             // 2: عبور از کف کندل 1 (2003.5 < 2004) و حجم بیشتر (120)
-            Candle(2, 120_000L, 2005.5, 2007.0, 2003.5, 2006.5, 120.0),
+            Candle(2, 28_920_000L, 2005.5, 2007.0, 2003.5, 2006.5, 120.0),
             // 3: کندل حجم کم دوم (40 < 120، کف=2005، سقف=2008) -> معتبر!
-            Candle(3, 180_000L, 2006.5, 2008.0, 2005.0, 2007.5, 40.0),
+            Candle(3, 28_980_000L, 2006.5, 2008.0, 2005.0, 2007.5, 40.0),
             // 4: تایید کندل حجم کم دوم (کلوز 2009.5 > 2008)
-            Candle(4, 240_000L, 2007.5, 2010.0, 2007.0, 2009.5, 90.0),
+            Candle(4, 29_040_000L, 2007.5, 2010.0, 2007.0, 2009.5, 90.0),
             // 5: شروع کندل ۵ دقیقه‌ای بعدی (بسته شدن کندل میانی 0..4) + کندل حجم زیاد (150 > 90، سقف 2012، کف 2009)
-            Candle(5, 300_000L, 2009.5, 2012.0, 2009.0, 2011.5, 150.0),
+            Candle(5, 29_100_000L, 2009.5, 2012.0, 2009.0, 2011.5, 150.0),
             // 6: کلوز بالای 2012 -> تایید HV و مسلح شدن در 2012.01
-            Candle(6, 360_000L, 2011.5, 2014.0, 2011.0, 2013.5, 100.0)
+            Candle(6, 29_160_000L, 2011.5, 2014.0, 2011.0, 2013.5, 100.0)
         )
         e.feed(bars, lastIsClosed = true)
 
@@ -407,7 +407,7 @@ class SpecRevTest {
     fun `doc 4-9 oo level moves stop once candle closes fully outside HV without touching oo`() {
         val cfg = Settings().apply { initialEquity = 100000.0 }
         val b = PaperBroker(cfg)
-        val t0 = 1_700_000_000_000L
+        val t0 = 1_699_948_800_000L // سه‌شنبه 2023-11-14 ساعت 08:00 UTC — داخل پنجرهٔ سفارش‌گیری (§18-26 سند)
         // سفارش خرید: oo=2010.01 (سقف HV 2010 + ۱ تیک)، باکس HV 2007..2010، SL=2006.98
         val s = Setup(9L, 1, 6, 2020.0, 2000.0, 1, 0).apply {
             hvH = 2010.0; hvL = 2007.0; sl = 2006.98
