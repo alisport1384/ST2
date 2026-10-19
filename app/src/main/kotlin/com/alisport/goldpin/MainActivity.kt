@@ -1154,7 +1154,7 @@ class MainActivity : Activity() {
         // §v1.4.9: باکس‌ها با «کلوز از سمت دور» پاک می‌شوند؛ محدودیت تعداد غیرفعال (نامحدود).
         v.addView(Ui.tv(this, "حداکثر باکس روی چارت: نامحدود (پاک‌سازی با کلوز از سمت دور)", 11f, Palette.dim))
         v.addView(switchRow("نمایش ناحیه‌های ردشده", s.cfg.showRejectedZones) { s.cfg.showRejectedZones = it; s.rebuildAsync() })
-        v.addView(switchRow("پاک کردن باکس با کلوز از سمت دور", s.cfg.clearUsedZones) { s.cfg.clearUsedZones = it; s.rebuildAsync() })
+        v.addView(Ui.tv(this, "ابطال ناحیه با کلوز از سمت دور: طبق سند همیشه فعال", 11f, Palette.dim))
         val dists = arrayOf("مثلثی حول Close", "مثلثی حول Typical", "یکنواخت")
         dists.forEachIndexed { i, n ->
             v.addView(Ui.btn(this, "توزیع حجم: $n", if (s.cfg.distMode == i) Palette.accent else Palette.panel2,

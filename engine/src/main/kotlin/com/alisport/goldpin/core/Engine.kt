@@ -504,22 +504,15 @@ class Engine(val cfg: Settings) {
         microS.add(cd)
 
         // چرخهٔ عمر باکس‌های ناحیه (حذف با کلوز از سمت دور)
-        if (cfg.clearUsedZones) {
-            for (zb in zones) {
-                if (zb.status != ZoneStatus.ACTIVE) continue
-                val dead = if (zb.dir == 1) cd.c < zb.bot else cd.c > zb.top
-                if (dead) {
-                    zb.status = ZoneStatus.DELETED
-                    zb.endBi = i; zb.endT = cd.t
-                }
+        // §4-5: ابطال با کلوز سمت دور قانون استراتژی است، نه گزینهٔ قابل‌خاموش‌کردن.
+        for (zb in zones) {
+            if (zb.status != ZoneStatus.ACTIVE) continue
+            val dead = if (zb.dir == 1) cd.c < zb.bot else cd.c > zb.top
+            if (dead) {
+                zb.status = ZoneStatus.DELETED
+                zb.endBi = i; zb.endT = cd.t
             }
         }
-        // سقف تعداد باکس‌های نمایان:
-        // ⚠ پیش‌تر این‌جا `zones.size > maxZoneBoxes` سنجیده می‌شد؛ ولی `zones` هرگز کوچک نمی‌شود
-        // (باکس‌ها فقط وضعیت می‌گیرند)، پس بعد از ساخت ۲۴ باکس، در **هر** کندل یک باکس زنده
-        // بی‌دلیل CAP می‌شد و عملاً هیچ باکس ناحیه‌ای روی چارت نمی‌ماند.
-        // شمارش درست = فقط باکس‌های نمایان (فعال/ردشده) — همان معیاری که trimZones دارد.
-        trimZones()
         if (agg1.closedNow && agg1.cl != null) prevT1Vol = agg1.cl!!.v
         prevChartVol = cd.v
         cnt.zoneCount = zones.size
@@ -962,7 +955,8 @@ class Engine(val cfg: Settings) {
             // سهمیه را مصرف می‌کنند (شمارهٔ Z1/Z2 بین پذیرفته‌ها و ردشده‌ها مشترک است).
             val cand = VolumeProfile.zoneCandidates(prof, cfg.vpRows, bullC, sb.c, cfg.minZoneRows)
             cnt.zoneRejected += cand.rejected.size
-            if (cfg.showRejectedZones) for (rz in cand.rejected) {
+            // گزینهٔ نمایش نباید تاریخچهٔ ناحیه‌های ردشده را از وضعیت ذخیره حذف کند.
+            for (rz in cand.rejected) {
                 addZoneBox(zoneDir, rz, sb, ZoneStatus.REJECTED)
                 lg("ZONE", "ناحیهٔ ردشده (کلوز داخل محدوده بود)",
                     "dir=${if (bullC) "BULL" else "BEAR"} top=${f2(rz.top)} bot=${f2(rz.bot)} rows=${rz.loIdx}-${rz.hiIdx} bar=${sb.bi}")
@@ -984,12 +978,15 @@ class Engine(val cfg: Settings) {
                 }
             }
             pruneSetups()
-            trimZones()
         }
     }
 
     private fun markStructureZoneStatus(s: Setup, status: Int, endBi: Int = curBi, endT: Long = curT) {
-        zones.firstOrNull { it.dir == s.dir && it.idx == s.zIdx && it.createdBi == s.zBi && it.status == ZoneStatus.ACTIVE }
+        zones.firstOrNull {
+            it.dir == s.dir && it.idx == s.zIdx && it.status == ZoneStatus.ACTIVE &&
+                it.top == s.zTop && it.bot == s.zBot &&
+                (if (s.zT > 0L) it.createdT == s.zT else it.createdBi == s.zBi)
+        }
             ?.let { it.status = status; it.endBi = endBi; it.endT = endT }
     }
 
@@ -1034,16 +1031,6 @@ class Engine(val cfg: Settings) {
                 it.status = status; it.endBi = endBi; it.endT = endT
             }
             s.hvZoneId = -1L
-        }
-    }
-
-    private fun trimZones() {
-        // مسیر سریع: اگر کل باکس‌ها هم از سقف کمترند، قطعاً باکس نمایان بیشتری وجود ندارد
-        if (zones.size <= cfg.maxZoneBoxes) return
-        // قدیمی‌ترین باکس نمایان (فعال/ردشده) تا وقتی که تعداد نمایان‌ها از سقف بگذرد حذف می‌شود
-        while (zones.count { it.status == ZoneStatus.ACTIVE || it.status == ZoneStatus.REJECTED } > cfg.maxZoneBoxes) {
-            val victim = zones.firstOrNull { it.status == ZoneStatus.ACTIVE || it.status == ZoneStatus.REJECTED } ?: break
-            victim.status = ZoneStatus.CAP
         }
     }
 
@@ -1158,7 +1145,9 @@ class Engine(val cfg: Settings) {
     ): Int {
         var n = 0
         for (z in src) {
-            if (z.createdT <= 0L || z.createdT >= fromT || z.status == ZoneStatus.CAP) continue
+            // باکس‌های CAP فایل‌های قدیمی نیز تاریخچه‌اند؛ نباید در بازسازی گم شوند.
+            // وضعیت CAP حفظ می‌شود اما به معاملهٔ جدید تبدیل نمی‌شود (وضعیت اصلی ناشناخته است).
+            if (z.createdT <= 0L || z.createdT >= fromT) continue
             val existing = dst.firstOrNull { sameZone(it, z) }
             if (existing != null) {
                 idMap[z.id] = existing.id

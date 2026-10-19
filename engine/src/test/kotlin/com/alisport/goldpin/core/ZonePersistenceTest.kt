@@ -40,8 +40,9 @@ class ZonePersistenceTest {
             prevZoneSeq = 8L, prevSetups = listOf(previousSetup), currentCandles = replay
         )
 
-        assertEquals(5, restoredCount, "ناحیهٔ ساختاری تکراری و CAP دوباره اضافه نمی‌شوند")
-        assertEquals(3, rebuilt.zones.size)
+        assertEquals(6, restoredCount, "ناحیهٔ ساختاری تکراری نمی‌شود و CAP تاریخی حفظ می‌شود")
+        assertEquals(4, rebuilt.zones.size)
+        assertTrue(rebuilt.zones.any { it.status == ZoneStatus.CAP && it.createdT == 4_000L })
         assertEquals(1, rebuilt.zones.count { it.status == ZoneStatus.ACTIVE })
         assertTrue(rebuilt.zones.any { it.status == ZoneStatus.DELETED && it.endT == 4_000L })
         assertTrue(rebuilt.zones.any { it.status == ZoneStatus.REJECTED })

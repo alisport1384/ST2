@@ -57,7 +57,7 @@ object Store {
         "tfMode" to c.tfMode, "tfS" to c.tfS, "tfM" to c.tfM, "tf1" to c.tf1, "tf2" to c.tf2,
         "vpRows" to c.vpRows, "vpVA" to c.vpVA, "vpSmooth" to c.vpSmooth, "distMode" to c.distMode,
         "minZoneRows" to c.minZoneRows, "drawZones" to c.drawZones, "showRejectedZones" to c.showRejectedZones,
-        "clearUsedZones" to c.clearUsedZones, "maxZoneBoxes" to c.maxZoneBoxes, "showPocVA" to c.showPocVA,
+        "clearUsedZones" to true, "maxZoneBoxes" to Int.MAX_VALUE, "showPocVA" to c.showPocVA,
         "maxSetups" to c.maxSetups, "midInvalidClose" to c.midInvalidClose,
         "hvScanFirstTouch" to c.hvScanFirstTouch, "hvMarkFirstIncrease" to c.hvMarkFirstIncrease,
         "rejectCandleNext" to c.rejectCandleNext,
@@ -85,7 +85,9 @@ object Store {
         c.vpRows = m["vpRows"].asI(); c.vpVA = m["vpVA"].asD(); c.vpSmooth = m["vpSmooth"].asI()
         c.distMode = m["distMode"].asI(); c.minZoneRows = m["minZoneRows"].asI()
         c.drawZones = m["drawZones"].asB(); c.showRejectedZones = m["showRejectedZones"].asB()
-        c.clearUsedZones = m["clearUsedZones"].asB(); c.maxZoneBoxes = m["maxZoneBoxes"].asI()
+        // تنظیمات قدیمی ممکن است ابطال را خاموش یا سقف باکس را محدود کرده باشند؛
+        // سند فعلی ابطال با کلوز و ذخیرهٔ نامحدود ناحیه‌ها را اجباری می‌داند.
+        c.clearUsedZones = true; c.maxZoneBoxes = Int.MAX_VALUE
         c.showPocVA = m["showPocVA"].asB()
         c.maxSetups = m["maxSetups"].asI(); c.midInvalidClose = m["midInvalidClose"].asB()
         c.hvScanFirstTouch = m["hvScanFirstTouch"].asB(); c.hvMarkFirstIncrease = m["hvMarkFirstIncrease"].asB()
