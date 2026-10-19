@@ -141,6 +141,13 @@ class PaperBroker(private val cfg: Settings) {
         }
         // §4-8 سند: سطح سفارش = سقف باکس HV + ۱ تیک بافر (خرید) / کف باکس HV − ۱ تیک بافر (فروش)
         val entryPx = cfg.entryLevel(s.bull, s.hvH, s.hvL)
+        // §18-31 سند: سفارشی که فاصلهٔ حد ضررش از سطح سفارش بیشتر از N است ثبت نمی‌شود و
+        // باطل است (علت: SL>N)؛ در بک‌تست هم سفارشی حساب نمی‌شود. گارد اصلی در موتور است
+        // (HV و ستاپ می‌مانند)؛ این‌جا خط دفاع دوم برای ثبت مستقیم است.
+        if (!s.sl.isNaN() && abs(entryPx - s.sl) > cfg.maxSlUnits) {
+            lastError = "فاصلهٔ حد ضرر از سطح سفارش (${fmt(abs(entryPx - s.sl))}) بیشتر از N=${fmt(cfg.maxSlUnits)} است — سفارش ثبت نمی‌شود (SL>N، §18-31 سند)"
+            return false
+        }
         var mmNote = ""
         var mmCm = false
         val qty: Double

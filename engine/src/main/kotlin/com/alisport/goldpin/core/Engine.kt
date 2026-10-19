@@ -71,6 +71,14 @@ class Settings {
     /** استراتژی ۲: حد سود نهایی = ورود ± این مقدار (واحد قیمت). پیش‌فرض ۱۰. */
     var tpUnits: Double = 10.0
 
+    /**
+     * §18-31 سند: سفارش‌هایی که فاصلهٔ حد ضررشان از سطح سفارش بیشتر از N است ثبت نمی‌شوند
+     * (سفارش باطل است؛ علت: SL>N). HV و ستاپ سر جایشان می‌مانند و ستاپ تا پر/منقضی/باطل‌شدن
+     * HV ادامه دارد، ولی روی آن HV سفارشی ثبت نمی‌شود و در بک‌تست هم سفارشی حساب نمی‌شود.
+     * N در تنظیمات قابل تغییر است؛ پیش‌فرض سند: ۳ واحد قیمت.
+     */
+    var maxSlUnits: Double = 3.0
+
     var useRiskPct: Boolean = true
     var riskPct: Double = 1.0
     var equityPct: Double = 100.0
@@ -130,6 +138,7 @@ class Settings {
         it.rejectCandleNext = rejectCandleNext
         it.mintick = mintick; it.slBufTicks = slBufTicks; it.entryBufTicks = entryBufTicks; it.minTPunits = minTPunits
         it.strategy = strategy; it.tpUnits = tpUnits
+        it.maxSlUnits = maxSlUnits
         it.useRiskPct = useRiskPct; it.riskPct = riskPct; it.equityPct = equityPct
         it.maxLeverage = maxLeverage; it.roundQty = roundQty
         it.contractSize = contractSize; it.initialEquity = initialEquity
@@ -1877,6 +1886,7 @@ class Engine(val cfg: Settings) {
      */
     private fun clearHvMark(s: Setup) {
         s.hvBi = -1; s.hvT = 0L; s.runMax = Double.NaN
+        s.slBlockedHvBi = -1
         if (s.stage == 5) s.stage = 4
     }
 
@@ -1905,6 +1915,19 @@ class Engine(val cfg: Settings) {
         s.tp1 = targets.tp1
         s.tp2 = targets.tp2
         s.tpx = targets.tpx
+        // §18-31 سند: سفارشی که فاصلهٔ حد ضررش از سطح سفارش بیشتر از N است ثبت نمی‌شود و
+        // سفارش باطل است (علت: SL>N). HV مطابق ستاپ می‌ماند و ستاپ تا پر/منقضی/باطل‌شدن HV
+        // ادامه دارد، ولی روی این HV سفارشی ثبت نمی‌شود و در بک‌تست هم حسابی ندارد.
+        val slDist = abs(eRef - s.sl)
+        if (slDist > cfg.maxSlUnits) {
+            if (s.slBlockedHvBi != s.hvBi) {
+                s.slBlockedHvBi = s.hvBi
+                lg("ENGINE", "سفارش ستاپ #${s.id} ثبت نمی‌شود — فاصلهٔ حد ضرر از سطح سفارش (${f2(slDist)}) بیشتر از N=${f2(cfg.maxSlUnits)} است (SL>N، §18-31 سند)؛ HV و ستاپ ادامه دارند",
+                    "entry=${f2(eRef)} sl=${f2(s.sl)} bar=$curBi")
+            }
+            return
+        }
+        s.slBlockedHvBi = -1
         // §4-8: فقط و فقط یک سفارش برای هر LV امکان‌پذیر است چه سفارش پر شود چه فعال نشود چه باطل شود.
         if (!s.prevEntry.isNaN()) {
             clearHvMark(s)
@@ -2011,7 +2034,46 @@ class Engine(val cfg: Settings) {
     private fun removePinMarker(kind: Int, price: Double) {
         if (price.isNaN()) return
         val idx = markers.indexOfLast { it.kind == kind && it.price == price }
-        if (idx >= 0) markers.removeAt(idx)
+        if (idx >= 0) {
+            markers.removeAt(idx)
+            prunePinMarkerAlternation()
+        }
+    }
+
+    /**
+     * تناوب سخت مارکرهای pinBU/pinBE روی چارت (§18-1/§18-3/§18-4 سند): در دنبالهٔ
+     * مارکرهای پین هرگز دو مارکر هم‌جهت پشت‌سرهم نباید دیده شود.
+     *
+     * چرا با وجود حذف مارکرِ پینِ باطل‌شده باز هم دو هم‌جهت پشت‌سرهم می‌ماند؟
+     * وقتی پین هم‌جهت تازه‌ای Ready می‌شود، وضعیت پین قبلی همان جهت بازنویسی می‌شود
+     * (lastBUpin/lastBEpin) و موتور دیگر آن پین قدیمی را ردیابی نمی‌کند؛ اگر بعداً پین
+     * مخالفِ بین آن دو باطل شود و مارکرش (درست) حذف شود، مارکر پین قدیمیِ ازیادرفته
+     * برای همیشه روی چارت می‌ماند و کنار پین هم‌جهت بعدی «دو کندل مهم بالاترین/پایین‌ترین
+     * پشت‌سرهم» دیده می‌شود — همان ایراد عکس‌های مالک. طبق §18-4 چنین پینی مرده است و
+     * باید کاملاً دور ریخته شود؛ این تابع پس از هر ثبت/حذف مارکر پین، از هر جفت هم‌جهتِ
+     * چسبیده، آن‌که پینِ زندهٔ فعلی نیست را دور می‌ریزد (اگر هیچ‌کدام زنده نبود، قدیمی‌تر
+     * دور ریخته می‌شود چون پین تازه جای آن را گرفته است). در بارگذاری وضعیت ذخیره‌شده هم
+     * صدا زده می‌شود تا مارکرهای مردهٔ ذخیره‌های قدیمی پاک‌سازی شوند.
+     */
+    fun prunePinMarkerAlternation() {
+        fun isLivePin(m: Marker): Boolean =
+            (m.kind == MarkerKind.PIN_BU && buActive && m.price == lastBUpin) ||
+                (m.kind == MarkerKind.PIN_BE && beActive && m.price == lastBEpin)
+        var prevIdx = -1
+        var i = 0
+        while (i < markers.size) {
+            val m = markers[i]
+            if (m.kind != MarkerKind.PIN_BU && m.kind != MarkerKind.PIN_BE) { i++; continue }
+            if (prevIdx >= 0 && markers[prevIdx].kind == m.kind) {
+                val victim = if (isLivePin(markers[prevIdx]) && !isLivePin(m)) i else prevIdx
+                markers.removeAt(victim)
+                prevIdx = -1
+                i = 0
+                continue
+            }
+            prevIdx = i
+            i++
+        }
     }
 
     /**
@@ -2136,6 +2198,8 @@ class Engine(val cfg: Settings) {
 
     private fun addMarkerAtTime(t: Long, bi: Int, price: Double, kind: Int, text: String) {
         markers.add(Marker(t, bi, price, kind, text))
+        // ثبت هر پین تازه، فرصت دور ریختن مارکر پین هم‌جهتِ مردهٔ قبلی است (§18-4).
+        if (kind == MarkerKind.PIN_BU || kind == MarkerKind.PIN_BE) prunePinMarkerAlternation()
         // توالی پین‌ها و شروع/چرخش روند تاریخچه‌اند و نباید با سقف مارکرهای
         // جزئی حذف شوند؛ فقط مارکرهای رخدادهای پرتکرار قدیمی‌تر trim می‌شوند.
         while (markers.size > 2000) {
@@ -2192,6 +2256,8 @@ class Setup(
     var markH = Double.NaN; var markL = Double.NaN; var markBi = -1
     var lvH = Double.NaN; var lvL = Double.NaN; var lvBi = -1; var lvT = 0L; var lvConfBi = -1; var lvConfT = 0L; var lvZoneId = -1L
     var hvH = Double.NaN; var hvL = Double.NaN; var hvBi = -1; var hvT = 0L; var hvScanBi = -1; var hvConfBi = -1; var hvConfT = 0L; var hvZoneId = -1L
+    /** §18-31 سند: ایندکس HVای که به‌علت SL>N سفارش رویش ثبت نشد؛ تا وقتی همان HV برقرار است تلاش مجدد/لاگ تکراری نداریم. */
+    var slBlockedHvBi = -1
     var midConfirmBi = -1
     var runMax = Double.NaN
     var zGone = false

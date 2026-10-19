@@ -17,6 +17,7 @@ fun main(args: Array<String>) {
     var maxRows = Int.MAX_VALUE
     var strategy = Strategy.DOC
     var tpUnits = 10.0
+    var maxSlUnits = -1.0
     var maxSetups = -1
     var i = 0
     while (i < args.size) {
@@ -29,6 +30,7 @@ fun main(args: Array<String>) {
             "--max" -> maxRows = args[++i].toInt()
             "--strategy" -> strategy = args[++i].toInt()          // ۱ = سند (پیش‌فرض) · ۲ = بدون روند، حد سود ثابت
             "--tp-units" -> tpUnits = args[++i].toDouble()        // استراتژی ۲: حد سود (واحد قیمت)، پیش‌فرض ۱۰
+            "--max-sl-units" -> maxSlUnits = args[++i].toDouble() // §18-31 سند: سقف فاصلهٔ حد ضرر N (پیش‌فرض سند ۳)
             "--max-setups" -> maxSetups = args[++i].toInt()
         }
         i++
@@ -79,6 +81,7 @@ fun main(args: Array<String>) {
         this.vpRows = rows; this.vpSmooth = smooth; this.tfMode = tfMode
         if (Strategy.valid(strategy)) this.strategy = strategy
         this.tpUnits = tpUnits
+        if (maxSlUnits >= 0) this.maxSlUnits = maxSlUnits
         if (maxSetups > 0) this.maxSetups = maxSetups
     }
     val t2 = TF_MODES.first { it.idx == tfMode }

@@ -46,7 +46,7 @@ class MarketScheduleAndTpLegsTest {
 
     @Test
     fun `no fill on weekend and engine skips weekend candles`() {
-        val cfg = Settings()
+        val cfg = Settings().apply { maxSlUnits = 1_000_000.0 } // موضوع این تست‌ها §18-31 نیست
         val b = PaperBroker(cfg)
         val fri = ms("2026-10-16T12:00:00Z")
         val s = Setup(1L, 1, 6, 165.0, 155.0, 1, 0).apply {
@@ -94,7 +94,7 @@ class MarketScheduleAndTpLegsTest {
     }
 
     private fun buyBrokerWithTrade(tp1: Double, tp2: Double, tpx: Double, hvH: Double, hvL: Double, sl: Double): Pair<PaperBroker, Long> {
-        val cfg = Settings()
+        val cfg = Settings().apply { maxSlUnits = 1_000_000.0 } // موضوع این تست‌ها §18-31 نیست
         val b = PaperBroker(cfg)
         val t0 = ms("2026-10-19T08:00:00Z")   // دوشنبه
         val entry = cfg.entryLevel(true, hvH, hvL)

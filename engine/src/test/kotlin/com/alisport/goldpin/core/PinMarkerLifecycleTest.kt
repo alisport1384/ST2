@@ -179,7 +179,14 @@ class PinMarkerLifecycleTest {
         val e = Engine(cfgS1())
         e.runAll(bars(*rows))
         val pins = pinMarkers(e)
-        assertTrue(MarkerKind.PIN_BU to 4144.2 in pins, "pinBU زنده (@4144.2) باید بماند: $pins")
+        // pinBU اول (@4144.2) با Ready شدن pinBU بعدی (@4198.6 در win33) جایگزین شد و
+        // pinBE میان آن دو (@4219.7) هم با تثبیت روند مصرف شد؛ طبق §18-4 پینِ ازیادرفته
+        // کاملاً دور ریخته می‌شود وگرنه دو «کندل مهم پایین‌ترین» پشت‌سرهم می‌ماند
+        // (عکس‌های بعدی مالک). پس فقط pinBU زندهٔ فعلی باید روی چارت باشد.
+        assertEquals(
+            listOf(MarkerKind.PIN_BU to 4198.6), pins,
+            "فقط pinBU زنده (@4198.6) باید بماند؛ پین‌های مرده/جایگزین‌شده دور ریخته می‌شوند (§18-4): $pins"
+        )
         assertFalse(
             pins.any { it.first == MarkerKind.PIN_BE && it.second == 4171.8 },
             "pinBE اول در win9 باطل شده؛ مارکرش نباید روی چارت بماند (§18-4): $pins"

@@ -1214,6 +1214,7 @@ class AppState {
         to.rejectCandleNext = c.rejectCandleNext
         to.mintick = c.mintick; to.slBufTicks = c.slBufTicks; to.entryBufTicks = c.entryBufTicks; to.minTPunits = c.minTPunits
         to.strategy = c.strategy; to.tpUnits = c.tpUnits
+        to.maxSlUnits = c.maxSlUnits
         to.useRiskPct = c.useRiskPct; to.riskPct = c.riskPct; to.equityPct = c.equityPct
         to.maxLeverage = c.maxLeverage; to.roundQty = c.roundQty
         to.contractSize = c.contractSize; to.initialEquity = c.initialEquity

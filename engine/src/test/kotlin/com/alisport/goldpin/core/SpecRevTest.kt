@@ -72,6 +72,7 @@ class SpecRevTest {
         // ۵۰٪ حجم در 0.5 فیبو بسته می‌شود + سر‌به‌سر شدن بدون کمیسیون (commission = 0)؛
         // در صورت برگشت به نقطهٔ ورود، ۵۰٪ باقی‌مانده دقیقاً در نقطهٔ ورود بدون کمیسیون بسته می‌شود.
         val cfg = Settings().apply {
+            maxSlUnits = 1_000_000.0 // موضوع تست §18-31 نیست
             mmMode = MoneyMode.MIXED
             initialEquity = 1000.0
             cmsnAuto = false
@@ -150,6 +151,7 @@ class SpecRevTest {
         val cfg = Settings().apply {
             tfS = Tf.H1; tfM = Tf.M15; tf1 = Tf.M1; tf2 = Tf.M1
             hvMarkFirstIncrease = true
+            maxSlUnits = 1_000_000.0
         }
         val e = Engine(cfg)
         val b = PaperBroker(cfg)
@@ -287,6 +289,7 @@ class SpecRevTest {
         val cfg = Settings().apply {
             tfMode = 1
             tfS = Tf.H1; tfM = Tf.M15; tf1 = Tf.M5; tf2 = Tf.M1
+            maxSlUnits = 1_000_000.0
         }
         val e = Engine(cfg)
         val b = PaperBroker(cfg)
@@ -356,6 +359,7 @@ class SpecRevTest {
         val cfg = Settings().apply {
             tfMode = 2
             tfS = Tf.M30; tfM = Tf.M5; tf1 = Tf.M1; tf2 = Tf.M1
+            maxSlUnits = 1_000_000.0
         }
         val e = Engine(cfg)
         val b = PaperBroker(cfg)
@@ -405,7 +409,7 @@ class SpecRevTest {
 
     @Test
     fun `doc 4-9 oo level moves stop once candle closes fully outside HV without touching oo`() {
-        val cfg = Settings().apply { initialEquity = 100000.0 }
+        val cfg = Settings().apply { initialEquity = 100000.0; maxSlUnits = 1_000_000.0 }
         val b = PaperBroker(cfg)
         val t0 = 1_699_948_800_000L // سه‌شنبه 2023-11-14 ساعت 08:00 UTC — داخل پنجرهٔ سفارش‌گیری (§18-26 سند)
         // سفارش خرید: oo=2010.01 (سقف HV 2010 + ۱ تیک)، باکس HV 2007..2010، SL=2006.98

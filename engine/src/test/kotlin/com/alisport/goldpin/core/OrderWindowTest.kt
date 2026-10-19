@@ -42,7 +42,7 @@ class OrderWindowTest {
     }
 
     private fun tryRegister(t: Long): Boolean =
-        PaperBroker(Settings()).registerLimit(buySetup(), Candle(0, t, 171.0, 172.0, 170.5, 171.5, 100.0))
+        PaperBroker(Settings().apply { maxSlUnits = 1_000_000.0 }).registerLimit(buySetup(), Candle(0, t, 171.0, 172.0, 170.5, 171.5, 100.0))
 
     @Test
     fun `doc 18-26 broker registers orders only inside the window`() {
@@ -56,7 +56,7 @@ class OrderWindowTest {
     @Test
     fun `doc 18-27 at 20-00 open trade closes at 20-00 price and pending is cancelled not filled`() {
         // معاملهٔ باز: رأس ۲۰:۰۰ با قیمت بازشدن کندل ۲۰:۰۰ بسته می‌شود، حتی اگر همان کندل تا حد سود نهایی برود
-        val b = PaperBroker(Settings())
+        val b = PaperBroker(Settings().apply { maxSlUnits = 1_000_000.0 })
         assertTrue(b.registerLimit(buySetup(), Candle(0, mon("08:00"), 171.0, 172.0, 170.5, 171.5, 100.0)))
         b.onBar(Candle(1, mon("08:01"), 171.0, 175.0, 169.8, 174.0, 100.0))
         assertEquals(1, b.openTrades.size)
@@ -71,7 +71,7 @@ class OrderWindowTest {
         assertTrue(tr.reason.contains("پایان زمان"), "دلیل ثبت‌شده باید «پایان زمان» باشد: ${tr.reason}")
 
         // سفارش معلق: رأس ۲۰:۰۰ لغو می‌شود و همان کندل (حتی با لمس سطح) آن را پر نمی‌کند
-        val b2 = PaperBroker(Settings())
+        val b2 = PaperBroker(Settings().apply { maxSlUnits = 1_000_000.0 })
         assertTrue(b2.registerLimit(buySetup(), Candle(0, mon("19:00"), 171.0, 172.0, 170.5, 171.5, 100.0)))
         b2.onBar(Candle(1, mon("19:30"), 171.0, 172.0, 171.0, 171.5, 100.0))
         assertEquals(1, b2.pendingOrders.size)
@@ -81,14 +81,14 @@ class OrderWindowTest {
         assertEquals(OrderStatus.CANCELLED_EXPIRED, b2.orders[0].status)
         assertTrue(b2.orders[0].cancelReason?.contains("پایان زمان") == true)
         // و با قیمت زنده هم بعد از ۲۰:۰۰ چیزی پر نمی‌شود
-        val b3 = PaperBroker(Settings())
+        val b3 = PaperBroker(Settings().apply { maxSlUnits = 1_000_000.0 })
         assertTrue(b3.registerLimit(buySetup(), Candle(0, mon("19:00"), 171.0, 172.0, 170.5, 171.5, 100.0)))
         assertEquals(0, b3.onLiveCandle(Candle(5, mon("20:05"), 171.0, 172.0, 169.0, 170.0, 100.0)))
     }
 
     @Test
     fun `doc 18-27 remaining qty after TP1 closes at 20-00 with end-of-time reason`() {
-        val b = PaperBroker(Settings())
+        val b = PaperBroker(Settings().apply { maxSlUnits = 1_000_000.0 })
         assertTrue(b.registerLimit(buySetup(), Candle(0, mon("08:00"), 171.0, 172.0, 170.5, 171.5, 100.0)))
         b.onBar(Candle(1, mon("08:01"), 171.0, 175.0, 169.8, 174.0, 100.0))
         val tr = b.openTrades[0]
