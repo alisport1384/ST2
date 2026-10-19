@@ -10,7 +10,12 @@ object Store {
     const val SPEC_REV = 2
 
 
-    const val FORMAT = 3
+    /**
+     * ۴ = افزودن تاریخچهٔ تریگر۱/۲، `stageFa` و نقشهٔ زمان کندل‌ها به فایل.
+     * فایل‌های نسخهٔ ۳ هم بدون مشکل خوانده می‌شوند (کلیدهای تازه «اگر بود» خوانده می‌شوند)،
+     * فقط ستاپ‌های نیمه‌کاره‌ای که در آن فایل‌ها ذخیره شده‌اند تاریخچه ندارند.
+     */
+    const val FORMAT = 4
 
     class Loaded(
         val cfg: Settings,
@@ -194,6 +199,17 @@ object Store {
         o["lastBEpinRef"] = e.lastBEpinRef; o["lastBEpinLo"] = e.lastBEpinLo
         o["lastZoneTop"] = e.lastZoneTop; o["lastZoneBot"] = e.lastZoneBot
         o["zoneRefH"] = e.zoneRefH; o["zoneRefL"] = e.zoneRefL
+        o["stageFa"] = e.stageFa
+        // تاریخچهٔ کندل‌های تریگر۱ و تریگر۲ — اسکن LV (§18-16) و HV (§18-17) فقط روی همین
+        // بافرها کار می‌کند. اگر ذخیره نشوند، ستاپِ نیمه‌کاره بعد از هر ری‌استارت برای همیشه
+        // قفل می‌شود (کندل‌های قبل از ری‌استارت دیگر در دسترس نیستند و شرط `<= mcCloseBi` هیچ‌وقت برقرار نمی‌شود).
+        o["t1History"] = e.t1History.map {
+            listOf(it.bar.bi, it.bar.t, it.bar.o, it.bar.h, it.bar.l, it.bar.c, it.bar.v,
+                it.prevVol, it.startBi, it.closeBi, it.lowBi, it.highBi)
+        }
+        o["t2History"] = e.t2History.map {
+            listOf(it.bar.bi, it.bar.t, it.bar.o, it.bar.h, it.bar.l, it.bar.c, it.bar.v, it.prevVol)
+        }
         o["lastPocPx"] = e.lastPocPx; o["lastProfBars"] = e.lastProfBars
         o["lastEntryPx"] = e.lastEntryPx; o["lastSlPx"] = e.lastSlPx; o["lastTpPx"] = e.lastTpPx
         o["lastResult"] = e.lastResult
@@ -265,6 +281,25 @@ object Store {
         e.lastZoneTop = m["lastZoneTop"].asD(); e.lastZoneBot = m["lastZoneBot"].asD()
         if (m.containsKey("zoneRefH")) e.zoneRefH = m["zoneRefH"].asD()
         if (m.containsKey("zoneRefL")) e.zoneRefL = m["zoneRefL"].asD()
+        if (m.containsKey("stageFa")) e.stageFa = m["stageFa"].asS()
+        for (x in m["t1History"].asList()) {
+            val l = x.asList(); if (l.size < 12) continue
+            e.t1History.add(
+                Engine.T1Bar(
+                    Candle(l[0].asI(), l[1].asL(), l[2].asD(), l[3].asD(), l[4].asD(), l[5].asD(), l[6].asD()),
+                    l[7].asD(), l[8].asI(), l[9].asI(), l[10].asI(), l[11].asI()
+                )
+            )
+        }
+        for (x in m["t2History"].asList()) {
+            val l = x.asList(); if (l.size < 8) continue
+            e.t2History.add(
+                Engine.T2Bar(
+                    Candle(l[0].asI(), l[1].asL(), l[2].asD(), l[3].asD(), l[4].asD(), l[5].asD(), l[6].asD()),
+                    l[7].asD()
+                )
+            )
+        }
         e.lastPocPx = m["lastPocPx"].asD(); e.lastProfBars = m["lastProfBars"].asI()
         e.lastEntryPx = m["lastEntryPx"].asD(); e.lastSlPx = m["lastSlPx"].asD(); e.lastTpPx = m["lastTpPx"].asD()
         e.lastResult = m["lastResult"].asS()
@@ -449,6 +484,9 @@ object Store {
             candles.add(Candle(idx++, c.t, c.o, c.h, c.l, c.c, c.v))
         }
         val structureCandles = candleListFrom(root["structureCandles"])
+        // نقشهٔ «شمارهٔ کندل ← زمان» از همان کندل‌های بازیابی‌شده ساخته می‌شود تا مارکرهایی که
+        // بعد از ری‌استارت روی کندل‌های قبلی گذاشته می‌شوند جای درست خود را داشته باشند.
+        eng.seedBarTimes(candles)
         return Loaded(cfg, eng, broker, candles, structureCandles, root["meta"].asMap(), root["savedAt"].asL())
     }
 }

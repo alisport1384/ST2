@@ -1228,68 +1228,17 @@ class AppState {
         to.lotStep = c.lotStep; to.lostResetAtFinalTp = c.lostResetAtFinalTp
     }
 
-    /** کپی وضعیت موتورِ بازگردانی‌شده به موتور سراسری (تا ارجاع‌ها یکسان بماند) */
+    /**
+     * کپی وضعیت موتورِ بازگردانی‌شده به موتور سراسری (تا ارجاع‌ها یکسان بماند).
+     * پیاده‌سازی در خودِ موتور است ([Engine.copyStateFrom]) تا هیچ فیلدی جا نیفتد.
+     */
     private fun copyEngine(src: Engine, dst: Engine) {
-        dst.aggS.reset(); dst.aggM.reset(); dst.agg1.reset()
-        copyAgg(src.aggS, dst.aggS); copyAgg(src.aggM, dst.aggM); copyAgg(src.agg1, dst.agg1)
-        dst.structBars.clear(); dst.structBars.addAll(src.structBars)
-        dst.microS.clear(); dst.microS.addAll(src.microS)
-        dst.pins.clear(); dst.pins.addAll(src.pins)
-        dst.setups.clear(); dst.setups.addAll(src.setups)
-        dst.zones.clear(); dst.zones.addAll(src.zones)
-        dst.t1Zones.clear(); dst.t1Zones.addAll(src.t1Zones)
-        dst.t2Zones.clear(); dst.t2Zones.addAll(src.t2Zones)
-        dst.markers.clear(); dst.markers.addAll(src.markers)
-        dst.events.clear(); dst.events.addAll(src.events)
-        dst.cnt.setup = src.cnt.setup; dst.cnt.touch = src.cnt.touch; dst.cnt.mid = src.cnt.mid
-        dst.cnt.lv = src.cnt.lv; dst.cnt.hv = src.cnt.hv; dst.cnt.entry = src.cnt.entry
-        dst.cnt.done = src.cnt.done; dst.cnt.zoneCount = src.cnt.zoneCount; dst.cnt.zoneRejected = src.cnt.zoneRejected
-        dst.trend = src.trend; dst.HH = src.HH; dst.HL = src.HL; dst.LL = src.LL; dst.LH = src.LH
-        dst.tempBoxTop = src.tempBoxTop; dst.tempBoxBot = src.tempBoxBot
-        dst.hlPinLo = src.hlPinLo; dst.hlPinRef = src.hlPinRef; dst.hlPinHi = src.hlPinHi; dst.hlPinSeq = src.hlPinSeq
-        dst.hhPinHi = src.hhPinHi; dst.hhPinRef = src.hhPinRef; dst.hhPinLo = src.hhPinLo; dst.hhPinSeq = src.hhPinSeq
-        dst.lhPinHi = src.lhPinHi; dst.lhPinRef = src.lhPinRef; dst.lhPinLo = src.lhPinLo; dst.lhPinSeq = src.lhPinSeq
-        dst.llPinLo = src.llPinLo; dst.llPinRef = src.llPinRef; dst.llPinHi = src.llPinHi; dst.llPinSeq = src.llPinSeq
-        dst.seqStart = src.seqStart
-        dst.bullBU1Low = src.bullBU1Low; dst.bullBEHigh = src.bullBEHigh
-        dst.bullBU2Low = src.bullBU2Low; dst.bullBU2Bi = src.bullBU2Bi
-        dst.bearBE1High = src.bearBE1High; dst.bearBULow = src.bearBULow
-        dst.bearBE2High = src.bearBE2High; dst.bearBE2Bi = src.bearBE2Bi
-        dst.bullSetup = src.bullSetup; dst.bearSetup = src.bearSetup
-        dst.expectedReady = src.expectedReady
-        dst.lowestBUpin = src.lowestBUpin; dst.highestBE = src.highestBE
-        dst.lastBUpin = src.lastBUpin; dst.lastBEpin = src.lastBEpin
-        dst.buActive = src.buActive; dst.beActive = src.beActive
-        dst.pinSeq = src.pinSeq; dst.buSeq = src.buSeq; dst.beSeq = src.beSeq
-        dst.lastBUpinRef = src.lastBUpinRef; dst.lastBUpinHi = src.lastBUpinHi
-        dst.lastBEpinRef = src.lastBEpinRef; dst.lastBEpinLo = src.lastBEpinLo
-        dst.lastZoneTop = src.lastZoneTop; dst.lastZoneBot = src.lastZoneBot
-        dst.lastPocPx = src.lastPocPx; dst.lastProfBars = src.lastProfBars
-        dst.lastEntryPx = src.lastEntryPx; dst.lastSlPx = src.lastSlPx; dst.lastTpPx = src.lastTpPx
-        dst.lastResult = src.lastResult
-        dst.prevT1Vol = src.prevT1Vol; dst.prevChartVol = src.prevChartVol
-        dst.zoneSeq = src.zoneSeq; dst.setupSeq = src.setupSeq; dst.processed = src.processed
-        dst.curBi = src.curBi; dst.curT = src.curT
+        dst.copyStateFrom(src)
     }
 
-    private fun copyAgg(s: Agg, d: Agg) {
-        d.reset()
-        d.periods = s.periods
-        d.cur = s.cur?.let { Candle(it.bi, it.t, it.o, it.h, it.l, it.c, it.v) }
-        d.cl = s.cl?.let { Candle(it.bi, it.t, it.o, it.h, it.l, it.c, it.v) }
-        d.closedNow = false
-    }
-
+    /** نقطهٔ واحد کپی وضعیت کارگزار: خودِ کارگزار ([PaperBroker.copyStateFrom]). */
     private fun copyBroker(src: PaperBroker, dst: PaperBroker) {
-        dst.orders.clear(); dst.orders.addAll(src.orders)
-        dst.trades.clear(); dst.trades.addAll(src.trades)
-        dst.balance = src.balance; dst.equity = src.equity
-        dst.maxEquity = src.maxEquity; dst.maxDrawdown = src.maxDrawdown
-        dst.orderSeq = src.orderSeq; dst.tradeSeq = src.tradeSeq
-        dst.mm.lost = src.mm.lost; dst.mm.cmsnLost = src.mm.cmsnLost   // §۲۰
-        // v1.4.9: همهٔ سفارش‌ها/پوزیشن‌های فعال کپی شوند.
-        for (o in src.pendingOrders) dst.restorePending(o)
-        for (t in src.openTrades) dst.restoreOpen(t)
+        dst.copyStateFrom(src)
     }
 
     /** پاک کردن کامل */

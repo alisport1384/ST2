@@ -200,7 +200,6 @@ class Engine(val cfg: Settings) {
 
     var lastZoneTop = Double.NaN; var lastZoneBot = Double.NaN
     var lastPocPx = Double.NaN; var lastProfBars = 0
-    var profileOnLastS: Profile? = null
 
     var lastEntryPx = Double.NaN; var lastSlPx = Double.NaN; var lastTpPx = Double.NaN
     var lastResult = "-"
@@ -212,7 +211,6 @@ class Engine(val cfg: Settings) {
     var processed = 0
     var curBi = -1
     var curT = 0L
-    var curVol = 0.0
     var prevChartVol = Double.NaN
 
     internal data class T2Bar(val bar: Candle, val prevVol: Double)
@@ -276,15 +274,91 @@ class Engine(val cfg: Settings) {
         lastBUpinRef = Double.NaN; lastBUpinHi = Double.NaN
         lastBEpinRef = Double.NaN; lastBEpinLo = Double.NaN
         lastZoneTop = Double.NaN; lastZoneBot = Double.NaN; lastPocPx = Double.NaN; lastProfBars = 0
-        profileOnLastS = null
         lastEntryPx = Double.NaN; lastSlPx = Double.NaN; lastTpPx = Double.NaN
         lastResult = "-"; stageFa = "-"
         prevT1Vol = Double.NaN; zoneSeq = 0; setupSeq = 0
-        processed = 0; curBi = -1; curT = 0; curVol = 0.0; prevChartVol = Double.NaN
+        processed = 0; curBi = -1; curT = 0; prevChartVol = Double.NaN
         t2History.clear(); t1History.clear()
         zoneRefH = Double.NaN; zoneRefL = Double.NaN
         livePreview.clear(); liveCandle = null
         times.clear()
+    }
+
+    /**
+     * کپی **کامل** وضعیت این موتور روی [dst] (همان کاری که اپ هنگام بازیابی انجام می‌دهد).
+     *
+     * چرا این‌جا و نه در App.kt؟ چون نسخهٔ قبلی در `App.copyEngine` فهرست دستیِ فیلدها بود و
+     * هر فیلد تازه‌ای که اضافه می‌شد از قلم می‌افتاد (نمونهٔ واقعی: `t1History`/`t2History`،
+     * `times` و `zoneRefH/zoneRefL`). با یک پیاده‌سازی در خود موتور، تست واحد می‌تواند
+     * با بازتاب بررسی کند که هیچ فیلدی جا نیفتاده باشد.
+     */
+    fun copyStateFrom(src: Engine) {
+        aggS.reset(); aggM.reset(); agg1.reset()
+        copyAggInto(src.aggS, aggS); copyAggInto(src.aggM, aggM); copyAggInto(src.agg1, agg1)
+        structBars.clear(); structBars.addAll(src.structBars)
+        microS.clear(); microS.addAll(src.microS)
+        pins.clear(); pins.addAll(src.pins)
+        setups.clear(); setups.addAll(src.setups)
+        zones.clear(); zones.addAll(src.zones)
+        t1Zones.clear(); t1Zones.addAll(src.t1Zones)
+        t2Zones.clear(); t2Zones.addAll(src.t2Zones)
+        markers.clear(); markers.addAll(src.markers)
+        events.clear(); events.addAll(src.events)
+        t1History.clear(); t1History.addAll(src.t1History)
+        t2History.clear(); t2History.addAll(src.t2History)
+        times.clear(); times.putAll(src.times)
+        cnt.setup = src.cnt.setup; cnt.touch = src.cnt.touch; cnt.mid = src.cnt.mid
+        cnt.lv = src.cnt.lv; cnt.hv = src.cnt.hv; cnt.entry = src.cnt.entry
+        cnt.done = src.cnt.done; cnt.zoneCount = src.cnt.zoneCount; cnt.zoneRejected = src.cnt.zoneRejected
+        trend = src.trend; HH = src.HH; HL = src.HL; LL = src.LL; LH = src.LH
+        tempBoxTop = src.tempBoxTop; tempBoxBot = src.tempBoxBot
+        hlPinLo = src.hlPinLo; hlPinRef = src.hlPinRef; hlPinHi = src.hlPinHi; hlPinSeq = src.hlPinSeq
+        hhPinHi = src.hhPinHi; hhPinRef = src.hhPinRef; hhPinLo = src.hhPinLo; hhPinSeq = src.hhPinSeq
+        lhPinHi = src.lhPinHi; lhPinRef = src.lhPinRef; lhPinLo = src.lhPinLo; lhPinSeq = src.lhPinSeq
+        llPinLo = src.llPinLo; llPinRef = src.llPinRef; llPinHi = src.llPinHi; llPinSeq = src.llPinSeq
+        seqStart = src.seqStart
+        bullBU1Low = src.bullBU1Low; bullBEHigh = src.bullBEHigh
+        bullBU2Low = src.bullBU2Low; bullBU2Bi = src.bullBU2Bi
+        bearBE1High = src.bearBE1High; bearBULow = src.bearBULow
+        bearBE2High = src.bearBE2High; bearBE2Bi = src.bearBE2Bi
+        bullSetup = src.bullSetup; bearSetup = src.bearSetup
+        expectedReady = src.expectedReady
+        lowestBUpin = src.lowestBUpin; highestBE = src.highestBE
+        lastBUpin = src.lastBUpin; lastBEpin = src.lastBEpin
+        buActive = src.buActive; beActive = src.beActive
+        pinSeq = src.pinSeq; buSeq = src.buSeq; beSeq = src.beSeq
+        lastBUpinRef = src.lastBUpinRef; lastBUpinHi = src.lastBUpinHi
+        lastBEpinRef = src.lastBEpinRef; lastBEpinLo = src.lastBEpinLo
+        lastZoneTop = src.lastZoneTop; lastZoneBot = src.lastZoneBot
+        zoneRefH = src.zoneRefH; zoneRefL = src.zoneRefL
+        lastPocPx = src.lastPocPx; lastProfBars = src.lastProfBars
+        lastEntryPx = src.lastEntryPx; lastSlPx = src.lastSlPx; lastTpPx = src.lastTpPx
+        lastResult = src.lastResult; stageFa = src.stageFa
+        prevT1Vol = src.prevT1Vol; prevChartVol = src.prevChartVol
+        zoneSeq = src.zoneSeq; setupSeq = src.setupSeq; processed = src.processed
+        curBi = src.curBi; curT = src.curT
+    }
+
+    private fun copyAggInto(s: Agg, d: Agg) {
+        d.reset()
+        d.periods = s.periods
+        d.cur = s.cur?.let { Candle(it.bi, it.t, it.o, it.h, it.l, it.c, it.v) }
+        d.cl = s.cl?.let { Candle(it.bi, it.t, it.o, it.h, it.l, it.c, it.v) }
+        d.closedNow = false
+    }
+
+    /**
+     * بازسازی نقشهٔ «شمارهٔ کندل چارت ← زمان» از فهرست کندل‌ها.
+     * اپ وضعیت ذخیره‌شده را دوباره پردازش نمی‌کند، پس بدون این کار `times` بعد از هر
+     * ری‌استارت خالی می‌ماند و مارکرهایی که روی کندل‌های قدیمی گذاشته می‌شوند با زمان
+     * اشتباه (curT) ثبت می‌شوند — یعنی روی محور افقی چارت جای غلط.
+     */
+    internal fun seedBarTimes(cs: List<Candle>) {
+        times.clear()
+        for (c in cs) {
+            times[c.bi] = c.t
+            if (times.size > 200_000) { times.clear(); times[c.bi] = c.t }
+        }
     }
 
     // ── ورود داده ──────────────────────────────────────────────────────────────
@@ -294,10 +368,15 @@ class Engine(val cfg: Settings) {
      */
     fun feed(candles: List<Candle>, lastIsClosed: Boolean = false) {
         if (candles.isEmpty()) return
-        val lastIdx = candles.size - 1
-        var i = processed
+        // پشتیبانی از «برش» فهرست: شمارهٔ کندل مبنا = bi نخستین کندل.
+        // ⚠ پیش‌تر feed فرض می‌کرد فهرست از صفر شروع می‌شود؛ دادن یک برش
+        // (مثلاً `candles.subList(split, size)`) **بی‌صدا هیچ کاری نمی‌کرد** چون
+        // `lastIdx` کوچک‌تر از `processed` می‌شد و حلقه یک بار هم اجرا نمی‌شد.
+        val base = candles.first().bi
+        val lastIdx = base + candles.size - 1
+        var i = maxOf(processed, base)
         while (i <= lastIdx) {
-            val cd = candles[i]
+            val cd = candles[i - base]
             val isLast = i == lastIdx
             if (MarketHours.isClosed(cd.t)) {
                 // تعطیلات شنبه و یکشنبه (ساعت استاندارد بازار): کندل آخر هفته هیچ تصمیمی
@@ -305,10 +384,10 @@ class Engine(val cfg: Settings) {
                 // سشن یکشنبه‌شب (از ۲۲:۰۰ UTC) باز است و جزئی از دوشنبه حساب می‌شود.
                 processed = i + 1
             } else if (!isLast || lastIsClosed) {
-                processClosed(cd, i, candles.getOrNull(i - 1))
+                processClosed(cd, i, candles.getOrNull(i - 1 - base))
                 processed = i + 1
             } else {
-                updateLive(cd, i, candles.getOrNull(i - 1))
+                updateLive(cd, i, candles.getOrNull(i - 1 - base))
             }
             i++
         }
@@ -353,7 +432,6 @@ class Engine(val cfg: Settings) {
             times[bi] = bar.t
             curBi = bi
             curT = bar.t + cfg.tfS * 1000L
-            curVol = bar.v
             structureEngine(bar, buildZones = false)
         }
         return history.size
@@ -372,7 +450,7 @@ class Engine(val cfg: Settings) {
      * حالا تجمیع فقط در [processClosed] و فقط با کندل بسته انجام می‌شود (بدون ریپینت).
      */
     private fun updateLive(cd: Candle, i: Int, prev: Candle?) {
-        curBi = i; curT = cd.t; curVol = cd.v; liveCandle = cd
+        curBi = i; curT = cd.t; liveCandle = cd
         times[i] = cd.t
         livePreview.clear()
         prevChartVol = prev?.v ?: Double.NaN
@@ -402,7 +480,7 @@ class Engine(val cfg: Settings) {
 
     // ── پردازش کندل بسته ───────────────────────────────────────────────────────
     private fun processClosed(cd: Candle, i: Int, prev: Candle?) {
-        curBi = i; curT = cd.t; curVol = cd.v
+        curBi = i; curT = cd.t
         times[i] = cd.t
         if (times.size > 200000) times.clear()
         val isNewS = Tf.isNewBarStart(tfS(), cd.t, prev?.t)
@@ -952,7 +1030,6 @@ class Engine(val cfg: Settings) {
         val zoneDir = if (noTrend) (if (bullC) 1 else if (bearC) -1 else 0) else trend
         val dirOK = if (noTrend) zoneDir != 0 else ((trend == 1 && bullC) || (trend == -1 && bearC))
         val prof = VolumeProfile.build(microS, cfg.vpRows, cfg.vpVA, cfg.distMode, cfg.vpSmooth, cfg.mintick)
-        profileOnLastS = prof
         lastProfBars = microS.size
         if (cfg.showPocVA && !prof.poc.isNaN()) lastPocPx = prof.poc
         if (insideRef) {

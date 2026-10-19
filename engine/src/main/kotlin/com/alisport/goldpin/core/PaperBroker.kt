@@ -225,6 +225,26 @@ class PaperBroker(private val cfg: Settings) {
     fun restorePending(o: Order?) { if (o != null && !pendings.any { it.id == o.id }) pendings.add(o) }
     fun restoreOpen(t: Trade?) { if (t != null && t.open && !opens.any { it.id == t.id }) opens.add(t) }
 
+    /**
+     * کپی **کامل** وضعیت کارگزار روی [dst] — همان کاری که اپ هنگام بازیابی انجام می‌دهد.
+     *
+     * چرا در خود کارگزار: نسخهٔ قبلی در `App.copyBroker` بود و `mm.naked` (سرمایهٔ پایهٔ §۲۰)
+     * را جا می‌انداخت؛ یعنی بعد از هر ری‌استارت در مود Mixed آستانهٔ دوبرابر شدن سرمایه از نو
+     * از سرمایهٔ اولیه حساب می‌شد و حجم/MinLot اشتباه می‌شد.
+     */
+    fun copyStateFrom(src: PaperBroker) {
+        orders.clear(); orders.addAll(src.orders)
+        trades.clear(); trades.addAll(src.trades)
+        pendings.clear(); pendings.addAll(src.pendings)
+        opens.clear(); opens.addAll(src.opens)
+        balance = src.balance; equity = src.equity
+        maxEquity = src.maxEquity; maxDrawdown = src.maxDrawdown
+        orderSeq = src.orderSeq; tradeSeq = src.tradeSeq
+        lastError = src.lastError
+        mm.lost = src.mm.lost; mm.cmsnLost = src.mm.cmsnLost
+        mm.restoreNaked(src.mm.nakedCapital())
+    }
+
     fun cancelPendingManually(t: Long, bi: Int) {
         ArrayList(pendings).forEach { cancel(it, "لغو دستی توسط کاربر", t, bi, OrderStatus.CANCELLED_MANUAL) }
     }
