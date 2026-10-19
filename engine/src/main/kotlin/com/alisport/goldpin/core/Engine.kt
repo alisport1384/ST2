@@ -724,7 +724,10 @@ class Engine(val cfg: Settings) {
                     removeStructLabel("HH", oldHH); removeStructLabel("HL", oldHL)
                     HH = Double.NaN; HL = Double.NaN; LL = Double.NaN; LH = Double.NaN
                     clearBUpin()
-                    if (!hhPinHi.isNaN()) {
+                    // ⚠ اگر در همین کندل یک pinBE تازه Ready شده باشد، همان پین آخر (و پایهٔ LH
+                    // بعدی) است؛ بازنویسی آن با پینِ قدیمیِ HH توالی را می‌شکند و برچسب LH را
+                    // روی قیمت غلط می‌نشاند. فقط وقتی هیچ pinBE زنده‌ای نمانده، HH به pinBE برمی‌گردد.
+                    if (!beActive && !hhPinHi.isNaN()) {
                         lastBEpin = hhPinHi; lastBEpinRef = hhPinRef; lastBEpinLo = hhPinLo
                         beActive = true; beSeq = ++pinSeq
                     }
@@ -809,7 +812,9 @@ class Engine(val cfg: Settings) {
                     removeStructLabel("LL", oldLL); removeStructLabel("LH", oldLH)
                     HH = Double.NaN; HL = Double.NaN; LL = Double.NaN; LH = Double.NaN
                     clearBEpin()
-                    if (!llPinLo.isNaN()) {
+                    // قرینهٔ حالت بالا: اگر در همین کندل یک pinBU تازه Ready شده، همان پین آخر
+                    // (و پایهٔ HL بعدی) می‌ماند و نباید با پینِ قدیمیِ LL بازنویسی شود.
+                    if (!buActive && !llPinLo.isNaN()) {
                         lastBUpin = llPinLo; lastBUpinRef = llPinRef; lastBUpinHi = llPinHi
                         buActive = true; buSeq = ++pinSeq
                     }
@@ -2197,6 +2202,9 @@ class Engine(val cfg: Settings) {
     }
 
     private fun addMarkerAtTime(t: Long, bi: Int, price: Double, kind: Int, text: String) {
+        // هر رخداد فقط یک برچسب دارد؛ تکرارِ همان (نوع، قیمت، کندل، متن) دوباره اضافه نمی‌شود
+        // تا روی چارت دو مارکر هم‌مکان و برچسب‌های روی‌هم‌افتاده دیده نشود.
+        if (markers.any { it.kind == kind && it.bi == bi && it.t == t && it.text == text && it.price == price }) return
         markers.add(Marker(t, bi, price, kind, text))
         // ثبت هر پین تازه، فرصت دور ریختن مارکر پین هم‌جهتِ مردهٔ قبلی است (§18-4).
         if (kind == MarkerKind.PIN_BU || kind == MarkerKind.PIN_BE) prunePinMarkerAlternation()

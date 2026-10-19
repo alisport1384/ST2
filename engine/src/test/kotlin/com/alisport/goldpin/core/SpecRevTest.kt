@@ -445,6 +445,51 @@ class SpecRevTest {
     }
 
     @Test
+    fun `trend rotation keeps the pin registered in the same candle so LH and LL sit on real pins`() {
+        // §۴-۱ «چرخش روند» + §۱۸-۱ «توالی»: اگر در همان کندلی که روند از صعودی به نزولی
+        // می‌چرخد یک pinBE تازه Ready شود، همان پین باید آخرین پین بماند (پایهٔ LH بعدی).
+        // پیش‌تر این پین با پینِ قدیمیِ HH بازنویسی می‌شد و برچسب LH روی قیمت غلط می‌نشست.
+        val cfg = Settings().apply { tfS = Tf.M1; tfM = Tf.M1; tf1 = Tf.M1; tf2 = Tf.M1 }
+        val e = Engine(cfg)
+        e.trend = 1
+        e.HH = 120.0; e.HL = 111.0
+        e.hhPinHi = 120.0; e.hhPinRef = 116.0; e.hhPinLo = 114.0; e.hhPinSeq = 2
+        e.hlPinLo = 100.0; e.hlPinRef = 96.0; e.hlPinHi = 103.0; e.hlPinSeq = 1
+        e.lastBEpin = 120.0; e.lastBEpinRef = 116.0; e.lastBEpinLo = 114.0; e.beActive = true; e.beSeq = 2
+        e.lastBUpin = 100.0; e.lastBUpinRef = 96.0; e.lastBUpinHi = 103.0; e.buActive = true; e.buSeq = 1
+        e.expectedReady = -1
+        // کاندید تازهٔ pinBE: سطح تایید = کف کندل مهم = 112 ، سطح ابطال = 114
+        e.pins.add(Pin(-1, 118.0, 112.0, 1, 1, 114.0, 0))
+
+        val t0 = 1_699_948_800_000L // سه‌شنبه 2023-11-14 ساعت 08:00 UTC
+        val bars = listOf(
+            Candle(0, t0, 112.0, 115.0, 111.0, 114.0, 100.0),
+            Candle(1, t0 + 60_000L, 114.0, 118.0, 113.0, 116.0, 90.0),   // کندل مهم تازه
+            Candle(2, t0 + 120_000L, 113.0, 113.5, 109.0, 110.0, 120.0), // ReadyBE (کلوز ۱۱۰ < ۱۱۲) و هم‌زمان کلوز زیر HL (۱۱۱)
+            Candle(3, t0 + 180_000L, 110.0, 110.5, 109.0, 110.2, 100.0), // بستن کندل ۲
+            Candle(4, t0 + 240_000L, 107.0, 109.5, 106.0, 109.0, 110.0), // ReadyBU در روند نزولی ⇒ LL/LH
+            Candle(5, t0 + 300_000L, 109.0, 109.5, 108.5, 109.2, 100.0)
+        )
+        // تا کندل ۳ (چرخش روند) پردازش می‌کنیم؛ سپس کاندید pinBU را که در کندل‌های بعد Ready می‌شود می‌دهیم.
+        e.feed(bars.subList(0, 4), lastIsClosed = true)
+        assertEquals(1, e.expectedReady, "بعد از pinBE طبق توالی، پین بعدی pinBU است")
+        assertTrue(e.buSeq == -1 || !e.buActive, "با چرخش روند، pinBU قبلی باید باطل شده باشد")
+        e.pins.add(Pin(1, 108.0, 104.0, 3, 3, 103.0, 0))
+        e.feed(bars, lastIsClosed = true)
+
+        assertEquals(-1, e.trend, "کلوز زیر HL باید روند را به نزولی بچرخاند")
+        assertTrue(e.HH.isNaN() && e.HL.isNaN(), "برچسب‌های HH/HL باید پاک شوند")
+        assertTrue(e.beActive, "pinBE تازه باید زنده بماند")
+        assertEquals(118.0, e.lastBEpin, 1e-9, "پینِ تازه‌Ready (۱۱۸) باید آخرین pinBE بماند، نه پینِ قدیمیِ HH (۱۲۰)")
+        assertEquals(-1, e.expectedReady, "پس از Ready شدن pinBU، پین بعدی باید pinBE باشد")
+        assertTrue(e.markers.any { it.kind == MarkerKind.PIN_BE && it.price == 118.0 },
+            "مارکر کندل مهمِ تازه باید روی چارت بماند")
+
+        assertEquals(104.0, e.LL, 1e-9, "اولین pinBU در روند نزولی باید LL شود")
+        assertEquals(118.0, e.LH, 1e-9, "LH باید سقف همان pinBE تازه باشد (۱۱۸)، نه HH قدیمی")
+    }
+
+    @Test
     fun `trend HH break keeps pinBE and HL reverts to pinBU, LL break keeps pinBU and LH reverts to pinBE`() {
         fun cfg() = Settings().apply { tfS = Tf.M1; tfM = Tf.M1; tf1 = Tf.M1; tf2 = Tf.M1 }
         // ـ روند صعودی: کلوز بالای HH ⇒ HH→pinBE (حذف نمی‌شود)، HL→pinBU، پین بعدی pinBU است
