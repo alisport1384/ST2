@@ -13,7 +13,9 @@ class SpecRevTest {
         assertEquals(500.0, c.maxLeverage)
         assertEquals(1.0, c.entryBufTicks)
         assertEquals(1, c.maxSetups)
-        assertEquals(10.0, c.maxSlUnits, "§18-31 ویرایش نهایی: N پیش‌فرض ۱۰ است")
+        assertEquals(3.0, c.maxSlUnits, "§18-31 ویرایش جدید: N پیش‌فرض ۳ است")
+        assertEquals(0, c.vpSmooth, "§۴-۵ ویرایش جدید: هموارسازی پیش‌فرض ۰")
+        assertEquals(VolumeProfile.DIST_UNIFORM, c.distMode, "§۴-۵ ویرایش جدید: مدل پخش حجم پیش‌فرض یکنواخت")
 
         val mmCfg = Settings().apply { mmMode = MoneyMode.MIXED; initialEquity = 1000.0 }
         val mm = MoneyManager(mmCfg)
@@ -48,12 +50,13 @@ class SpecRevTest {
         assertEquals(500.0, l.maxLeverage); assertEquals(1.0, l.entryBufTicks); assertEquals(1, l.maxSetups)
         assertEquals(10.0, Store.load(j).cfg.maxLeverage)
 
-        // مهاجرت rev2: مقدار قدیمی پیش‌فرض N=3 به پیش‌فرض جدید N=10؛ مقدار سفارشی حفظ شود.
+        // مهاجرت rev2 → rev4: مقدار پیش‌فرض قدیمی N=3 در نسخهٔ ۳ به ۱۰ رفت و در نسخهٔ ۴
+        // (سند جدید) دوباره ۳ است؛ نتیجهٔ نهایی باید پیش‌فرض سند فعلی باشد.
         val prevN = Settings().apply { maxSlUnits = 3.0 }
         val prevEngine = Engine(prevN); val prevBroker = PaperBroker(prevN)
         val prevJson = Store.save(prevN, prevEngine, prevBroker, emptyList())
             .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":2")
-        assertEquals(10.0, Store.load(prevJson).cfg.maxSlUnits)
+        assertEquals(3.0, Store.load(prevJson).cfg.maxSlUnits)
         prevN.maxSlUnits = 7.0
         val customJson = Store.save(prevN, Engine(prevN), PaperBroker(prevN), emptyList())
             .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":2")
@@ -453,10 +456,13 @@ class SpecRevTest {
         // مساوی‌بودن کلوز با oo کافی نیست؛ مقایسهٔ سند اکید است.
         b.onBar(Candle(2, t0 + 120_000L, 2011.0, 2012.0, 2009.0, 2010.01, 100.0))
         assertTrue(tr.slAdj.isNaN(), "کلوز مساوی oo نباید انتقال را فعال کند")
-        // کندل وارد باکس HV می‌شود و سایه‌اش زیر oo می‌رود، ولی کلوز بالای oo است.
-        // سند نهایی فقط کلوز بالای oo را می‌خواهد؛ شرط خروج کامل از باکس HV حذف شده است.
+        // §4-9 ویرایش جدید: کفِ کندل زیر oo می‌رود (لمس/عبور) ⇒ «حتی یک تیک لمس هم نبود» برقرار نیست
+        // و همچنین کلوز داخل باکس HV است ⇒ انتقال نباید انجام شود.
         b.onBar(Candle(3, t0 + 180_000L, 2011.0, 2012.0, 2009.0, 2011.5, 100.0))
-        assertEquals(2010.01, tr.slAdj, 1e-9, "کلوز بالای oo باید حد ضرر را دقیقاً به oo منتقل کند (§4-9)")
+        assertTrue(tr.slAdj.isNaN(), "کندلی که کفش زیر oo است یا داخل باکس HV بسته می‌شود انتقال نمی‌دهد (§4-9)")
+        // کندل بعدی: بیرون از باکس HV (کلوز بالای ۲۰۱۰) و کل کندل بالاتر از oo (کف ۲۰۱۰٫۰۲ > ۲۰۱۰٫۰۱)
+        b.onBar(Candle(4, t0 + 240_000L, 2011.0, 2013.0, 2010.02, 2012.5, 100.0))
+        assertEquals(2010.01, tr.slAdj, 1e-9, "کل کندل بالاتر از oo و بیرون از باکس HV ⇒ انتقال به oo (§4-9)")
         // ذخیره/بازیابی: لبه‌های HV و slAdj باید برگردند
         val e = Engine(cfg)
         val loaded = Store.load(Store.save(cfg, e, b, emptyList()))
@@ -464,7 +470,7 @@ class SpecRevTest {
         assertEquals(2010.0, lt.hvTop, 1e-9); assertEquals(2007.0, lt.hvBot, 1e-9)
         assertEquals(2010.01, lt.slAdj, 1e-9)
         // برگشت قیمت به oo ⇒ خروج سر‌به‌سر (بدون سود/زیان قیمتی)
-        b.onBar(Candle(4, t0 + 240_000L, 2013.0, 2013.5, 2010.0, 2011.0, 100.0))
+        b.onBar(Candle(5, t0 + 300_000L, 2013.0, 2013.5, 2010.0, 2011.0, 100.0))
         assertFalse(tr.open)
         assertEquals("خروج سر‌به‌سر", tr.reason)
         assertEquals(0.0, tr.grossPnl(), 1e-9)

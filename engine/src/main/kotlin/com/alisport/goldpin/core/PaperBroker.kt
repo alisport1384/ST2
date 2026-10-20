@@ -348,20 +348,25 @@ class PaperBroker(private val cfg: Settings) {
             closeAll(t, cfg.exitFill(bull, slLvl, isBe), cd.t, cd.bi, if (isBe) "خروج سر‌به‌سر" else "حد ضرر")
             return
         }
-        // §4-9 (ویرایش نهایی سند — «خیلی مهم» ـ سطح oo):
-        //   خرید: «اگر بعد از پر شدن و باز شدن سفارش یک کندل تریگر۲ خارج از سطح oo خرید بسته شد و
-        //          کاملاً بالاتر از سطح oo بسته شده بود، حد ضرر به سطح oo خرید منتقل می‌شود.»
-        //   فروش: قرینه (کلوز کاملاً پایین‌تر از سطح oo).
+        // §4-9 (ویرایش جدید سند — «خیلی مهم»):
+        //   خرید: «اگر بعد از پر شدن سفارش یک کندل تریگر۲ **خارج از باکس HV** بسته شد به طوری که
+        //          سقف، کف، باز و بسته (high, low, close, open) به طور کامل بالاتر از سطح oo بود و
+        //          حتی با سطح oo یک تیک لمس نداشت، حد ضرر به سطح oo خرید منتقل می‌شود.»
+        //   فروش: قرینه (کلوز بیرون و پایین باکس، و کل کندل کاملاً پایین‌تر از oo).
         // سطح oo = رقم دقیقی که اوردر در بروکر باز شده است (§18-24) = قیمت ورود ثبت‌شدهٔ معامله.
-        // معیار فقط **کلوز** کندل بستهٔ تریگر۲ است (§3)؛ باکس HV شرط نیست و کندل ورود مشمول نیست.
-        // انتقال فقط یک‌بار و فقط وقتی انجام می‌شود که همین کندل حد ضررِ در جریان را نزده باشد.
+        // سه شرط با هم: (۱) کلوز بیرون از باکس HV در جهت معامله، (۲) کل کندل آن‌سوی oo
+        // (برای خرید low > oo ⇒ open/high/close هم بالاترند)، (۳) هیچ لمسی به oo نباشد.
         if (!sameEntryBar && !t.be && t.slAdj.isNaN()) {
             val oo = t.entry
-            val moved = if (bull) cd.c > oo else cd.c < oo
+            val haveBox = !t.hvTop.isNaN() && !t.hvBot.isNaN()
+            val closedOutsideBox = if (!haveBox) true
+                else if (bull) cd.c > t.hvTop else cd.c < t.hvBot
+            val wholeBarBeyond = if (bull) cd.l > oo else cd.h < oo
+            val moved = closedOutsideBox && wholeBarBeyond
             if (moved) {
                 t.slAdj = oo
-                lg("TRADE", "کندل تریگر۲ کاملاً آن‌سوی سطح oo بسته شد → حد ضرر به سطح oo منتقل شد · معامله #${t.id}",
-                    "oo=${fmt(oo)} close=${fmt(cd.c)} hv=${fmt(t.hvBot)}-${fmt(t.hvTop)} bar=${cd.bi}")
+                lg("TRADE", "کندل تریگر۲ بیرون از باکس HV و کاملاً آن‌سوی سطح oo بسته شد → حد ضرر به سطح oo منتقل شد · معامله #${t.id}",
+                    "oo=${fmt(oo)} o=${fmt(cd.o)} h=${fmt(cd.h)} l=${fmt(cd.l)} c=${fmt(cd.c)} hv=${fmt(t.hvBot)}-${fmt(t.hvTop)} bar=${cd.bi}")
                 alarm(AlertKind.BE, "حد ضرر به سطح oo منتقل شد",
                     "معامله #${t.id} · سطح oo ${fmt(oo)}")
             }

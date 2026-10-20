@@ -33,10 +33,10 @@ class SlLimitAndPinAlternationTest {
         assertTrue(b.lastError?.contains("18-31") == true, "lastError=${b.lastError}")
         assertEquals(0, b.pendingOrders.size)
 
-        // پیش‌فرض سند ویرایش نهایی N=10 است؛ مثال با فاصلهٔ 5 باید پذیرفته شود.
-        assertEquals(10.0, Settings().maxSlUnits)
+        // پیش‌فرض سند در ویرایش جدید N=3 است؛ همان مثال با فاصلهٔ 5 باید رد شود.
+        assertEquals(3.0, Settings().maxSlUnits)
         val bDefault = PaperBroker(Settings())
-        assertTrue(bDefault.registerLimit(sDoc, Candle(0, t, 4174.0, 4175.0, 4173.5, 4174.5, 100.0)))
+        assertFalse(bDefault.registerLimit(sDoc, Candle(0, t, 4174.0, 4175.0, 4173.5, 4174.5, 100.0)))
 
         // دقیقاً برابر N مجاز است («بیشتر از N» باطل است) — اینجا N=3 را صریحاً تنظیم می‌کنیم.
         val b2 = PaperBroker(Settings().apply { maxSlUnits = 3.0 })

@@ -7,7 +7,7 @@ package com.alisport.goldpin.core
 // ═══════════════════════════════════════════════════════════════════════════════
 object Store {
     /** نسخهٔ هم‌ترازی تنظیمات با سند؛ فایل‌های با مقدار کمتر هنگام بارگذاری به پیش‌فرض‌های سند مهاجرت می‌کنند. */
-    const val SPEC_REV = 3
+    const val SPEC_REV = 4
 
 
     const val FORMAT = 3
@@ -139,6 +139,14 @@ object Store {
         // مقادیر سفارشی دیگر حفظ می‌شوند.
         if (savedSpecRev < 3 && (!m.containsKey("maxSlUnits") || m["maxSlUnits"].asD() == 3.0)) {
             c.maxSlUnits = 10.0
+        }
+        // specRev 4 (ویرایش جدید سند): پیش‌فرض‌های §۴-۵ و §۱۸-۳۱ عوض شدند —
+        // «هموارسازی ۰» ، «مدل پخش حجم یکنواخت» و «N = ۳ واحد». فقط وقتی مقدار ذخیره‌شده
+        // دقیقاً همان پیش‌فرض قدیمی باشد مهاجرت می‌کند؛ عدد سفارشی کاربر دست نمی‌خورد.
+        if (savedSpecRev < 4) {
+            if (c.vpSmooth == 1) c.vpSmooth = 0
+            if (c.distMode == VolumeProfile.DIST_TRI_CLOSE) c.distMode = VolumeProfile.DIST_UNIFORM
+            if (c.maxSlUnits == 10.0) c.maxSlUnits = 3.0
         }
         return c
     }

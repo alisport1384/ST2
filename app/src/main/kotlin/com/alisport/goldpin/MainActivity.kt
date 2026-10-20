@@ -1629,8 +1629,18 @@ class MainActivity : Activity() {
         add("قیمت ورود", Fa.n(t.entry))
         add("حجم", "${Fa.n(t.qty, 3)} اونس")
         add("حد ضرر اولیه", Fa.n(t.sl0))
-        add("TP1 / TP2", "${Fa.n(t.tp1)} / ${Fa.n(t.tp2)}")
-        add("حد سود نهایی (۱٫۲۷۲)", Fa.n(t.tpX))
+        // §18-33 سند (ویرایش جدید): در «همهٔ» مودها TP1 و TP2 و TPX باید با **عدد و نتیجه** نشان داده شوند.
+        fun tpResult(kind: String): String {
+            val f = t.fills.firstOrNull { it.kind == kind }
+            return if (f != null) "✔ لمس شد — ${Fa.n(f.qty, 2)} @ ${Fa.n(f.price)} · ${Fa.signed(f.pnl)} دلار"
+                   else "— لمس نشد"
+        }
+        add("TP1 (۰٫۳۸۲ فیبو) · ${Fa.n(t.tp1)}", tpResult("TP1"),
+            if (t.fills.any { it.kind == "TP1" }) Palette.up else Palette.dim)
+        add("TP2 (۰٫۵ فیبو) · ${Fa.n(t.tp2)}", tpResult("TP2"),
+            if (t.fills.any { it.kind == "TP2" }) Palette.up else Palette.dim)
+        add("TPX (۱٫۲۷۲ فیبو) · ${Fa.n(t.tpX)}", tpResult("TPX"),
+            if (t.fills.any { it.kind == "TPX" }) Palette.up else Palette.dim)
         add("ناحیهٔ ساختار", "${Fa.n(t.zoneBot)} تا ${Fa.n(t.zoneTop)}")
         if (!t.open) {
             add("زمان خروج", Fa.jalali(t.exitT ?: 0))

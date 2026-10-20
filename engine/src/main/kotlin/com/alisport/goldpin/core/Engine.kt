@@ -23,8 +23,10 @@ class Settings {
 
     var vpRows: Int = 24
     var vpVA: Double = 10.0
-    var vpSmooth: Int = 1
-    var distMode: Int = VolumeProfile.DIST_TRI_CLOSE
+    /** §۴-۵ سند (ویرایش جدید): هموارسازی پیش‌فرض **۰** (بازهٔ مجاز ۰ تا ۳). */
+    var vpSmooth: Int = 0
+    /** §۴-۵ سند (ویرایش جدید): مدل پیش‌فرض پخش حجم «یکنواخت» است. */
+    var distMode: Int = VolumeProfile.DIST_UNIFORM
     var minZoneRows: Int = 1
     var drawZones: Boolean = true
     var showRejectedZones: Boolean = true
@@ -88,9 +90,9 @@ class Settings {
      * §18-31 سند: سفارش‌هایی که فاصلهٔ حد ضررشان از سطح سفارش بیشتر از N است ثبت نمی‌شوند
      * (سفارش باطل است؛ علت: SL>N). HV و ستاپ سر جایشان می‌مانند و ستاپ تا پر/منقضی/باطل‌شدن
      * HV ادامه دارد، ولی روی آن HV سفارشی ثبت نمی‌شود و در بک‌تست هم سفارشی حساب نمی‌شود.
-     * N در تنظیمات قابل تغییر است؛ **پیش‌فرض سند: ۱۰ واحد قیمت** (§18-31 ویرایش نهایی).
+     * N در تنظیمات قابل تغییر است؛ **پیش‌فرض سند: ۳ واحد قیمت** (§18-31 ویرایش جدید).
      */
-    var maxSlUnits: Double = 10.0
+    var maxSlUnits: Double = 3.0
 
     var useRiskPct: Boolean = true
     var riskPct: Double = 1.0
@@ -455,8 +457,8 @@ class Engine(val cfg: Settings) {
         }
         if (aggM.closedNow) middleEngine(aggM.cl!!)
         if (aggS.closedNow) {
-            // §4-8 / §18-14 / §18-21: پس از بسته شدن کندل ساختار (و پس از بررسی آخرین کندل میانی آن در middleEngine):
-            //  • هر ناحیهٔ ساختاری که توسط کندلی دیگر در تایم‌فریم ساختار لمس شده باشد باطل (CONSUMED) می‌شود (§18-21)؛
+            // §4-5 / §18-14: پس از بسته شدن کندل ساختار (و پس از بررسی آخرین کندل میانی آن در middleEngine):
+            //  • ناحیهٔ ساختاری که لمس شده و یک کندل ساختار کامل از لمس گذشته باشد مصرف‌شده (CONSUMED) می‌شود؛
             //  • ستاپ آن تا زمانی که تایید میانی باطل نشده فعال می‌ماند (§18-14).
             val it2 = setups.iterator()
             while (it2.hasNext()) {
@@ -734,7 +736,10 @@ class Engine(val cfg: Settings) {
                     removeStructLabel("HH", oldHH); removeStructLabel("HL", oldHL)
                     HH = Double.NaN; HL = Double.NaN; LL = Double.NaN; LH = Double.NaN
                     clearBUpin()
-                    if (!hhPinHi.isNaN()) {
+                    // §4-1 (ویرایش جدید): اگر در همین کندل ReadyBE/pinBE تازه تایید شده باشد،
+                    // همان پین فعال می‌ماند («هم ReadyBE و هم pinBE تایید است»)؛ بازگرداندن پین
+                    // قدیمیِ HH آن را دور می‌ریخت.
+                    if (!hhPinHi.isNaN() && !readyBeNow) {
                         lastBEpin = hhPinHi; lastBEpinRef = hhPinRef; lastBEpinLo = hhPinLo
                         beActive = true; beSeq = ++pinSeq
                     }
@@ -819,7 +824,8 @@ class Engine(val cfg: Settings) {
                     removeStructLabel("LL", oldLL); removeStructLabel("LH", oldLH)
                     HH = Double.NaN; HL = Double.NaN; LL = Double.NaN; LH = Double.NaN
                     clearBEpin()
-                    if (!llPinLo.isNaN()) {
+                    // قرینهٔ حالت بالا: ReadyBU/pinBU تازه‌ی همین کندل حفظ می‌شود.
+                    if (!llPinLo.isNaN() && !readyBuNow) {
                         lastBUpin = llPinLo; lastBUpinRef = llPinRef; lastBUpinHi = llPinHi
                         buActive = true; buSeq = ++pinSeq
                     }
@@ -1228,6 +1234,25 @@ class Engine(val cfg: Settings) {
         val mcCloseBi = maxOf(mc.bi, curBi - 1)
         for (s in setups) {
             if (s.stage < 1 || s.stage >= 7) continue
+            // §4-8 (ویرایش جدید سند): «لغو سفارش معلق: اگر ستاپ قبل از پر شدن باطل شود (شکست ناحیهٔ
+            // ساختار، تغییر روند)» — ابطال تایید میانی دیگر در فهرست لغو نیست. پس وقتی سفارش
+            // مسلح شده (stage=6)، زنجیرهٔ LV/HV و سفارش دست‌نخورده می‌مانند و فقط تایید میانی پاک می‌شود.
+            if (s.stage == 6) {
+                val brokenArmed = if (cfg.midInvalidClose) {
+                    if (s.dir == 1) mc.c < s.midRef else mc.c > s.midRef
+                } else {
+                    if (s.dir == 1) mc.l < s.midRef else mc.h > s.midRef
+                }
+                if (!s.midRef.isNaN() && brokenArmed) {
+                    val old = s.midRef
+                    s.midRef = Double.NaN; s.midBi = -1; s.midT = 0L; s.markBi = -1
+                    clearSetupFib(s)
+                    addMarker(mc.bi, old, 10, "تایید میانی باطل شد (سفارش مسلح پابرجاست)")
+                    lg("ENGINE", "تایید میانی باطل شد — سفارش مسلح لغو نشد (§4-8 سند) · ستاپ #${s.id}",
+                        "سطح قبلی=${f2(old)} bar=${mc.bi}")
+                }
+                continue
+            }
             if (s.midRef.isNaN() && (s.touchMidStart <= 0L || mc.t >= s.touchMidStart)) {
                 // ✔ تایید میانی
                 s.midRef = if (s.dir == 1) mc.l else mc.h
@@ -1257,11 +1282,9 @@ class Engine(val cfg: Settings) {
                 }
                 if (broken) {
                     val old = s.midRef
-                    //  ابطال میانی در هر مرحله‌ای (۱..۶) تایید را باطل می‌کند؛
-                    //  اگر ستاپ قبلاً مسلح شده بود (stage=6)، سفارش معلق هم لغو می‌شود —
-                    //  در غیر این‌صورت سفارش یتیم می‌ماند و ممکن است در کندل بعد پر شود
-                    //  در حالی که موتور دیگر آن ستاپ را نمی‌شناسد.
-                    if (s.stage == 6) broker?.onSetupInvalidated(s, curT, curBi)
+                    //  ابطال میانی تایید را باطل می‌کند. اگر ستاپ مسلح شده باشد (stage=6) این
+                    //  شاخه اصلاً اجرا نمی‌شود (بالای حلقه) — سند ۴-۸ لغو سفارش مسلح را فقط با
+                    //  شکست ناحیهٔ ساختار، تغییر روند، ابطال/مصرف LV و انقضا می‌پذیرد.
                     closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
                     closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
                     s.midRef = Double.NaN; s.midBi = -1; s.midT = 0L; s.markBi = -1
