@@ -11,8 +11,8 @@ android {
         applicationId = "com.alisport.goldpin"
         minSdk = 24
         targetSdk = 34
-        versionCode = 43
-        versionName = "1.4.30"
+        versionCode = 44
+        versionName = "1.4.31"
         resourceConfigurations += listOf("fa", "en")
     }
 

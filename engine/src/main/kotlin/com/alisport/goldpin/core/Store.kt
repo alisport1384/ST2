@@ -7,7 +7,7 @@ package com.alisport.goldpin.core
 // ═══════════════════════════════════════════════════════════════════════════════
 object Store {
     /** نسخهٔ هم‌ترازی تنظیمات با سند؛ فایل‌های با مقدار کمتر هنگام بارگذاری به پیش‌فرض‌های سند مهاجرت می‌کنند. */
-    const val SPEC_REV = 4
+    const val SPEC_REV = 5
 
 
     const val FORMAT = 3
@@ -148,6 +148,9 @@ object Store {
             if (c.distMode == VolumeProfile.DIST_TRI_CLOSE) c.distMode = VolumeProfile.DIST_UNIFORM
             if (c.maxSlUnits == 10.0) c.maxSlUnits = 3.0
         }
+        // specRev 5 (ویرایش جدید سند): پیش‌فرض §۱۸-۳۱ از ۳ به ۲۰ رفت. مقدار ۳ که فقط
+        // پیش‌فرض نسخهٔ قبل بوده مهاجرت می‌کند؛ هر عدد سفارشی دیگری دست‌نخورده می‌ماند.
+        if (savedSpecRev < 5 && c.maxSlUnits == 3.0) c.maxSlUnits = 20.0
         return c
     }
 
