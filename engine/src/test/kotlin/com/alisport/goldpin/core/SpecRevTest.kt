@@ -13,7 +13,7 @@ class SpecRevTest {
         assertEquals(500.0, c.maxLeverage)
         assertEquals(1.0, c.entryBufTicks)
         assertEquals(1, c.maxSetups)
-        assertEquals(20.0, c.maxSlUnits, "§18-31 ویرایش جدید: N پیش‌فرض ۲۰ است")
+        assertEquals(3.0, c.maxSlUnits, "§18-31 سند: N پیش‌فرض ۳ است")
         assertEquals(0, c.vpSmooth, "§۴-۵ ویرایش جدید: هموارسازی پیش‌فرض ۰")
         assertEquals(VolumeProfile.DIST_UNIFORM, c.distMode, "§۴-۵ ویرایش جدید: مدل پخش حجم پیش‌فرض یکنواخت")
 
@@ -50,17 +50,20 @@ class SpecRevTest {
         assertEquals(500.0, l.maxLeverage); assertEquals(1.0, l.entryBufTicks); assertEquals(1, l.maxSetups)
         assertEquals(10.0, Store.load(j).cfg.maxLeverage)
 
-        // مهاجرت rev2 → rev5: مسیر پیش‌فرض‌های N عوض شده‌اند (۳ → ۱۰ → ۳ → ۲۰)؛ نتیجهٔ نهایی
-        // باید همان پیش‌فرض سند فعلی (۲۰) باشد و عدد سفارشی کاربر دست‌نخورده بماند.
-        val prevN = Settings().apply { maxSlUnits = 3.0 }
-        val prevEngine = Engine(prevN); val prevBroker = PaperBroker(prevN)
-        val prevJson = Store.save(prevN, prevEngine, prevBroker, emptyList())
+        // مهاجرت N: پیش‌فرض سند در نسخهٔ ۱.۴.۳۱ برابر ۲۰ بود و اکنون به ۳ برگشته است.
+        //  • فایلی که مقدار ۲۰ دارد (پیش‌فرض نسخهٔ قبل) باید ۳ شود؛
+        //  • عدد سفارشی کاربر (مثل ۷) دست‌نخورده می‌ماند.
+        val prevN = Settings().apply { maxSlUnits = 20.0 }
+        val prevJson = Store.save(prevN, Engine(prevN), PaperBroker(prevN), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":5")
+        assertEquals(3.0, Store.load(prevJson).cfg.maxSlUnits, "پیش‌فرض ۲۰ نسخهٔ قبل باید به ۳ مهاجرت کند")
+        val customN = Settings().apply { maxSlUnits = 7.0 }
+        val customJson = Store.save(customN, Engine(customN), PaperBroker(customN), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":5")
+        assertEquals(7.0, Store.load(customJson).cfg.maxSlUnits, "عدد سفارشی کاربر نباید عوض شود")
+        val defaultJson = Store.save(Settings(), Engine(Settings()), PaperBroker(Settings()), emptyList())
             .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":2")
-        assertEquals(20.0, Store.load(prevJson).cfg.maxSlUnits)
-        prevN.maxSlUnits = 7.0
-        val customJson = Store.save(prevN, Engine(prevN), PaperBroker(prevN), emptyList())
-            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":2")
-        assertEquals(7.0, Store.load(customJson).cfg.maxSlUnits)
+        assertEquals(3.0, Store.load(defaultJson).cfg.maxSlUnits, "پرونده‌های قدیمی هم باید به پیش‌فرض ۳ برسند")
 
         val rv = doubleArrayOf(50.0, 50.0, 40.0, 30.0, 35.0, 20.0, 10.0)
         val p = Profile(rv, 1000.0, 10.0, Double.NaN, Double.NaN, Double.NaN)
@@ -436,40 +439,36 @@ class SpecRevTest {
     }
 
     @Test
-    fun `doc 4-9 oo level moves stop on a post-entry close beyond oo without HV condition`() {
+    fun `doc 4-9 oo stop transfer is deferred so the stop never moves on a close beyond oo`() {
         val cfg = Settings().apply { initialEquity = 100000.0; maxSlUnits = 1_000_000.0 }
         val b = PaperBroker(cfg)
-        val t0 = 1_699_948_800_000L // سه‌شنبه 2023-11-14 ساعت 08:00 UTC — داخل پنجرهٔ سفارش‌گیری (§18-26 سند)
+        val t0 = 1_699_948_800_000L // سه‌شنبه 2023-11-14 ساعت 08:00 UTC — داخل پنجرهٔ سفارش‌گیری (§18-26)
         // سفارش خرید: oo=2010.01 (سقف HV 2010 + ۱ تیک)، باکس HV 2007..2010، SL=2006.98
         val s = Setup(9L, 1, 6, 2020.0, 2000.0, 1, 0).apply {
             hvH = 2010.0; hvL = 2007.0; sl = 2006.98
             tp1 = 2030.0; tp2 = 2040.0; tpx = 2100.0; entry = 2010.01
         }
         assertTrue(b.registerLimit(s, Candle(0, t0, 2015.0, 2016.0, 2014.0, 2015.5, 100.0)))
-        assertEquals(2010.0, b.pendingOrders[0].hvTop, 1e-9)
-        assertEquals(2007.0, b.pendingOrders[0].hvBot, 1e-9)
-        // کندل پرشدن (باید oo را لمس کند؛ مشمول قاعدهٔ oo نیست)
+        // کندل پرشدن (باید oo را لمس کند)
         b.onBar(Candle(1, t0 + 60_000L, 2012.0, 2013.0, 2010.0, 2012.5, 100.0))
         assertEquals(1, b.openTrades.size)
         val tr = b.openTrades[0]
-        assertTrue(tr.slAdj.isNaN(), "کندل ورود نباید حد ضرر را به oo ببرد")
-        // مساوی‌بودن کلوز با oo کافی نیست؛ مقایسهٔ سند اکید است.
-        b.onBar(Candle(2, t0 + 120_000L, 2011.0, 2012.0, 2009.0, 2010.01, 100.0))
-        assertTrue(tr.slAdj.isNaN(), "کلوز مساوی oo نباید انتقال را فعال کند")
-        // §4-9 (نسخهٔ فعلی سند): فقط کلوز ملاک است؛ سایه و باکس HV شرط نیستند.
-        b.onBar(Candle(3, t0 + 180_000L, 2011.0, 2012.0, 2009.0, 2011.5, 100.0))
-        assertEquals(2010.01, tr.slAdj, 1e-9, "کلوز بالای oo باید حد ضرر را دقیقاً به oo منتقل کند (§4-9)")
-        // ذخیره/بازیابی: لبه‌های HV و slAdj باید برگردند
-        val e = Engine(cfg)
-        val loaded = Store.load(Store.save(cfg, e, b, emptyList()))
-        val lt = loaded.broker.trades.first { it.id == tr.id }
-        assertEquals(2010.0, lt.hvTop, 1e-9); assertEquals(2007.0, lt.hvBot, 1e-9)
-        assertEquals(2010.01, lt.slAdj, 1e-9)
-        // برگشت قیمت به oo ⇒ خروج سر‌به‌سر (بدون سود/زیان قیمتی)
-        b.onBar(Candle(4, t0 + 240_000L, 2013.0, 2013.5, 2010.0, 2011.0, 100.0))
+        assertEquals(2006.98, tr.sl0, 1e-9)
+
+        // §4-9: بلوک «انتقال حد ضرر به سطح oo» در سند داخل بلوک «به تعویق افتاده و در کد
+        // ایجاد نمی‌شود» است ⇒ هیچ کلوزی — حتی کلوز کاملاً بالای oo — حد ضرر را جابه‌جا نمی‌کند.
+        b.onBar(Candle(2, t0 + 120_000L, 2011.0, 2012.0, 2009.0, 2011.5, 100.0))
+        assertTrue(tr.open)
+        b.onBar(Candle(3, t0 + 180_000L, 2015.0, 2020.0, 2014.0, 2019.0, 100.0)) // دو کلوز قوی بالای oo
+        assertTrue(tr.open, "معامله باید باز بماند")
+        assertFalse(tr.be, "سر‌به‌سر فقط با حد سود اول فعال می‌شود")
+
+        // تنها حد ضررِ مؤثر همان SL اولیه است: برگشت به ۲۰۰۶٫۹۸ معامله را با «حد ضرر» می‌بندد
+        // (نه «خروج سر‌به‌سر»)، چون هیچ انتقالی رخ نداده است.
+        b.onBar(Candle(4, t0 + 240_000L, 2009.0, 2010.0, 2006.0, 2007.0, 100.0))
         assertFalse(tr.open)
-        assertEquals("خروج سر‌به‌سر", tr.reason)
-        assertEquals(0.0, tr.grossPnl(), 1e-9)
+        assertEquals("حد ضرر", tr.reason)
+        assertTrue(tr.grossPnl() < 0.0, "خروج باید ضرر قیمتی داشته باشد، نه صفر")
     }
 
     @Test
@@ -518,9 +517,9 @@ class SpecRevTest {
     }
 
     @Test
-    fun `doc 4-8 stop loss is taken from middle confirmation not HV box`() {
+    fun `doc 4-8 stop loss is taken from the high volume box not the middle confirmation`() {
         // همان سری کندلیِ تست §18-16/§18-17: کف تایید میانی = ۲۰۰۲٫۰ ، باکس HV = ۲۰۰۷٫۰..۲۰۱۰٫۰ ،
-        // سطح سفارش = ۲۰۱۰٫۰۱. با قاعدهٔ جدید §۴-۸ حد ضرر باید از کف تایید میانی ساخته شود.
+        // سطح سفارش = ۲۰۱۰٫۰۱. صفت «ناحیهٔ حجم زیاد» یعنی همان باکس HV، پس حد ضرر = ۲۰۰۷٫۰ − ۲ تیک.
         val cfg = Settings().apply {
             tfMode = 1
             tfS = Tf.H1; tfM = Tf.M15; tf1 = Tf.M5; tf2 = Tf.M1
@@ -562,22 +561,25 @@ class SpecRevTest {
 
         assertEquals(2002.0, s.midRef, 1e-9, "کف تایید میانی باید ۲۰۰۲٫۰ باشد")
         assertEquals(2010.01, b.pendingOrders[0].price, 1e-9, "سطح سفارش = سقف باکس HV + ۱ تیک")
-        // §4-8 ویرایش جدید: حد ضرر = کف تایید میانی (۲۰۰۲٫۰) − ۲ تیک = ۲۰۰۱٫۹۸ — نه کف باکس HV (۲۰۰۶٫۹۸)
-        assertEquals(2001.98, s.sl, 1e-9, "حد ضرر باید از کف تایید میانی ساخته شود، نه از کف باکس HV")
-        assertEquals(2001.98, b.pendingOrders[0].sl, 1e-9)
+        // §4-8 سند: حد ضرر = کف **ناحیهٔ حجم زیاد** (۲۰۰۷٫۰) − ۲ تیک = ۲۰۰۶٫۹۸
+        // و نه کف تایید میانی (۲۰۰۲٫۰) که ۲۰۰۱٫۹۸ می‌داد.
+        assertEquals(2006.98, s.sl, 1e-9, "حد ضرر باید از کف ناحیهٔ حجم زیاد ساخته شود، نه از تایید میانی")
+        assertEquals(2006.98, b.pendingOrders[0].sl, 1e-9)
     }
 
     @Test
-    fun `doc 20-2 mixed resets lost to zero when capital falls back below M`() {
+    fun `doc 20-2 mixed keeps lost when capital falls back below M`() {
         val cfg = Settings().apply {
             mmMode = MoneyMode.MIXED; initialEquity = 1000.0
             minLotAuto = false; minLotManual = 10.0
         }
         val mm = MoneyManager(cfg)
         mm.lost = 250.0
-        mm.onCapitalUpdated(1300.0)     // M = 1200 ⇒ ManageCM ، Lost حفظ می‌شود
+        mm.onCapitalUpdated(1300.0)     // M = 1200 ⇒ فاز ManageCM
         assertEquals(250.0, mm.lost, 1e-9)
-        mm.onCapitalUpdated(1150.0)     // Capital < M ⇒ ManageNothing و lost = ۰
-        assertEquals(0.0, mm.lost, 1e-9)
+        // ویرایش فعلی سند جملهٔ «و مقدار lost = 0.0 می‌شود» را برداشته است؛ پس بازگشت به
+        // ManageNothing نباید Lost را صفر کند.
+        mm.onCapitalUpdated(1150.0)
+        assertEquals(250.0, mm.lost, 1e-9, "بازگشت Capital به زیر M نباید Lost را صفر کند")
     }
 }

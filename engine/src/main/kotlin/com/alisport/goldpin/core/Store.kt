@@ -7,7 +7,7 @@ package com.alisport.goldpin.core
 // ═══════════════════════════════════════════════════════════════════════════════
 object Store {
     /** نسخهٔ هم‌ترازی تنظیمات با سند؛ فایل‌های با مقدار کمتر هنگام بارگذاری به پیش‌فرض‌های سند مهاجرت می‌کنند. */
-    const val SPEC_REV = 5
+    const val SPEC_REV = 6
 
 
     const val FORMAT = 3
@@ -148,9 +148,9 @@ object Store {
             if (c.distMode == VolumeProfile.DIST_TRI_CLOSE) c.distMode = VolumeProfile.DIST_UNIFORM
             if (c.maxSlUnits == 10.0) c.maxSlUnits = 3.0
         }
-        // specRev 5 (ویرایش جدید سند): پیش‌فرض §۱۸-۳۱ از ۳ به ۲۰ رفت. مقدار ۳ که فقط
-        // پیش‌فرض نسخهٔ قبل بوده مهاجرت می‌کند؛ هر عدد سفارشی دیگری دست‌نخورده می‌ماند.
-        if (savedSpecRev < 5 && c.maxSlUnits == 3.0) c.maxSlUnits = 20.0
+        // specRev 6: پیش‌فرض §۱۸-۳۱ به ۳ بازگشت. فقط فایل‌هایی که مقدار ۲۰ دارند (پیش‌فرض نسخهٔ
+        // ۱.۴.۳۱) به ۳ مهاجرت می‌کنند؛ هر عدد سفارشی دیگری (مثل ۷) دست‌نخورده می‌ماند.
+        if (savedSpecRev < 6 && c.maxSlUnits == 20.0) c.maxSlUnits = 3.0
         return c
     }
 
@@ -373,7 +373,7 @@ object Store {
                 "sl0" to t.sl0, "tp1" to t.tp1, "tp2" to t.tp2, "tpX" to t.tpX, "qty" to t.qty,
                 "zoneTop" to t.zoneTop, "zoneBot" to t.zoneBot, "contractSize" to t.contractSize,
                 "exitT" to (t.exitT ?: 0L), "exitBi" to (t.exitBi ?: -1), "exitPx" to (t.exitPx ?: Double.NaN),
-                "reason" to t.reason, "be" to t.be, "slAdj" to t.slAdj,
+                "reason" to t.reason, "be" to t.be,
                 "hvTop" to t.hvTop, "hvBot" to t.hvBot,
                 "commission" to t.commission, "mmCm" to t.mmCm,
                 "fills" to t.fills.map { listOf(it.t, it.bi, it.price, it.qty, it.kind, it.pnl) }
@@ -418,7 +418,6 @@ object Store {
                 val l = f.asList(); if (l.size < 6) continue
                 tr.fills.add(Fill(l[0].asL(), l[1].asI(), l[2].asD(), l[3].asD(), l[4].asS(), l[5].asD()))
             }
-            if (t.containsKey("slAdj")) tr.slAdj = t["slAdj"].asD()
             if (t.containsKey("hvTop")) tr.hvTop = t["hvTop"].asD()
             if (t.containsKey("hvBot")) tr.hvBot = t["hvBot"].asD()
             if (t.containsKey("commission")) tr.commission = t["commission"].asD()

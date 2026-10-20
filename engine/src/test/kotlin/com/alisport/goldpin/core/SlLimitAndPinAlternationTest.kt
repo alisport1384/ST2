@@ -7,7 +7,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * ۱) §18-31 سند: سفارشی که فاصلهٔ حد ضررش از N بیشتر است ثبت نمی‌شود (پیش‌فرض N=10؛
+ * ۱) §18-31 سند: سفارشی که فاصلهٔ حد ضررش از N بیشتر است ثبت نمی‌شود (پیش‌فرض N=3؛
  *    مثال خود سند N=3)؛ HV و ستاپ می‌مانند ولی روی آن HV سفارشی نیست.
  * ۲) تناوب مارکرهای pinBU/pinBE (§18-1/§18-3/§18-4): روی چارت هرگز دو «کندل مهم
  *    بالاترین/پایین‌ترین» هم‌جهت پشت‌سرهم نیست. رگرشن عکس‌های مالک: پین هم‌جهت تازه
@@ -33,10 +33,14 @@ class SlLimitAndPinAlternationTest {
         assertTrue(b.lastError?.contains("18-31") == true, "lastError=${b.lastError}")
         assertEquals(0, b.pendingOrders.size)
 
-        // پیش‌فرض سند در ویرایش جدید N=20 است؛ همان مثال با فاصلهٔ 5 باید پذیرفته شود.
-        assertEquals(20.0, Settings().maxSlUnits)
+        // پیش‌فرض سند N=3 است؛ همان مثال با فاصلهٔ 5 باید با تنظیمات پیش‌فرض هم رد شود
+        // (دقیقاً همان چیزی که مثال §18-31 می‌گوید).
+        assertEquals(3.0, Settings().maxSlUnits)
         val bDefault = PaperBroker(Settings())
-        assertTrue(bDefault.registerLimit(sDoc, Candle(0, t, 4174.0, 4175.0, 4173.5, 4174.5, 100.0)))
+        assertFalse(
+            bDefault.registerLimit(sDoc, Candle(0, t, 4174.0, 4175.0, 4173.5, 4174.5, 100.0)),
+            "با پیش‌فرض N=3 مثال خود سند باید رد شود (§18-31)"
+        )
 
         // دقیقاً برابر N مجاز است («بیشتر از N» باطل است) — اینجا N=3 را صریحاً تنظیم می‌کنیم.
         val b2 = PaperBroker(Settings().apply { maxSlUnits = 3.0 })

@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
 class TradeStopSpecTest {
 
     @Test
-    fun `doc 4-9 sell stop moves to oo on a close beyond oo`() {
+    fun `doc 4-9 oo stop transfer is deferred so a sell stop never moves on a close beyond oo`() {
         val cfg = Settings().apply { maxSlUnits = 1_000_000.0 }
         val broker = PaperBroker(cfg)
         val t0 = 1_699_948_800_000L // سه‌شنبه 08:00 UTC، داخل پنجرهٔ سفارش‌گیری
@@ -20,21 +20,21 @@ class TradeStopSpecTest {
         val oo = broker.pendingOrders.single().price
         assertEquals(2_006.99, oo, 1e-9)
 
-        // پرشدن سفارش فروش با لمس سطح oo؛ کندل ورود خودش مشمول انتقال نیست.
+        // پرشدن سفارش فروش با لمس سطح oo
         broker.onBar(Candle(1, t0 + 60_000L, 2_008.0, 2_007.5, 2_006.5, 2_007.0, 10.0))
         val trade = broker.openTrades.single()
-        assertTrue(trade.slAdj.isNaN())
+        assertEquals(2_010.02, trade.sl0, 1e-9)
 
-        // §4-9 (نسخهٔ فعلی سند): معیار فقط کلوز است. سایه بالای oo و داخل بودن نسبت به باکس HV
-        // مانع انتقال نیستند؛ همین کندل با کلوز ۲۰۰۵ زیر oo باید حد ضرر را به oo ببرد.
+        // §4-9: بلوک «انتقال حد ضرر به سطح oo با کلوز تریگر۲» در ویرایش فعلی سند داخل بلوک
+        // «به تعویق افتاده و در کد ایجاد نمی‌شود» است ⇒ کلوز کاملاً زیر oo هم حد ضرر را جابه‌جا نمی‌کند.
         broker.onBar(Candle(2, t0 + 120_000L, 2_006.0, 2_008.0, 2_004.0, 2_005.0, 10.0))
-        assertEquals(oo, trade.slAdj, 1e-9)
-        assertTrue(trade.open)
+        assertTrue(trade.open, "معامله باید باز بماند")
+        assertFalse(trade.be, "سر‌به‌سر فقط با حد سود اول فعال می‌شود")
 
-        // برگشت به oo حد ضرر را می‌زند و خروج سر‌به‌سرِ قیمتی ثبت می‌شود.
-        broker.onBar(Candle(3, t0 + 180_000L, 2_005.0, 2_007.0, 2_004.0, 2_005.5, 10.0))
+        // حد ضرر همان ۲۰۱۰٫۰۲ اولیه است: برگشت به آن معامله را با «حد ضرر» می‌بندد.
+        broker.onBar(Candle(3, t0 + 180_000L, 2_007.0, 2_011.0, 2_006.0, 2_010.5, 10.0))
         assertFalse(trade.open)
-        assertEquals("خروج سر‌به‌سر", trade.reason)
-        assertEquals(0.0, trade.grossPnl(), 1e-9)
+        assertEquals("حد ضرر", trade.reason, "برچسب باید «حد ضرر» باشد نه «خروج سر‌به‌سر»")
+        assertTrue(trade.grossPnl() < 0.0, "خروج باید ضرر قیمتی داشته باشد")
     }
 }

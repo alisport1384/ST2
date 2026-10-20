@@ -74,16 +74,17 @@ class MoneyManager(private val cfg: Settings) {
     fun restoreNaked(v: Double) { naked = if (v.isNaN() || v <= 0.0 || v == cfg.initialEquity) Double.NaN else v }
 
     /**
-     * §۲۰-۲: بعد از هر تغییر سرمایه (فقط مود Mixed)
-     *  • if (capital / nakedcapital) >= 2 ⇒ nakedcapital = nakedcapital × 2 ؛
-     *  • اگر Capital دوباره به زیر M رسید، بخش ManageNothing فعال می‌شود و **lost = 0.0**
-     *    (ویرایش جدید سند: «... و مقدار lost = 0.0 می‌شود»).
+     * §۲۰-۲: if (capital / nakedcapital) >= 2 ⇒ nakedcapital = nakedcapital × 2 (فقط مود Mixed).
+     *
+     * توجه: ویرایش فعلی سند جملهٔ «و مقدار lost = 0.0 می‌شود» را برای بازگشت Capital به زیر M
+     * **حذف کرده است**؛ پس با رفتن به فاز ManageNothing مقدار [lost] دست‌نخورده می‌ماند و فقط
+     * با بسته شدن معامله (و در صورت روشن بودن [Settings.lostResetAtFinalTp] با حد سود نهایی)
+     * به‌روزرسانی می‌شود.
      */
     fun onCapitalUpdated(capital: Double) {
         if (cfg.mmMode != MoneyMode.MIXED) return
         var guard = 0
         while (nakedCapital() > 0.0 && capital / nakedCapital() >= 2.0 && guard++ < 64) naked = nakedCapital() * 2.0
-        if (capital <= growthLimit()) lost = 0.0
     }
 
     /** MinLot = (NakedCapital × risk) / 100 یا مقدار دستی. */
