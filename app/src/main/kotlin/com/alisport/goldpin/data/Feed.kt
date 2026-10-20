@@ -561,6 +561,110 @@ object Feed {
         return BufferedReader(InputStreamReader(ins, Charsets.UTF_8)).use { it.readText() }
     }
 
+    // ── دادهٔ بک‌تست داخلی (طرح B) ─────────────────────────────────────────────
+    // فایل داخل APK نیست (۱٫۵MB می‌ماند)؛ یک‌بار از GitHub Release دانلود و در حافظهٔ اپ
+    // ذخیره می‌شود. هش برای این است که فایل نیمه‌دانلود یا قدیمی هرگز بک‌تست را خراب نکند.
+    const val BACKTEST_DATA_URL =
+        "https://github.com/alisport1384/ST1/releases/download/data-v1/goldpin_xauusd_m1_1y.csv.gz"
+    const val BACKTEST_DATA_SHA256 = "15fffd94b9c1970080d6012ff2aa3ae307d18a872381c677e44d16b5fd08db44"
+    const val BACKTEST_DATA_BARS = 351_894
+
+    /**
+     * خواندن CSV کندل به‌صورت **جریانی** (بدون ساخت رشتهٔ کامل).
+     *
+     * `readCsvStream` کل فایل ۱۸ مگابایتی را داخل یک String می‌ریخت (≈۳۶MB در حافظهٔ اندروید)
+     * و بعد لیست را دوباره می‌ساخت. برای یک سال M1 این روی گوشی‌های ضعیف به OOM می‌خورد.
+     * این نسخه خط‌به‌خط می‌خواند و فقط لیست نهایی را نگه می‌دارد.
+     */
+    fun parseCsvStream(stream: java.io.InputStream): List<Candle> {
+        val buffered = java.io.BufferedInputStream(stream, 1 shl 16)
+        buffered.mark(4)
+        val b0 = buffered.read(); val b1 = buffered.read()
+        buffered.reset()
+        val isGz = b0 == 0x1f && b1 == 0x8b
+        val ins = if (isGz) GZIPInputStream(buffered) else buffered
+        val out = ArrayList<Candle>(BACKTEST_DATA_BARS)
+        var first = true
+        BufferedReader(InputStreamReader(ins, Charsets.UTF_8), 1 shl 16).use { br ->
+            while (true) {
+                val raw = br.readLine() ?: break
+                val line = raw.trim()
+                if (line.isEmpty()) continue
+                if (first) {
+                    first = false
+                    if (line.contains("open", true) || line.contains("timestamp", true)) continue
+                }
+                val p = line.split(',', ';', '\t')
+                if (p.size < 5) continue
+                val t = p[0].trim().toLongOrNull() ?: continue
+                val o = p[1].trim().toDoubleOrNull() ?: continue
+                val h = p[2].trim().toDoubleOrNull() ?: continue
+                val l = p[3].trim().toDoubleOrNull() ?: continue
+                val c = p[4].trim().toDoubleOrNull() ?: continue
+                val v = if (p.size >= 6) (p[5].trim().toDoubleOrNull() ?: 0.0) else 0.0
+                val ms = if (t < 100_000_000_000L) t * 1000L else t
+                out.add(Candle(0, ms, o, h, l, c, v))
+            }
+        }
+        if (out.isEmpty()) throw FeedException("فایل دادهٔ بک‌تست خوانده نشد")
+        if (out.size > 1 && out[0].t > out[out.size - 1].t) out.sortBy { it.t }
+        val res = ArrayList<Candle>(out.size)
+        for ((i, c) in out.withIndex()) res.add(Candle(i, c.t, c.o, c.h, c.l, c.c, c.v))
+        Log.i(Log.CAT_FEED, "دادهٔ بک‌تست خوانده شد",
+            "کندل=${res.size} حجم‌دار=${res.any { it.v > 0 }}")
+        return res
+    }
+
+    /** دانلود فایل دادهٔ بک‌تست با گزارش پیشرفت (بایت دریافتی از کل). */
+    fun downloadTo(urlStr: String, dest: java.io.File, onProgress: (Long, Long) -> Unit = { _, _ -> }) {
+        val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 20_000
+            readTimeout = 60_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", UA)
+            setRequestProperty("Accept", "application/gzip,application/octet-stream,*/*")
+        }
+        try {
+            val code = conn.responseCode
+            if (code !in 200..299) throw FeedException("HTTP $code از سرور دادهٔ بک‌تست")
+            val total = conn.contentLengthLong
+            conn.inputStream.use { input ->
+                java.io.BufferedOutputStream(dest.outputStream(), 1 shl 16).use { output ->
+                    val buf = ByteArray(1 shl 16)
+                    var got = 0L
+                    var lastReport = 0L
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n <= 0) break
+                        output.write(buf, 0, n)
+                        got += n
+                        val now = System.currentTimeMillis()
+                        if (now - lastReport > 250) { lastReport = now; onProgress(got, total) }
+                    }
+                    onProgress(got, total)
+                }
+            }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** هش SHA-256 یک فایل (برای اعتبارسنجی دادهٔ دانلودشده). */
+    fun sha256(file: java.io.File): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        java.io.BufferedInputStream(file.inputStream(), 1 shl 16).use { ins ->
+            val buf = ByteArray(1 shl 16)
+            while (true) {
+                val n = ins.read(buf)
+                if (n <= 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        val sb = StringBuilder()
+        for (b in md.digest()) sb.append(String.format("%02x", b))
+        return sb.toString()
+    }
+
     /** باز کردن دارایی نمونهٔ داخلی (هر نامی که بسته‌بندی برایش انتخاب کرده باشد) */
     fun openSampleAsset(ctx: android.content.Context): java.io.InputStream {
         val names = listOf("sample_xauusd_m1.csv.gz", "sample_xauusd_m1.csv")

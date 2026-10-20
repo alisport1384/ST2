@@ -17,6 +17,25 @@ import java.util.concurrent.Executors
 // ═══════════════════════════════════════════════════════════════════════════════
 //  وضعیت سراسری اپ — موتور، کارگزار، کندل‌ها، تنظیمات فید و ذخیره/بازیابی
 // ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * نشست فعال (طرح B).
+ *
+ * دو نشست **کاملاً جدا** هستند و هیچ‌وقت داده‌شان قاطی نمی‌شود:
+ *  • [LIVE]     — دادهٔ فید شبکه، فایل `goldpin_state.json.gz`، سرویس زنده روشن.
+ *  • [INTERNAL] — دادهٔ یک‌سالهٔ M1 داخلی (از GitHub Release)، فایل `goldpin_backtest.json.gz`،
+ *                 فید و سرویس زنده **خاموش**.
+ *
+ * دلیل جداسازی: «مرج کردن» دو فید در یک سری، سه مشکل واقعی می‌ساخت —
+ *  ۱) اختلاف قیمت ~۰٫۱۶ دلار در نقطهٔ دوخت (پرش), ۲) اختلاف مقیاس حجم ~۲۵٬۰۰۰ برابر
+ *  (کندلِ درز فوراً «ولوم زیاد» دیده می‌شد), ۳) انتقال باکس‌های ساخته‌شده روی نمونهٔ داخلی
+ *  به سری زنده از طریق `zoneKeepKey`. با دو نشست جدا، هر سه غیرممکن است.
+ */
+enum class SessionMode(val fa: String) {
+    LIVE("زنده"),
+    INTERNAL("بک‌تست داخلی")
+}
+
 class AppState {
 
     val cfg = Settings()
@@ -81,6 +100,61 @@ class AppState {
      * (سفارش‌ها اما در همان لحظه با قیمت زنده پر می‌شوند).
      */
     var backtestFull: Boolean = true
+
+    /**
+     * کلید پیکربندیِ موتوری که باکس‌های ناحیهٔ فعلی با آن ساخته شده‌اند.
+     * §4-5 سند: ناحیه‌های ابطال‌نشده باید نگهداری/فراخوانی شوند؛ ولی فقط وقتی که همان سلسله‌مراتب
+     * تایم‌فریمی و همان استراتژی/پارامترهای پروفایل برقرار باشد — وگرنه باکس‌های مود قبلی بی‌معنا می‌شوند.
+     */
+    @Volatile
+    private var zoneKeepKey: String = ""
+
+    // ── نشست بک‌تست داخلی (طرح B) ─────────────────────────────────────────────
+    /** نشست فعال؛ همهٔ مسیرهای ذخیره/بارگذاری و نگهبان‌های فید به آن نگاه می‌کنند. */
+    @Volatile
+    var sessionMode: SessionMode = SessionMode.LIVE
+        private set
+
+    /** تنظیمات یا تایم‌فریم‌ها بعد از آخرین اجرای بک‌تست عوض شده‌اند ⇒ نتیجه کهنه است. */
+    @Volatile
+    var backtestStale: Boolean = false
+
+    /** ۰..۱ پیشرفت اجرای بک‌تست؛ مقدار منفی = بی‌کار. */
+    @Volatile
+    var backtestProgress: Float = -1f
+
+    @Volatile
+    var backtestProgressText: String = ""
+
+    /** خلاصهٔ آخرین اجرا/بارگذاری بک‌تست برای نمایش در تنظیمات. */
+    @Volatile
+    var backtestInfo: String = ""
+
+    private fun zoneKey(): String =
+        // sessionMode عمداً اول کلید است: باکس‌های بک‌تست داخلی هرگز نباید به نشست زنده
+        // (یا برعکس) منتقل شوند — قیمت/حجم دو فید متفاوت است.
+        "${sessionMode.name}/$symbol/${cfg.tfS}/${cfg.tfM}/${cfg.tf1}/${cfg.tf2}/${cfg.strategy}/${cfg.vpRows}/${cfg.vpVA}/" +
+            "${cfg.vpSmooth}/${cfg.distMode}/${cfg.minZoneRows}/${cfg.clearUsedZones}"
+
+    /** امضای پارامترهایی که «کهنه شدن» نتیجه را تعیین می‌کنند — برای هر [Settings]. */
+    fun signatureOf(c: Settings): String =
+        "$symbol/${c.tfS}/${c.tfM}/${c.tf1}/${c.tf2}/${c.strategy}/${c.vpRows}/${c.vpVA}/" +
+            "${c.vpSmooth}/${c.distMode}/${c.minZoneRows}/${c.maxSetups}/${c.midInvalidClose}/" +
+            "${c.hvScanFirstTouch}/${c.hvMarkFirstIncrease}/${c.minTPunits}/${c.maxSlUnits}/" +
+            "${c.slBufTicks}/${c.entryBufTicks}/${c.slipTicks}/${c.mintick}/${c.maxLeverage}/" +
+            "${c.useRiskPct}/${c.riskPct}/${c.initialEquity}/${c.mmMode}/${c.contractSize}/${c.tpUnits}"
+
+    /** امضای تنظیمات فعلی. */
+    fun backtestSignature(): String = signatureOf(cfg)
+
+
+    /**
+     * کندل‌های خام M1 نشست داخلی — مرجع تجمیع برای هر تایم‌فریمی که کاربر انتخاب کند.
+     * با تغییر مود/استراتژی، سری تریگر۲ از همین سری دوباره ساخته می‌شود تا تغییر تنظیمات
+     * واقعاً روی بک‌تست اثر بگذارد (باگ «بک‌تست تغییر مودها را نمی‌گیرد»).
+     */
+    @Volatile private var internalRaw: List<Candle> = emptyList()
+
     /** در حال محاسبهٔ سنگین (اجرای موتور/دانلود) — رابط پیام «در حال محاسبه…» نشان می‌دهد */
     @Volatile var busy: Boolean = false
     @Volatile var busyText: String = ""
@@ -226,6 +300,11 @@ class AppState {
         Log.init(appCtx!!, "1.4.21")
         Alerts.init(appCtx!!)
         val p = appCtx!!.getSharedPreferences("goldpin", Context.MODE_PRIVATE)
+        // نشست ذخیره‌شدهٔ کاربر (زنده/بک‌تست داخلی) — تا بعد از بستن و باز کردن اپ،
+        // کاربر دوباره داخل همان نشستی که بوده بالا بیاید.
+        sessionMode = try {
+            SessionMode.valueOf(p.getString("session_mode", SessionMode.LIVE.name) ?: SessionMode.LIVE.name)
+        } catch (e: Exception) { SessionMode.LIVE }
         // مهاجرت ۱٫۱ → ۱٫۲: تمام‌صفحهٔ خودکار دیگر پیش‌فرض نیست؛ تنظیم قدیمی true را یک‌بار خاموش کن.
         val uiVersion = p.getInt("ui_prefs_version", 0)
         autoFullscreen = if (uiVersion < 2) false else p.getBoolean("auto_fullscreen", false)
@@ -401,6 +480,16 @@ class AppState {
     // ── تنظیمات و بازسازی ──────────────────────────────────────────────────────
     /** بازسازی غیرهمزمان؛ تغییرات تنظیمات هرگز نخ رابط را قفل نمی‌کنند. */
     fun rebuildAsync() {
+        // ⚠ در نشست بک‌تست داخلی، هر تغییر تنظیم یعنی اجرای دوبارهٔ موتور روی ۳۵۲ هزار کندل
+        // (۲۸ ثانیه روی دسکتاپ، ۱–۲ دقیقه روی گوشی). پس به‌جای بازسازی خودکار، نتیجه «کهنه»
+        // علامت می‌خورد و دکمهٔ «اجرای مجدد بک‌تست» روشن می‌شود.
+        if (sessionMode == SessionMode.INTERNAL) {
+            backtestStale = true
+            lastFeedError = null
+            Log.i(Log.CAT_ENGINE, "تنظیمات در نشست بک‌تست عوض شد — نتیجه کهنه است", "منتظر اجرای مجدد")
+            notifyUi()
+            return
+        }
         busy = true
         busyText = "در حال بازسازی موتور…"
         notifyUi()
@@ -426,9 +515,30 @@ class AppState {
      * نمی‌کرد ⇒ سفارش/معامله/موجودی/Lost دوبار شمرده می‌شد و هر بار عدد دیگری درمی‌آمد.)
      */
     fun rebuild() {
+        if (sessionMode == SessionMode.INTERNAL) {
+            // در نشست داخلی، بازسازی خودکار ممنوع است؛ نتیجه فقط با اجرای کامل روی
+            // دادهٔ یک‌ساله (runInternalBacktest) ساخته می‌شود.
+            backtestStale = true
+            Log.w(Log.CAT_ENGINE, "درخواست بازسازی در نشست داخلی رد شد — نتیجه کهنه علامت خورد")
+            notifyUi()
+            return
+        }
         synchronized(stateLock) {
         val execCandles = if (modeCandles.isNotEmpty()) modeCandles else candles
         val t0 = System.currentTimeMillis()
+        // §4-5 سند: ناحیه‌های ابطال‌نشده باید ثبت/نگهداری شوند و بعد از بازسازی موتور هم
+        // دوباره فراخوانی شوند. باکس‌هایی که پیش از پنجرهٔ دادهٔ تازه ساخته شده‌اند از خودِ
+        // داده قابل بازسازی نیستند، پس همین‌جا (پیش از reset) نگه داشته می‌شوند.
+        // اگر سلسله‌مراتب تایم‌فریمی/استراتژی/پارامترهای پروفایل عوض شده باشد، باکس‌های مود
+        // قبلی معنا ندارند و بازگردانده نمی‌شوند.
+        val key = zoneKey()
+        val keepSameConfig = key == zoneKeepKey
+        val keepZones = if (keepSameConfig) ArrayList(engine.zones) else ArrayList()
+        val keepT1 = if (keepSameConfig) ArrayList(engine.t1Zones) else ArrayList()
+        val keepT2 = if (keepSameConfig) ArrayList(engine.t2Zones) else ArrayList()
+        val keepSetups = if (keepSameConfig) ArrayList(engine.setups) else ArrayList()
+        val keepZoneSeq = engine.zoneSeq
+        zoneKeepKey = key
         Log.i(Log.CAT_ENGINE, "شروع اجرای مجدد موتور",
             "کندل‌مود=${execCandles.size} مود=${cfg.tfMode} (tf2=${com.alisport.goldpin.core.Tf.label(cfg.tf2)}) چارت=${com.alisport.goldpin.core.Tf.label(chartTfSec)} بک‌تست‌کامل=$backtestFull")
         engine.reset()
@@ -438,6 +548,7 @@ class AppState {
         engine.barCommitHook = { cd -> broker.onBar(cd, live = false) }
         val prev = Alerts.inBacktest
         Alerts.inBacktest = true
+        var carried = 0
         try {
             if (execCandles.isNotEmpty()) {
                 val structureHistory = availableStructureHistory(cfg.tfS)
@@ -447,6 +558,11 @@ class AppState {
                         "کندل ساختار=${Fa.d(seeded.toString())} شروع=${Tf.label(cfg.tfS)} ${structureHistory.firstOrNull()?.t ?: 0L}")
                 }
                 engine.feed(execCandles, lastIsClosed = backtestFull)
+                // بازگرداندن ناحیه‌های ابطال‌نشدهٔ بیرونِ این پنجره (§4-5 سند)
+                carried = engine.carryOverZones(
+                    keepZones, keepT1, keepT2, execCandles.first().t, keepZoneSeq,
+                    prevSetups = keepSetups, currentCandles = execCandles
+                )
                 val latestClosedIndex = engine.processed - 1
                 val latestClosed = execCandles.getOrNull(latestClosedIndex)
                 if (latestClosed != null) {
@@ -462,7 +578,7 @@ class AppState {
         Log.i(Log.CAT_ENGINE, "اجرای موتور تمام شد",
             "مدت=${System.currentTimeMillis() - t0}ms پردازش‌شده=${engine.processed} ستاپ=${engine.cnt.setup} برخورد=${engine.cnt.touch} " +
                 "میانی=${engine.cnt.mid} ولوم‌کم=${engine.cnt.lv} ولوم‌زیاد=${engine.cnt.hv} ورود=${engine.cnt.entry} پایان=${engine.cnt.done} " +
-                "باکس=${engine.zones.size} سفارش=${broker.orders.size} معامله=${broker.trades.size} موجودی=${Fa.n(broker.balance, 2)}")
+                "باکس=${engine.zones.size} (بازگردانده‌شده=${Fa.d(carried.toString())}) سفارش=${broker.orders.size} معامله=${broker.trades.size} موجودی=${Fa.n(broker.balance, 2)}")
         publishSnapshot()
         notifyUi()
         }
@@ -596,15 +712,27 @@ class AppState {
     fun setMode(modeIdx: Int) {
         Log.i(Log.CAT_CFG, "تغییر مود تایم‌فریمی", "مود=$modeIdx")
         val m = TF_MODES.firstOrNull { it.idx == modeIdx } ?: TF_MODES[0]
-        busy = true
-        busyText = "در حال تغییر مود تایم‌فریمی…"
-        notifyUi()
         cfg.tfMode = m.idx
         val tfChanged = !m.custom && (chartTfSec != m.t2 || !sameTimeframe(medianStepSec(modeCandles), m.t2.toLong()))
         if (!m.custom) {
             cfg.tfS = m.s; cfg.tfM = m.m; cfg.tf1 = m.t1; cfg.tf2 = m.t2
             chartTfSec = m.t2
         }
+        // ── نگهبان طرح B ────────────────────────────────────────────────────────
+        // در نشست داخلی، تغییر مود نباید موتور را خودسرانه روی دادهٔ M1 بازسازی کند؛
+        // فقط سری نمایش/تریگر۲ از نو تجمیع می‌شود و نتیجه «کهنه» علامت می‌خورد تا با
+        // دکمهٔ «اجرای مجدد بک‌تست» با همین تنظیمات تازه از نو اجرا شود.
+        if (sessionMode == SessionMode.INTERNAL) {
+            internalResetSeries()
+            backtestStale = true
+            Log.i(Log.CAT_CFG, "مود در نشست داخلی عوض شد — نتیجه کهنه شد",
+                "مود=${m.idx} tf2=${com.alisport.goldpin.core.Tf.label(cfg.tf2)}")
+            notifyUi()
+            return
+        }
+        busy = true
+        busyText = "در حال تغییر مود تایم‌فریمی…"
+        notifyUi()
         io.execute {
             try {
                 val cached = tfFeedCache[cfg.tf2]
@@ -636,6 +764,13 @@ class AppState {
         if (newTf2 <= 0) return
         cfg.tf2 = newTf2
         chartTfSec = newTf2
+        // نگهبان طرح B: همان منطق setMode — بازسازی موتور فقط با «اجرای مجدد بک‌تست».
+        if (sessionMode == SessionMode.INTERNAL) {
+            internalResetSeries()
+            backtestStale = true
+            notifyUi()
+            return
+        }
         io.execute {
             val cached = tfFeedCache[newTf2]
             val local = if (modeFromFeed && cached != null && cached.isNotEmpty()) cached else aggregateBestAvailable(newTf2)
@@ -684,6 +819,13 @@ class AppState {
 
     // ── دانلود تاریخچه از فید ───────────────────────────────────────────────────
     fun downloadHistory(forceRebuild: Boolean = false, onDone: (String) -> Unit = {}) {
+        // نگهبان طرح B: در نشست داخلی هیچ دانلودی انجام نمی‌شود؛ وگرنه دادهٔ شبکه جای
+        // دادهٔ یک‌ساله را می‌گرفت (همان «تداخل» که با جداسازی نشست‌ها حذف شد).
+        if (sessionMode == SessionMode.INTERNAL) {
+            Log.w(Log.CAT_FEED, "دانلود تاریخچه در نشست بک‌تست داخلی نادیده گرفته شد")
+            main.post { onDone("در حالت بک‌تست داخلی، فید شبکه خاموش است") }
+            return
+        }
         val t0 = System.currentTimeMillis()
         val targetTf = chartTfSec
         val modeTf = cfg.tf2
@@ -929,6 +1071,8 @@ class AppState {
      * به‌صورت بک‌تست **ساکت** (فقط لاگ، بدون بنر/نوتیفیکیشن/صدا/لرزش) اجرا می‌شود.
      */
     fun feedLiveTail(tail: List<Candle>) {
+        // نگهبان طرح B: تیک زنده هرگز وارد موتورِ بک‌تست نمی‌شود.
+        if (sessionMode == SessionMode.INTERNAL) return
         synchronized(stateLock) {
             mergeTail(tail)
             val execCandles = if (modeCandles.isNotEmpty()) modeCandles else candles
@@ -1015,7 +1159,18 @@ class AppState {
             "${com.alisport.goldpin.core.Tf.label(chartTfSec)} → ${com.alisport.goldpin.core.Tf.label(newTf)} · مود=${cfg.tfMode} (tf2=${com.alisport.goldpin.core.Tf.label(cfg.tf2)})")
         chartTfSec = newTf
 
-        // ۱) اگر دادهٔ تایم‌فریم مقصد از حافظه (کش فید، کندل‌های مود یا نمونهٔ ریزدانه) قابل ساخت است، بلافاصله نمایش بده
+        // ۱) اگر دادهٔ تایم‌فریم مقصد از حافظه قابل ساخت است، بلافاصله نمایش بده.
+        //
+        // ⚠ نکتهٔ مهم (§۴-۵ سند): تجمیعِ محلی از سری تریگر۲ فقط به عمق همان سری است.
+        // اگر تایم‌فریم مقصد **درشت‌تر** از دادهٔ موجود باشد (مثلاً چارت را روی تایم‌فریم
+        // ساختار بگذاریم ولی سری ۱ دقیقه فقط ۷ روز عقب برود)، چارتِ ساختار فقط همان ۷ روز را
+        // نشان می‌دهد و باکس‌های قدیمی (که سند می‌گوید نامحدود نگه داشته و نمایش داده شوند)
+        // بیرون از محدودهٔ چارت می‌افتند و دیده نمی‌شوند. پس برای تایم‌فریم درشت‌تر از منبع،
+        // ابتدا تاریخچهٔ عمیقِ همان تایم‌فریم از فید گرفته می‌شود (با بازگشت به تجمیع محلی در
+        // صورت نبود شبکه).
+        val srcStep = listOf(medianStepSec(modeCandles), medianStepSec(fineCandles))
+            .filter { it > 0L }.minOrNull() ?: 0L
+        val coarserThanSource = srcStep > 0L && newTf.toLong() > srcStep
         val cached = tfFeedCache[newTf]
         val canAggregateLocally = (!modeFromFeed && fineCandles.isNotEmpty() && medianStepSec(fineCandles) in 1L..newTf.toLong()) ||
             (modeCandles.isNotEmpty() && medianStepSec(modeCandles) in 1L..newTf.toLong())
@@ -1028,7 +1183,23 @@ class AppState {
                 setDisplayCandles(mergeDisplayWithMode(cached, newTf))
                 return
             }
-            if (canAggregateLocally) {
+            // تایم‌فریم ساختار: تاریخچهٔ عمیقِ ثبت‌شده (structureCandles) باید بر تجمیع کوتاهِ
+            // سری تریگر۲ ترجیح داشته باشد تا باکس‌های قدیمی ساختار در محدودهٔ چارت بمانند.
+            if (newTf == cfg.tfS) {
+                val deep = availableStructureHistory(newTf)
+                val localAgg = if (canAggregateLocally) aggregateBestAvailable(newTf) else emptyList()
+                val deepStartsEarlier = deep.isNotEmpty() &&
+                    (localAgg.isEmpty() || deep.first().t < localAgg.first().t)
+                if (deepStartsEarlier) {
+                    setDisplayCandles(
+                        if (localAgg.isEmpty()) deep else mergeDisplayWithMode(mergeAtTimeframe(deep, localAgg, newTf), newTf)
+                    )
+                    return
+                }
+            }
+            // فقط برای «تایم‌فریم ساختار» عمق بیشتر از فید گرفته می‌شود (باکس‌های قدیمی ساختار
+            // باید در محدودهٔ چارت بمانند)؛ برای بقیهٔ تایم‌فریم‌ها همان تجمیع محلی سریع کافی است.
+            if (canAggregateLocally && !(coarserThanSource && modeFromFeed && newTf == cfg.tfS)) {
                 val local = aggregateBestAvailable(newTf)
                 if (local.isNotEmpty()) {
                     setDisplayCandles(local)
@@ -1050,6 +1221,11 @@ class AppState {
                     try {
                         baseTfSec = base
                         if (chart.isNotEmpty()) tfFeedCache[newTf] = chart
+                        // §4-5: تاریخچهٔ تایم‌فریم ساختار باید ثبت/ذخیره شود تا باکس‌های قدیمی و
+                        // توالی ساختار در بازسازی‌های بعدی هم در دسترس باشند.
+                        if (chart.isNotEmpty() && newTf == cfg.tfS) {
+                            rememberStructureHistory(chart, cfg.tfS)
+                        }
                         if (modeCandles.isEmpty()) {
                             modeFromFeed = true
                             setCandles(chart, rebuildNow = true)
@@ -1102,9 +1278,22 @@ class AppState {
         )
         // ⚠ موتور/کارگزار در نخ IO تغییر می‌کنند؛ بدون قفل، Store.save روی فهرست‌های در حال
         // تغییر می‌افتاد و ConcurrentModificationException می‌داد (ذخیرهٔ خودکار حین لایو).
-        val persistedCandles = if (modeCandles.isNotEmpty()) modeCandles else candles
+        // ⚠ نشست بک‌تست داخلی: کندل‌ها **نویسنده نمی‌شوند**.
+        // یک سال M1 در JSON ≈۲۲MB می‌شد (اندازه‌گیری‌شده) و ذخیرهٔ خودکار هر بار آن را
+        // می‌نوشت؛ در حالی که همین کندل‌ها از فایل داده (۵MB gz) قابل خواندن دوباره‌اند.
+        // نتیجه: فایل نشست داخلی ۳۶۰KB می‌ماند و باکس‌های ساختار/LV/HV کامل ذخیره می‌شوند.
+        val persistedCandles = when {
+            sessionMode == SessionMode.INTERNAL -> emptyList()
+            modeCandles.isNotEmpty() -> modeCandles
+            else -> candles
+        }
+        val btMeta = if (sessionMode == SessionMode.INTERNAL) backtestSignature() else ""
         return synchronized(stateLock) {
-            Store.save(cfg, engine, broker, persistedCandles, meta, structureCandles = structureCandles)
+            Store.save(
+                cfg, engine, broker, persistedCandles,
+                meta + mapOf("session" to sessionMode.name, "btSig" to btMeta),
+                structureCandles = structureCandles
+            )
         }
     }
 
@@ -1113,7 +1302,7 @@ class AppState {
         return try {
             busy = true
             val json = buildJson()
-            val main = Storage.autoFile(ctx)
+            val main = sessionFile(ctx)
             try {   // پشتیبان از آخرین نسخهٔ سالم
                 if (main.exists()) {
                     val tmp = java.io.File(main.parentFile, main.name + ".tmp")
@@ -1125,8 +1314,8 @@ class AppState {
             } catch (e: Exception) { Log.w(Log.CAT_STORE, "نسخهٔ پشتیبان ساخته نشد", e.message ?: "") }
             Storage.writeText(main, json)
             Log.i(Log.CAT_STORE, "ذخیرهٔ خودکار انجام شد",
-                "بایت=${json.length} کندل=${candles.size} باکس=${engine.zones.size} سفارش=${broker.orders.size} معامله=${broker.trades.size} مدت=${System.currentTimeMillis() - t0}ms")
-            "ذخیره شد: ${Storage.autoFile(ctx).absolutePath}"
+                "نشست=${sessionMode.fa} بایت=${json.length} کندل=${candles.size} باکس=${engine.zones.size} سفارش=${broker.orders.size} معامله=${broker.trades.size} مدت=${System.currentTimeMillis() - t0}ms")
+            "ذخیره شد: ${sessionFile(ctx).absolutePath}"
         } catch (e: Exception) {
             Log.e(Log.CAT_STORE, "ذخیرهٔ خودکار ناموفق", e)
             "خطای ذخیره: ${e.message}"
@@ -1148,9 +1337,15 @@ class AppState {
     }
 
     /** بارگذاری کامل — وضعیت دقیقاً همان‌طور که ذخیره شده بود برمی‌گردد. */
-    fun loadFromText(json: String): String {
+    /**
+     * @param applySettings اگر true باشد (شروع سرد اپ) تنظیمات داخل فایل روی تنظیمات فعلی
+     *   نوشته می‌شود. هنگام «تعویض نشست» باید false باشد؛ وگرنه تنظیماتی که کاربر همین
+     *   الان عوض کرده با نسخهٔ قدیمیِ داخل فایل زنده به عقب برمی‌گردد (باگ «بک‌تست تغییر
+     *   مود/استراتژی را نمی‌گیرد»).
+     */
+    fun loadFromText(json: String, applySettings: Boolean = true): String {
         val t0 = System.currentTimeMillis()
-        Log.i(Log.CAT_STORE, "شروع بازیابی وضعیت", "بایت=${json.length}")
+        Log.i(Log.CAT_STORE, "شروع بازیابی وضعیت", "بایت=${json.length} اعمال‌تنظیمات=$applySettings")
         return try {
             // تجزیهٔ JSON (سنگین) بیرون از قفل؛ کپی وضعیت داخل قفل
             val ld = Store.load(json)
@@ -1158,14 +1353,18 @@ class AppState {
             symbol = m["symbol"]?.toString() ?: symbol
             baseTfSec = (m["baseTfSec"] as? Long)?.toInt() ?: baseTfSec
             depth = (m["depth"] as? Long)?.toInt() ?: depth
+            val settingsDiffer = signatureOf(ld.cfg) != signatureOf(cfg)
             synchronized(stateLock) {
-                copySettings(ld.cfg, cfg)
-                chartTfSec = (m["chartTfSec"] as? Long)?.toInt() ?: cfg.tf2
+                if (applySettings) copySettings(ld.cfg, cfg)
+                chartTfSec = if (applySettings) ((m["chartTfSec"] as? Long)?.toInt() ?: cfg.tf2) else chartTfSec
                 engine.reset()
                 broker.reset()
                 // انتقال وضعیت بازیابی‌شده به نمونه‌های سراسری
                 copyEngine(ld.eng, engine)
                 copyBroker(ld.broker, broker)
+                // باکس‌های ناحیهٔ بازیابی‌شده از فایل، باکس‌های معتبرِ همین پیکربندی‌اند؛ پس اگر بعداً
+                // موتور روی پنجرهٔ دادهٔ کوتاه‌تری بازسازی شد، ناحیه‌های ابطال‌نشده دوباره فراخوانی شوند (§4-5 سند).
+                zoneKeepKey = zoneKey()
                 engine.broker = broker
                 broker.engine = engine
                 engine.barCommitHook = { cd -> broker.onBar(cd, live = false) }
@@ -1187,6 +1386,12 @@ class AppState {
                     aggregateBestAvailable(chartTfSec).ifEmpty { restoredMode }
                 }
                 publishSnapshot()
+            }
+            if (!applySettings && settingsDiffer) {
+                // تنظیمات کاربر مقدس است: وضعیت بازگردانده می‌شود، ولی موتور با
+                // تنظیمات فعلی از نو ساخته می‌شود تا باکس/سفارش‌های مود قبلی نمانند.
+                Log.i(Log.CAT_STORE, "تنظیمات فعلی با فایل زنده فرق دارد → بازسازی با تنظیمات فعلی")
+                rebuild()
             }
             notifyUi()
             Log.i(Log.CAT_STORE, "بازیابی موفق",
@@ -1213,6 +1418,7 @@ class AppState {
         to.hvScanFirstTouch = c.hvScanFirstTouch; to.hvMarkFirstIncrease = c.hvMarkFirstIncrease
         to.rejectCandleNext = c.rejectCandleNext
         to.mintick = c.mintick; to.slBufTicks = c.slBufTicks; to.entryBufTicks = c.entryBufTicks; to.minTPunits = c.minTPunits
+        to.slipTicks = c.slipTicks
         to.strategy = c.strategy; to.tpUnits = c.tpUnits
         to.maxSlUnits = c.maxSlUnits
         to.useRiskPct = c.useRiskPct; to.riskPct = c.riskPct; to.equityPct = c.equityPct
@@ -1228,17 +1434,437 @@ class AppState {
         to.lotStep = c.lotStep; to.lostResetAtFinalTp = c.lostResetAtFinalTp
     }
 
-    /**
-     * کپی وضعیت موتورِ بازگردانی‌شده به موتور سراسری (تا ارجاع‌ها یکسان بماند).
-     * پیاده‌سازی در خودِ موتور است ([Engine.copyStateFrom]) تا هیچ فیلدی جا نیفتد.
-     */
+    /** کپی وضعیت موتورِ بازگردانی‌شده به موتور سراسری (تا ارجاع‌ها یکسان بماند) */
     private fun copyEngine(src: Engine, dst: Engine) {
-        dst.copyStateFrom(src)
+        dst.aggS.reset(); dst.aggM.reset(); dst.agg1.reset()
+        copyAgg(src.aggS, dst.aggS); copyAgg(src.aggM, dst.aggM); copyAgg(src.agg1, dst.agg1)
+        dst.structBars.clear(); dst.structBars.addAll(src.structBars)
+        dst.microS.clear(); dst.microS.addAll(src.microS)
+        dst.pins.clear(); dst.pins.addAll(src.pins)
+        dst.setups.clear(); dst.setups.addAll(src.setups)
+        dst.zones.clear(); dst.zones.addAll(src.zones)
+        dst.t1Zones.clear(); dst.t1Zones.addAll(src.t1Zones)
+        dst.t2Zones.clear(); dst.t2Zones.addAll(src.t2Zones)
+        dst.markers.clear(); dst.markers.addAll(src.markers)
+        dst.events.clear(); dst.events.addAll(src.events)
+        dst.cnt.setup = src.cnt.setup; dst.cnt.touch = src.cnt.touch; dst.cnt.mid = src.cnt.mid
+        dst.cnt.lv = src.cnt.lv; dst.cnt.hv = src.cnt.hv; dst.cnt.entry = src.cnt.entry
+        dst.cnt.done = src.cnt.done; dst.cnt.zoneCount = src.cnt.zoneCount; dst.cnt.zoneRejected = src.cnt.zoneRejected
+        dst.trend = src.trend; dst.HH = src.HH; dst.HL = src.HL; dst.LL = src.LL; dst.LH = src.LH
+        dst.tempBoxTop = src.tempBoxTop; dst.tempBoxBot = src.tempBoxBot
+        dst.hlPinLo = src.hlPinLo; dst.hlPinRef = src.hlPinRef; dst.hlPinHi = src.hlPinHi; dst.hlPinSeq = src.hlPinSeq
+        dst.hhPinHi = src.hhPinHi; dst.hhPinRef = src.hhPinRef; dst.hhPinLo = src.hhPinLo; dst.hhPinSeq = src.hhPinSeq
+        dst.lhPinHi = src.lhPinHi; dst.lhPinRef = src.lhPinRef; dst.lhPinLo = src.lhPinLo; dst.lhPinSeq = src.lhPinSeq
+        dst.llPinLo = src.llPinLo; dst.llPinRef = src.llPinRef; dst.llPinHi = src.llPinHi; dst.llPinSeq = src.llPinSeq
+        dst.seqStart = src.seqStart
+        dst.bullBU1Low = src.bullBU1Low; dst.bullBEHigh = src.bullBEHigh
+        dst.bullBU2Low = src.bullBU2Low; dst.bullBU2Bi = src.bullBU2Bi
+        dst.bearBE1High = src.bearBE1High; dst.bearBULow = src.bearBULow
+        dst.bearBE2High = src.bearBE2High; dst.bearBE2Bi = src.bearBE2Bi
+        dst.bullSetup = src.bullSetup; dst.bearSetup = src.bearSetup
+        dst.expectedReady = src.expectedReady
+        dst.lowestBUpin = src.lowestBUpin; dst.highestBE = src.highestBE
+        dst.lastBUpin = src.lastBUpin; dst.lastBEpin = src.lastBEpin
+        dst.buActive = src.buActive; dst.beActive = src.beActive
+        dst.pinSeq = src.pinSeq; dst.buSeq = src.buSeq; dst.beSeq = src.beSeq
+        dst.lastBUpinRef = src.lastBUpinRef; dst.lastBUpinHi = src.lastBUpinHi
+        dst.lastBEpinRef = src.lastBEpinRef; dst.lastBEpinLo = src.lastBEpinLo
+        dst.lastZoneTop = src.lastZoneTop; dst.lastZoneBot = src.lastZoneBot
+        dst.zoneRefH = src.zoneRefH; dst.zoneRefL = src.zoneRefL   // §18-22: مرجع ابطال نواحی درونی
+        dst.lastPocPx = src.lastPocPx; dst.lastProfBars = src.lastProfBars
+        dst.lastEntryPx = src.lastEntryPx; dst.lastSlPx = src.lastSlPx; dst.lastTpPx = src.lastTpPx
+        dst.lastResult = src.lastResult
+        dst.prevT1Vol = src.prevT1Vol; dst.prevChartVol = src.prevChartVol
+        dst.zoneSeq = src.zoneSeq; dst.setupSeq = src.setupSeq; dst.processed = src.processed
+        dst.curBi = src.curBi; dst.curT = src.curT
     }
 
-    /** نقطهٔ واحد کپی وضعیت کارگزار: خودِ کارگزار ([PaperBroker.copyStateFrom]). */
+    private fun copyAgg(s: Agg, d: Agg) {
+        d.reset()
+        d.periods = s.periods
+        d.cur = s.cur?.let { Candle(it.bi, it.t, it.o, it.h, it.l, it.c, it.v) }
+        d.cl = s.cl?.let { Candle(it.bi, it.t, it.o, it.h, it.l, it.c, it.v) }
+        d.closedNow = false
+    }
+
     private fun copyBroker(src: PaperBroker, dst: PaperBroker) {
-        dst.copyStateFrom(src)
+        dst.orders.clear(); dst.orders.addAll(src.orders)
+        dst.trades.clear(); dst.trades.addAll(src.trades)
+        dst.balance = src.balance; dst.equity = src.equity
+        dst.maxEquity = src.maxEquity; dst.maxDrawdown = src.maxDrawdown
+        dst.orderSeq = src.orderSeq; dst.tradeSeq = src.tradeSeq
+        dst.mm.lost = src.mm.lost; dst.mm.cmsnLost = src.mm.cmsnLost   // §۲۰
+        // §۲۰ سند: «اگر Capital = 2×NakedCapital شد، NakedCapital دو برابر می‌شود»؛ این حالت
+        // باید بعد از بازیابی فایل هم حفظ شود، وگرنه با هر بار لود، حجم/ریسک به مقدار اولیه برمی‌گردد.
+        dst.mm.restoreNaked(src.mm.nakedCapital())
+        // v1.4.9: همهٔ سفارش‌ها/پوزیشن‌های فعال کپی شوند.
+        for (o in src.pendingOrders) dst.restorePending(o)
+        for (t in src.openTrades) dst.restoreOpen(t)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  نشست بک‌تست داخلی (طرح B) — دادهٔ یک‌سالهٔ M1 با حجم، جدا از فید زنده
+    //
+    //  چرا نشست جدا و نه «مرج»: دیتاست آزاد و فید زنده دو فید متفاوت‌اند
+    //  (اختلاف قیمت میانه −۰٫۱۶۵ دلار و مقیاس حجم ≈۲۵٬۰۰۰ برابر — اندازه‌گیری‌شده).
+    //  هر اتصالی بین این دو، یک پرش قیمت و یک کندل حجمی جعلی روی درز می‌سازد و
+    //  باکس‌های داخلی را وارد سری زنده می‌کند. با جداسازی، تداخل از نظر ساختاری حذف می‌شود.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /** ثبت نشست فعال در تنظیمات دستگاه. */
+    private fun persistSessionMode() {
+        try {
+            appCtx?.getSharedPreferences("goldpin", Context.MODE_PRIVATE)
+                ?.edit()?.putString("session_mode", sessionMode.name)?.apply()
+        } catch (e: Exception) { Log.w(Log.CAT_APP, "ثبت نشست ناموفق", e.message ?: "") }
+    }
+
+    /** فایل نشست فعال (زنده یا بک‌تست). */
+    private fun sessionFile(ctx: Context): File =
+        if (sessionMode == SessionMode.INTERNAL) Storage.internalFile(ctx) else Storage.autoFile(ctx)
+
+    fun hasBacktestData(ctx: Context): Boolean {
+        val f = Storage.dataFile(ctx)
+        return f.exists() && f.length() > 1_000_000
+    }
+
+    /** متن وضعیت دادهٔ بک‌تست برای نمایش در تنظیمات. */
+    fun backtestDataText(ctx: Context): String {
+        val f = Storage.dataFile(ctx)
+        if (!f.exists()) return "دادهٔ یک‌ساله دانلود نشده است"
+        val mb = f.length() / 1048576.0
+        return "دادهٔ یک‌ساله موجود است · ${Fa.n(mb, 2)} مگابایت · ${Fa.d(Feed.BACKTEST_DATA_BARS.toString())} کندل M1"
+    }
+
+    /** دانلود یک‌بارهٔ دادهٔ یک‌ساله از GitHub Release با بررسی هش. */
+    fun downloadBacktestData(ctx: Context, onDone: (String) -> Unit = {}) {
+        io.execute {
+            busy = true
+            busyText = "دانلود دادهٔ بک‌تست…"
+            backtestProgress = 0f
+            notifyUi()
+            var msg: String
+            try {
+                val part = Storage.dataPartFile(ctx)
+                if (part.exists()) part.delete()
+                Feed.downloadTo(Feed.BACKTEST_DATA_URL, part) { got, total ->
+                    backtestProgress = if (total > 0) (got.toFloat() / total) else -1f
+                    busyText = if (total > 0)
+                        "دانلود دادهٔ بک‌تست: ${(got * 100 / total)}٪ (${Fa.n(got / 1048576.0, 1)} از ${Fa.n(total / 1048576.0, 1)} مگابایت)"
+                    else "دانلود دادهٔ بک‌تست: ${Fa.n(got / 1048576.0, 1)} مگابایت"
+                    notifyUi()
+                }
+                val hash = Feed.sha256(part)
+                if (!hash.equals(Feed.BACKTEST_DATA_SHA256, ignoreCase = true)) {
+                    part.delete()
+                    throw FeedException("هش فایل داده مطابق انتظار نیست (دانلود ناقص) — دوباره تلاش کنید")
+                }
+                val dest = Storage.dataFile(ctx)
+                if (dest.exists()) dest.delete()
+                if (!part.renameTo(dest)) { part.copyTo(dest, overwrite = true); part.delete() }
+                msg = "دادهٔ بک‌تست ذخیره شد: ${Fa.n(dest.length() / 1048576.0, 2)} مگابایت"
+                Log.i(Log.CAT_FEED, "دادهٔ بک‌تست دانلود شد", "بایت=${dest.length()} هش=${hash.take(12)}…")
+            } catch (e: Exception) {
+                Log.e(Log.CAT_FEED, "دانلود دادهٔ بک‌تست ناموفق", e)
+                msg = "خطای دانلود داده: ${e.message}"
+            } finally {
+                backtestProgress = -1f
+                busy = false
+                busyText = ""
+            }
+            main.post { notifyUi(); onDone(msg) }
+        }
+    }
+
+    /** پاک کردن فایل دادهٔ بک‌تست (برای آزاد کردن ۵ مگابایت). */
+    fun deleteBacktestData(ctx: Context): String {
+        var n = 0
+        for (f in listOf(Storage.dataFile(ctx), Storage.dataPartFile(ctx))) {
+            if (f.exists() && f.delete()) n++
+        }
+        notifyUi()
+        return if (n > 0) "دادهٔ بک‌تست پاک شد" else "فایلی برای پاک کردن نبود"
+    }
+
+    /**
+     * پاک‌سازی کامل حافظه برای تعویض نشست — **هیچ فایلی حذف نمی‌شود**.
+     * (برخلاف [wipe] که دادهٔ کاربر را هم پاک می‌کند.)
+     */
+    private fun resetStateForSession() {
+        synchronized(stateLock) {
+            candles = emptyList()
+            modeCandles = emptyList()
+            fineCandles = emptyList()
+            structureCandles = emptyList()
+            internalRaw = emptyList()
+            tfFeedCache.clear()
+            modeFromFeed = false
+            zoneKeepKey = ""
+            broker.reset()
+            engine.reset()
+            engine.broker = broker
+            broker.engine = engine
+            engine.barCommitHook = { cd -> broker.onBar(cd, live = false) }
+            publishSnapshot()
+        }
+    }
+
+    /** خلاصهٔ وضعیت موتور/کارگزار برای نمایش بعد از اجرا یا بارگذاری. */
+    private fun backtestSummary(): String {
+        val zones = engine.zones
+        val lv = engine.t1Zones.size      // باکس‌های تریگر۱ (LV/ولوم کم)
+        val hv = engine.t2Zones.size      // باکس‌های تریگر۲ (HV/ولوم زیاد)
+        return "کندل=${Fa.d(engine.processed.toString())} · ناحیه=${Fa.d(zones.size.toString())} " +
+            "(فعال=${Fa.d(zones.count { it.status == ZoneStatus.ACTIVE }.toString())}) · " +
+            "LV=${Fa.d(lv.toString())} · HV=${Fa.d(hv.toString())} · " +
+            "سفارش=${Fa.d(broker.orders.size.toString())} · معامله=${Fa.d(broker.trades.size.toString())} · " +
+            "سرمایه=${Fa.n(broker.balance, 2)}"
+    }
+
+    /**
+     * اجرای کامل موتور روی دادهٔ یک‌ساله — با گزارش پیشرفت.
+     *
+     * `feed` را قطعه‌قطعه صدا می‌زنیم تا نوار پیشرفت واقعی باشد؛ `feed` از `processed`
+     * ادامه می‌دهد، پس نه کندلی دوبار پردازش می‌شود و نه کندلی جا می‌افتد. کندل آخر
+     * فقط در پاس نهایی «بسته» حساب می‌شود.
+     */
+    /**
+     * سری کندل «تریگر ۲» (تایم‌فریمی که موتور روی آن اجرا می‌شود) از دادهٔ خام M1.
+     *
+     * پیش‌تر همیشه خودِ M1 به موتور داده می‌شد؛ یعنی اگر کاربر مود را عوض می‌کرد،
+     * موتور باز هم دادهٔ یک‌دقیقه‌ای را به‌عنوان تایم‌فریم تریگر۲ می‌دید و تغییر مود
+     * هیچ اثری نداشت. حالا برای هر tf2 دوباره از M1 تجمیع می‌شود.
+     */
+    private fun internalModeSeries(raw: List<Candle>): List<Candle> {
+        if (raw.isEmpty()) return raw
+        val step = medianStepSec(raw)
+        if (cfg.tf2 <= step || sameTimeframe(step, cfg.tf2.toLong())) return raw
+        return Feed.aggregate(raw, cfg.tf2).ifEmpty { raw }
+    }
+
+    /** تجمیع دوبارهٔ سری‌های نمایشی از M1 — بدون دست‌زدن به نتیجهٔ موتور. */
+    private fun internalResetSeries() {
+        val raw = internalRaw
+        if (raw.isEmpty()) return
+        val mode = internalModeSeries(raw)
+        synchronized(stateLock) {
+            fineCandles = raw
+            modeCandles = mode
+            tfFeedCache.clear()
+            tfFeedCache[cfg.tf2] = mode
+            modeFromFeed = true
+            candles = if (chartTfSec == cfg.tf2) mode else aggregateBestAvailable(chartTfSec).ifEmpty { mode }
+            zoneKeepKey = ""
+        }
+        publishSnapshot()
+    }
+
+    private fun runInternalBlocking(ctx: Context, raw: List<Candle>): String {
+        val t0 = System.currentTimeMillis()
+        internalRaw = raw
+        val mode = internalModeSeries(raw)
+        synchronized(stateLock) {
+            fineCandles = raw
+            modeCandles = mode
+            tfFeedCache.clear()
+            tfFeedCache[cfg.tf2] = mode
+            modeFromFeed = true
+            structureCandles = emptyList()
+            candles = if (chartTfSec == cfg.tf2) mode else aggregateBestAvailable(chartTfSec).ifEmpty { mode }
+            zoneKeepKey = ""
+            broker.reset()
+            engine.reset()
+            engine.broker = broker
+            broker.engine = engine
+            engine.barCommitHook = { cd -> broker.onBar(cd, live = false) }
+            publishSnapshot()
+        }
+        notifyUi()
+
+        val prevAlerts = Alerts.inBacktest
+        Alerts.inBacktest = true          // بک‌تست هرگز بنر/نوتیفیکیشن/صدا نمی‌دهد
+        try {
+            // موتور روی سری تریگر۲ همان مودِ انتخاب‌شده اجرا می‌شود (نه همیشه M1)
+            val chunk = 20_000
+            var done = 0
+            while (done < mode.size) {
+                val upto = minOf(mode.size, done + chunk)
+                engine.feed(mode.subList(0, upto), lastIsClosed = false)
+                done = upto
+                backtestProgress = done.toFloat() / mode.size
+                backtestProgressText = "${Fa.d(done.toString())} از ${Fa.d(mode.size.toString())}"
+                busyText = "بک‌تست داخلی: ${(backtestProgress * 100).toInt()}٪ — $backtestProgressText کندل"
+                notifyUi()
+            }
+            engine.feed(mode, lastIsClosed = true)
+            // مارکر «روند فعلی» تا آخرین کندل بسته
+            val lastClosed = mode.getOrNull(engine.processed - 1)
+            if (lastClosed != null) engine.ensureCurrentTrendMarker(lastClosed.t, lastClosed.c, engine.processed - 1)
+        } finally {
+            Alerts.inBacktest = prevAlerts
+        }
+
+        zoneKeepKey = zoneKey()
+        backtestStale = false
+        backtestProgress = -1f
+        backtestProgressText = ""
+        synchronized(stateLock) { publishSnapshot() }
+        val ms = System.currentTimeMillis() - t0
+        backtestInfo = backtestSummary()
+        Log.i(Log.CAT_ENGINE, "بک‌تست داخلی تمام شد",
+            "مدت=${ms}ms کندل‌M1=${raw.size} کندل‌مود=${mode.size} tf2=${com.alisport.goldpin.core.Tf.label(cfg.tf2)} " +
+                "استراتژی=${cfg.strategy} ناحیه=${engine.zones.size} LV=${engine.t1Zones.size} HV=${engine.t2Zones.size} " +
+                "سفارش=${broker.orders.size} معامله=${broker.trades.size}")
+        saveToAutoFile(ctx)               // فایل نشست داخلی: بدون کندل ⇒ ≈۳۶۰KB
+        return "بک‌تست تمام شد (${ms / 1000} ثانیه)\n$backtestInfo"
+    }
+
+    /** بازیابی نشست داخلی ذخیره‌شده + خواندن کندل‌ها از فایل داده. */
+    private fun restoreInternalBlocking(ctx: Context, raw: List<Candle>): String {
+        val f = Storage.internalFile(ctx)
+        if (!f.exists()) return runInternalBlocking(ctx, raw)
+        busyText = "بازیابی نتیجهٔ بک‌تست…"
+        notifyUi()
+        val ld = Store.load(Storage.readText(f))
+        val savedSig = ld.meta["btSig"]?.toString().orEmpty()
+        // ── نقطهٔ حیاتی «اتصال تنظیمات به بک‌تست» ────────────────────────────────
+        // اگر مود/استراتژی/پارامترها از آخرین اجرا عوض شده باشد، نتیجهٔ ذخیره‌شده دیگر
+        // پاسخِ همین تنظیمات نیست. پیش‌تر فقط هشدار «کهنه» نشان داده می‌شد و کاربر پیام
+        // می‌گرفت که بک‌تست تغییرات را نمی‌گیرد؛ حالا خودکار با تنظیمات تازه اجرا می‌شود.
+        if (savedSig.isNotEmpty() && savedSig != backtestSignature()) {
+            Log.i(Log.CAT_ENGINE, "تنظیمات از آخرین بک‌تست عوض شده → اجرای مجدد خودکار",
+                "قدیم=${savedSig.take(40)}… جدید=${backtestSignature().take(40)}…")
+            return runInternalBlocking(ctx, raw)
+        }
+        internalRaw = raw
+        val mode = internalModeSeries(raw)
+        synchronized(stateLock) {
+            engine.reset()
+            broker.reset()
+            copyEngine(ld.eng, engine)
+            copyBroker(ld.broker, broker)
+            engine.broker = broker
+            broker.engine = engine
+            engine.barCommitHook = { cd -> broker.onBar(cd, live = false) }
+            fineCandles = raw
+            modeCandles = mode
+            tfFeedCache.clear()
+            tfFeedCache[cfg.tf2] = mode
+            modeFromFeed = true
+            structureCandles = ArrayList(ld.structureCandles)
+            candles = if (chartTfSec == cfg.tf2) mode else aggregateBestAvailable(chartTfSec).ifEmpty { mode }
+            zoneKeepKey = zoneKey()
+            backtestStale = false
+            publishSnapshot()
+        }
+        backtestInfo = backtestSummary()
+        notifyUi()
+        return "نتیجهٔ بک‌تست بازگردانده شد (تنظیمات مطابق است)\n$backtestInfo"
+    }
+
+    /** بازیابی نشست زنده از فایل (یا نمونهٔ داخلی اگر فایلی نبود). */
+    private fun restoreLiveBlocking(ctx: Context, applySettings: Boolean = true): String {
+        val f = Storage.autoFile(ctx)
+        if (!f.exists()) {
+            val n = loadSampleBlocking(ctx)
+            return "فایل زنده‌ای نبود — نمونهٔ کوچک داخلی بارگذاری شد (${Fa.d(n.toString())} کندل)"
+        }
+        return loadFromText(Storage.readText(f), applySettings)
+    }
+
+    /**
+     * بارگذاری کامل نشست داخلی (روی نخ IO). اگر فایل نشست نباشد، بک‌تست اجرا می‌شود.
+     */
+    private fun loadInternalBlocking(ctx: Context): String {
+        val data = Storage.dataFile(ctx)
+        if (!data.exists()) return "دادهٔ یک‌ساله دانلود نشده است — اول «دانلود دادهٔ بک‌تست» را بزنید"
+        busy = true
+        busyText = "خواندن دادهٔ یک‌ساله…"
+        backtestProgress = 0f
+        notifyUi()
+        val raw = try {
+            data.inputStream().use { Feed.parseCsvStream(it) }
+        } catch (e: Exception) {
+            backtestProgress = -1f
+            busy = false; busyText = ""
+            return "خطای خواندن دادهٔ بک‌تست: ${e.message}"
+        }
+        return try {
+            restoreInternalBlocking(ctx, raw)
+        } finally {
+            busy = false
+            busyText = ""
+            backtestProgress = -1f
+            notifyUi()
+        }
+    }
+
+    /** اجرای دستی مجدد بک‌تست (از دکمهٔ تنظیمات). */
+    fun runInternalBacktest(ctx: Context, onDone: (String) -> Unit = {}) {
+        if (sessionMode != SessionMode.INTERNAL) {
+            main.post { onDone("اول «تاریخچهٔ داخلی» را روشن کنید") }
+            return
+        }
+        io.execute {
+            busy = true
+            busyText = "خواندن دادهٔ یک‌ساله…"
+            notifyUi()
+            var msg = ""
+            try {
+                val data = Storage.dataFile(ctx)
+                if (!data.exists()) throw FeedException("دادهٔ یک‌ساله دانلود نشده است")
+                val raw = data.inputStream().use { Feed.parseCsvStream(it) }
+                msg = runInternalBlocking(ctx, raw)
+            } catch (e: Exception) {
+                Log.e(Log.CAT_ENGINE, "اجرای بک‌تست ناموفق", e)
+                msg = "خطای بک‌تست: ${e.message}"
+            } finally {
+                busy = false
+                busyText = ""
+                backtestProgress = -1f
+                backtestProgressText = ""
+            }
+            main.post { notifyUi(); onDone(msg) }
+        }
+    }
+
+    /**
+     * روشن/خاموش کردن «تاریخچهٔ داخلی».
+     *
+     * ترتیب کار عمدی است: **اول** نشست فعلی ذخیره می‌شود، **بعد** حافظه پاک و نشست مقصد
+     * بارگذاری می‌شود. پس هیچ‌وقت وضعیت زنده با دادهٔ بک‌تست جای‌گزین نمی‌شود.
+     */
+    fun switchSession(ctx: Context, target: SessionMode, onDone: (String) -> Unit = {}) {
+        if (target == sessionMode) {
+            main.post { onDone("نشست «${target.fa}» همین حالا فعال است") }
+            return
+        }
+        io.execute {
+            busy = true
+            busyText = if (target == SessionMode.INTERNAL) "رفتن به بک‌تست داخلی…" else "بازگشت به حالت زنده…"
+            notifyUi()
+            var msg: String
+            try {
+                saveToAutoFile(ctx)            // نشست فعلی، در فایل خودش
+                resetStateForSession()
+                sessionMode = target
+                backtestStale = false
+                backtestInfo = ""
+                // هنگام بازگشت به زنده، تنظیماتِ فعلیِ کاربر حفظ می‌شود (applySettings=false)
+                msg = if (target == SessionMode.INTERNAL) loadInternalBlocking(ctx)
+                      else restoreLiveBlocking(ctx, applySettings = false)
+                persistSessionMode()
+                Log.i(Log.CAT_APP, "نشست عوض شد", "→ ${target.name}")
+            } catch (e: Exception) {
+                Log.e(Log.CAT_APP, "تعویض نشست ناموفق", e)
+                msg = "خطای تعویض نشست: ${e.message}"
+            } finally {
+                busy = false
+                busyText = ""
+                backtestProgress = -1f
+            }
+            main.post { notifyUi(); onDone(msg) }
+        }
     }
 
     /** پاک کردن کامل */
@@ -1250,6 +1876,7 @@ class AppState {
             structureCandles = emptyList()
             tfFeedCache.clear()
             modeFromFeed = false
+            zoneKeepKey = ""      // پاک‌سازی کامل: هیچ باکس قدیمی‌ای نباید بازگردانده شود
             broker.reset()
             engine.reset()
             engine.broker = broker; broker.engine = engine
@@ -1302,13 +1929,18 @@ class AppState {
         notifyUi()
         io.execute {
             val msg = try {
-                val f = Storage.autoFile(ctx)
-                if (f.exists()) {
-                    loadFromText(Storage.readText(f))
+                if (sessionMode == SessionMode.INTERNAL) {
+                    // کاربر آخرین بار در نشست بک‌تست بوده است.
+                    if (hasBacktestData(ctx)) {
+                        loadInternalBlocking(ctx)
+                    } else {
+                        sessionMode = SessionMode.LIVE
+                        persistSessionMode()
+                        Log.w(Log.CAT_APP, "نشست داخلی انتخاب شده بود ولی داده موجود نیست → بازگشت به زنده")
+                        restoreLiveBlocking(ctx)
+                    }
                 } else {
-                    Log.w(Log.CAT_APP, "فایل ذخیره پیدا نشد → بارگذاری دادهٔ نمونه")
-                    loadSampleBlocking(ctx)
-                    "فایل ذخیره‌ای نبود — دادهٔ نمونه بارگذاری شد"
+                    restoreLiveBlocking(ctx)
                 }
             } catch (e: Exception) {
                 // هرگز اپ را با فایل خراب از کار نینداز؛ فقط اطلاع بده

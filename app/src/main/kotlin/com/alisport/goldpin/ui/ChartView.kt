@@ -9,10 +9,6 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.os.SystemClock
-import android.text.Layout
-import android.text.StaticLayout
-import android.text.TextDirectionHeuristics
-import android.text.TextPaint
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -196,7 +192,6 @@ class ChartView @JvmOverloads constructor(
     private val bg = Color.parseColor("#0E1116")
     private val gridCol = Color.parseColor("#1B2230")
     private val axisText = Color.parseColor("#9AA6B8")
-    private val axisTextDim = Color.parseColor("#5E6A7C")
     private val upCol = Color.parseColor("#26A69A")
     private val dnCol = Color.parseColor("#EF5350")
     private val crossCol = Color.parseColor("#8FA3BF")
@@ -210,11 +205,8 @@ class ChartView @JvmOverloads constructor(
         color = gridCol; strokeWidth = 1f; pathEffect = DashPathEffect(floatArrayOf(3f, 5f), 0f)
     }
     private val pAxis = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#121821") }
-    private val pTxt = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = axisText; textSize = Ui.dp(context, 10.5f).toFloat() }
-    private val pTxtSm = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = axisText; textSize = Ui.dp(context, 9.5f).toFloat() }
-
-    /** فقط برای برچسب کوچک «UTC» روی نوار محور زمان (رنگ و اندازهٔ جدا تا pTxtSm را تغییر ندهد). */
-    private val pUTC = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = axisTextDim; textSize = Ui.dp(context, 8.5f).toFloat() }
+    private val pTxt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = axisText; textSize = Ui.dp(context, 10.5f).toFloat() }
+    private val pTxtSm = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = axisText; textSize = Ui.dp(context, 9.5f).toFloat() }
     private val pLegend = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = Ui.dp(context, 11f).toFloat(); isFakeBoldText = true }
     private val pZoneFill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val pZoneLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -243,11 +235,11 @@ class ChartView @JvmOverloads constructor(
         pathEffect = DashPathEffect(floatArrayOf(4f, 4f), 0f)
     }
     private val pBubble = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#2B3546") }
-    private val pBubbleTxt = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val pBubbleTxt = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE; textSize = Ui.dp(context, 10.5f).toFloat()
     }
     private val pLabelBg = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val pLabelTxt = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val pLabelTxt = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE; textSize = Ui.dp(context, 9.5f).toFloat()
     }
     private val pPoc = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -257,7 +249,7 @@ class ChartView @JvmOverloads constructor(
     private val pWater = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#15FFFFFF"); textSize = Ui.dp(context, 42f).toFloat(); isFakeBoldText = true
     }
-    private val pAuto = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val pAuto = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#5A6BFF"); textSize = Ui.dp(context, 9f).toFloat()
     }
     private val path = Path()
@@ -491,26 +483,22 @@ class ChartView @JvmOverloads constructor(
                     if (z.top > hi) hi = z.top
                 }
             }
-            if (showTrigger1Boxes) {
-                for (z in t1Zones) {
-                    if (z.status != ZoneStatus.ACTIVE) continue
+            fun includeTriggerBoxes(boxes: List<ZoneBox>) {
+                for (z in boxes) {
+                    if (z.status == ZoneStatus.CAP) continue
+                    val active = z.status == ZoneStatus.ACTIVE
+                    if (!active && !showDeletedStructureBoxes) continue
+                    if (!active && z.endT > 0L && z.endT < firstT) continue
                     val sBi = idxOfTime(z.createdT, z.createdBi)
-                    if (sBi <= to) {
+                    val eBi = if (active) candles.size - 1 else idxOfTime(z.endT, z.endBi)
+                    if (sBi <= to && eBi >= from) {
                         if (z.bot < lo) lo = z.bot
                         if (z.top > hi) hi = z.top
                     }
                 }
             }
-            if (showTrigger2Boxes) {
-                for (z in t2Zones) {
-                    if (z.status != ZoneStatus.ACTIVE) continue
-                    val sBi = idxOfTime(z.createdT, z.createdBi)
-                    if (sBi <= to) {
-                        if (z.bot < lo) lo = z.bot
-                        if (z.top > hi) hi = z.top
-                    }
-                }
-            }
+            if (showTrigger1Boxes) includeTriggerBoxes(t1Zones)
+            if (showTrigger2Boxes) includeTriggerBoxes(t2Zones)
         }
         if (showTradeLines) for (o in overlays) {
             val arr = doubleArrayOf(
@@ -595,14 +583,8 @@ class ChartView @JvmOverloads constructor(
     //  لمس
     // ══════════════════════════════════════════════════════════════════════════
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
-        // ⚠ پیش‌تر هر تغییر اندازه (باز شدن/بستن پنل‌ها، تغییر ارتفاع نوار پایین،
-        // چرخش صفحه) `resetView()` صدا می‌زد و زوم/جابه‌جایی کاربر را بی‌خبر پاک می‌کرد؛
-        // کاربر با هر تغییر چیدمان، دوباره روی «آخرین کندل با عرض پیش‌فرض» پرت می‌شد.
-        // حالا فقط اولین اندازه‌گیری نما را بازنشانی می‌کند؛ بعد از آن فقط مقیاس قیمت
-        // با اندازهٔ جدید هم‌تراز می‌شود و زوم/موقعیت کاربر حفظ می‌شود.
-        val firstLayout = chartW <= 0 || chartH <= 0
         chartW = w; chartH = h
-        if (firstLayout) resetView() else { sanitizeView(); applyAutoPrice(); invalidate() }
+        resetView()
         super.onSizeChanged(w, h, ow, oh)
     }
 
@@ -832,7 +814,7 @@ class ChartView @JvmOverloads constructor(
         if (hoverIdx >= 0) {
             val c = candles[hoverIdx]
             onInfo?.invoke(
-                "${Fa.jalali(c.t, timeZone = utcTz)} UTC   O ${Fa.n(c.o)}   H ${Fa.n(c.h)}   L ${Fa.n(c.l)}   C ${Fa.n(c.c)}   V ${Fa.vol(c.v)}"
+                "${Fa.jalali(c.t)}   O ${Fa.n(c.o)}   H ${Fa.n(c.h)}   L ${Fa.n(c.l)}   C ${Fa.n(c.c)}   V ${Fa.vol(c.v)}"
             )
         }
     }
@@ -858,8 +840,8 @@ class ChartView @JvmOverloads constructor(
         if (candles.isEmpty()) {
             pTxt.textSize = Ui.dp(context, 12.5f).toFloat()
             pTxt.color = axisText
-            drawTextAuto(canvas, "داده‌ای نیست — تب تنظیمات ← دانلود تاریخچه",
-                Ui.dp(context, 14f).toFloat(), chartH / 2f, pTxt)
+            canvas.drawText("داده‌ای نیست — تب تنظیمات ← دانلود تاریخچه", Ui.dp(context, 14f).toFloat(),
+                chartH / 2f, pTxt)
             pTxt.textSize = Ui.dp(context, 10.5f).toFloat()
             return
         }
@@ -876,12 +858,6 @@ class ChartView @JvmOverloads constructor(
         }
 
         val (from, to) = visibleRange()
-
-        // ── محور قیمت (پس‌زمینه) ──
-        // ⚠ ترتیب مهم است: این مستطیل باید **قبل** از نوشتن اعداد محور رسم شود؛ پیش‌تر
-        // بعد از حلقهٔ شبکه رسم می‌شد و درست روی همان اعداد می‌افتاد، بنابراین محور
-        // قیمت در اسکرین‌شات کاربر کاملاً خالی بود.
-        canvas.drawRect(plotW, 0f, chartW.toFloat(), chartH.toFloat(), pAxis)
 
         // ── شبکه و محور قیمت ──
         if (showGrid && priceSpan.isFinite() && priceSpan > 0) {
@@ -900,6 +876,9 @@ class ChartView @JvmOverloads constructor(
                 p = np
             }
         }
+        // محور قیمت (پس‌زمینه)
+        canvas.drawRect(plotW, 0f, chartW.toFloat(), chartH.toFloat(), pAxis)
+
         // ── پنل حجم ──
         if (showVolume && volH > 0) {
             var maxV = 0.0
@@ -925,12 +904,6 @@ class ChartView @JvmOverloads constructor(
             }
             canvas.drawLine(0f, priceH, plotW, priceH, pGrid)
         }
-
-        // ── از این‌جا تا پایان برچسب‌های استراتژی، رسم داخل مستطیل نمودار بریده می‌شود ──
-        // (پیش‌تر متن برچسب‌ها می‌توانست تا داخل ستون محور قیمت بیرون بزند؛ نمونه‌اش در
-        // اسکرین‌شات کاربر: «کندل مهم بالاترین» نیمه‌بریده در ستون محور دیده می‌شد.)
-        canvas.save()
-        canvas.clipRect(0f, 0f, plotW, h)
 
         // ── باکس‌های ناحیه ──
         if (showZones) drawZones(canvas, from, to, priceH)
@@ -969,17 +942,11 @@ class ChartView @JvmOverloads constructor(
         // ── نتیجهٔ معاملات (اختیاری، پیش‌فرض خاموش) ──
         if (showTradeResults) drawTradeResults(canvas, from, to, priceH)
 
-        canvas.restore()
-
         // ── محور زمان (تراز بر مرزهای طبیعی زمان — مانند تریدینگ‌ویو) ──
         // پیش‌تر برچسب‌ها «هر N کندل» انتخاب می‌شدند، پس روی زمان‌های دلخواه می‌افتادند
         // (مثلاً ۱۴:۳۷). حالا فقط روی مرزهای طبیعی (ساعت، نیم‌روز، روز، هفته) می‌نشینند
         // و در اولین کندلِ هر روز، **تاریخ** نشان داده می‌شود.
         canvas.drawRect(0f, h, chartW.toFloat(), chartH.toFloat(), pAxis)
-        // منطقهٔ زمانی محور را صریح بنویس؛ همهٔ برچسب‌ها (ساعت، تاریخ، کراس‌هیر) به UTC است
-        // چون سشن، پنجرهٔ سفارش‌گیری (۰۱:۳۰–۲۰:۰۰) و «پایان زمان» در سند به UTC تعریف شده‌اند.
-        pUTC.color = axisTextDim
-        canvas.drawText("UTC", Ui.dp(context, 2f).toFloat(), chartH - Ui.dp(context, 5f).toFloat(), pUTC)
         val tickMs = timeTickSec().toLong() * 1000L
         var lastTick = Long.MIN_VALUE
         var prevDay = Long.MIN_VALUE
@@ -1000,7 +967,7 @@ class ChartView @JvmOverloads constructor(
                     val lbl = timeLabel(t, tickMs, newDay)
                     val tw = pTxtSm.measureText(lbl)
                     val paint = if (newDay && tickMs < 86_400_000L) pTxt else pTxtSm
-                    canvas.drawText(lbl, (x - tw / 2).coerceIn(Ui.dp(context, 26f).toFloat(), plotW - tw - 2f),
+                    canvas.drawText(lbl, (x - tw / 2).coerceIn(2f, plotW - tw - 2f),
                         chartH - Ui.dp(context, 5f).toFloat(), paint)
                     drawn++
                 }
@@ -1018,7 +985,7 @@ class ChartView @JvmOverloads constructor(
                 canvas.drawLine(0f, lastY, plotW, lastY, pDashed)
                 val txt = fmtPrice(last.c)
                 pLabelBg.color = (if (up) upCol else dnCol) and 0x00FFFFFF or 0xFF000000.toInt()
-                val tw = min(pLabelTxt.measureText(txt) + Ui.dp(context, 8f), axisW - 2f)
+                val tw = pLabelTxt.measureText(txt) + Ui.dp(context, 8f)
                 canvas.drawRoundRect(RectF(plotW + 1f, lastY - Ui.dp(context, 8f), plotW + tw, lastY + Ui.dp(context, 8f)),
                     Ui.dp(context, 2f).toFloat(), Ui.dp(context, 2f).toFloat(), pLabelBg)
                 canvas.drawText(txt, plotW + Ui.dp(context, 4f), lastY + Ui.dp(context, 3.5f), pLabelTxt)
@@ -1027,7 +994,7 @@ class ChartView @JvmOverloads constructor(
 
         // ── نشانگر مقیاس خودکار ──
         if (showStatusBadges && autoPrice) {
-            drawTextAuto(canvas, "خودکار", plotW + Ui.dp(context, 4f), Ui.dp(context, 12f).toFloat(), pAuto)
+            canvas.drawText("خودکار", plotW + Ui.dp(context, 4f), Ui.dp(context, 12f).toFloat(), pAuto)
         }
 
         // ── لِجند بالا-چپ ──
@@ -1042,7 +1009,7 @@ class ChartView @JvmOverloads constructor(
             bubble(canvas, plotW + 1f, crossY - Ui.dp(context, 9f), axisW - 2f, fmtPrice(px))
             if (crossIdx in candles.indices) {
                 val t = timeLabelFull(candles[crossIdx].t)
-                val w = textWidth(t, pBubbleTxt) + Ui.dp(context, 10f)
+                val w = pBubbleTxt.measureText(t) + Ui.dp(context, 10f)
                 bubble(canvas, (crossX - w / 2).coerceIn(0f, plotW - w), h + 1f, w, t)
             }
         }
@@ -1085,135 +1052,18 @@ class ChartView @JvmOverloads constructor(
      * اولین کندل هر روز، تاریخ جایش را می‌گیرد. در تایم‌فریم روزانه و بالاتر فقط تاریخ.
      */
     private fun timeLabel(t: Long, tickMs: Long, newDay: Boolean): String {
-        // ⚠ همه‌چیز UTC: ساعت برچسب‌ها، تشخیص «روز جدید» و تاریخ شمسی باید یک منطقهٔ
-        // زمانی داشته باشند. پیش‌تر ساعت UTC بود ولی `Fa.jalaliShort` تاریخ را به وقت
-        // محلی دستگاه می‌گرفت؛ روی دستگاه با اختلاف ساعت، برچسب تاریخ یک روز جابه‌جا
-        // می‌شد (مرز روز با UTC سنجیده می‌شد، تاریخ با وقت محلی نوشته می‌شد).
-        if (tickMs >= 86_400_000L || newDay) return Fa.jalaliShort(t, utcTz)
-        val c = java.util.Calendar.getInstance(utcTz).apply { timeInMillis = t }
+        if (tickMs >= 86_400_000L) return Fa.jalaliShort(t)
+        if (newDay) return Fa.jalaliShort(t)
+        val c = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply { timeInMillis = t }
         return Fa.d(String.format("%02d:%02d", c.get(java.util.Calendar.HOUR_OF_DAY), c.get(java.util.Calendar.MINUTE)))
     }
 
-    private fun timeLabelFull(t: Long): String = Fa.jalali(t, timeZone = utcTz)
-
-    private val utcTz: java.util.TimeZone = java.util.TimeZone.getTimeZone("UTC")
-
-    // ══════════════════════════════════════════════════════════════════════════
-    //  نوشتن متن فارسی (RTL)
-    //
-    //  ⚠ ایرادِ دیده‌شده در اسکرین‌شات: برچسب‌های فارسی با `Canvas.drawText` نوشته
-    //  می‌شدند. Canvas هیچ بازآرایی دوجهته (bidi) انجام نمی‌دهد؛ نتیجه این بود که
-    //  حروفِ هر کلمه درست ولی **ترتیب کلمات برعکس** بود («کندل مهم بالاترین» به شکل
-    //  «بالاترین مهم کندل» دیده می‌شد). برای متن فارسی باید از StaticLayout با جهت
-    //  RTL استفاده شود تا هم شکل‌دهی حروف و هم ترتیب کلمات/اعداد درست باشد.
-    // ══════════════════════════════════════════════════════════════════════════
-    private val rtlCache = HashMap<String, StaticLayout>()
-
-    /**
-     * آیا رشته «متن فارسی» است (حرف دارد)؟
-     *
-     * ⚠ ایراد مهمی که با بازرسی محور زمان در اسکرین‌شات پیدا شد: بازهٔ قبلی
-     * `'\u0600'..'\u06FF'` **ارقام فارسی/عربی** (۰-۹ = U+06F0..U+06F9 و ٠-٩ = U+0660..U+0669)
-     * را هم متن فارسی حساب می‌کرد. بنابراین برچسب‌هایی مثل «۰۵/۰۹/۱۱» یا «۱۲:۰۰» که
-     * `Fa.d()` آن‌ها را به رقم فارسی تبدیل کرده با StaticLayout در جهت RTL چیده می‌شدند.
-     * در الگوریتم دوجهته، ارقام «AN» هستند و جداکنندهٔ «/» یا «:» بین آن‌ها هم جهت AN
-     * می‌گیرد؛ نتیجه این بود که **ترتیب بخش‌ها برعکس** می‌شد: تاریخِ ۱۴۰۵/۰۹/۱۱ روی محور
-     * به شکل «۱۱/۰۹/۰۵» و ساعت ۲۱:۳۰ به شکل «۳۰:۲۱» دیده می‌شد. خودِ ارقام هم در
-     * بلوک RTL ممکن است جابه‌جا شوند.
-     *
-     * حالا فقط **حروف** فارسی/عربی باعث چیدمان RTL می‌شوند؛ رشته‌ای که فقط رقم و
-     * جداکننده دارد با `canvas.drawText` و در جهت LTR نوشته می‌شود (همان چیزی که
-     * برای عدد/تاریخ/ساعت درست است). رشته‌های مختلط (مثل «ورود خرید @ ۴۱۹۲٫۶۰»)
-     * همچنان RTL چیده می‌شوند تا ترتیب کلمات درست بماند و عدد هم به‌صورت LTR داخل
-     * متن جای بگیرد.
-     */
-    private fun hasFa(s: String): Boolean = s.any { ch ->
-        when {
-            ch in '\u0621'..'\u064A' -> true                 // حروف عربی/فارسی پایه (ا ب پ ت … ی)
-            ch in '\u0671'..'\u06D5' -> ch !in '\u06F0'..'\u06F9'  // حروف فارسی/علائم، بدون ارقام ۰-۹
-            ch in '\uFB50'..'\uFDFF' -> true                 // فرم‌های نمایشی عربی A
-            ch in '\uFE70'..'\uFEFF' -> true                 // فرم‌های نمایشی عربی B
-            else -> false
-        }
-    }
-
-    private fun rtlLayout(text: String, paint: TextPaint): StaticLayout {
-        val key = text + "\u0000" + paint.textSize + "\u0000" + paint.isFakeBoldText
-        rtlCache[key]?.let { return it }
-        // عرض کمی بزرگ‌تر از اندازهٔ متن تا هیچ‌وقت شکسته نشود
-        val w = ceil(paint.measureText(text)).toInt().coerceAtLeast(1) + 6
-        val sl = StaticLayout.Builder.obtain(text, 0, text.length, paint, w)
-            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-            .setTextDirection(TextDirectionHeuristics.RTL)
-            .setIncludePad(false)
-            .build()
-        if (rtlCache.size > 512) rtlCache.clear()
-        rtlCache[key] = sl
-        return sl
-    }
-
-    /** عرض واقعی متن (فارسی = عرض Layout، لاتین = measureText). */
-    private fun textWidth(text: String, paint: TextPaint): Float =
-        if (hasFa(text)) rtlLayout(text, paint).width.toFloat() else paint.measureText(text)
-
-    /** رسم متن با درنظرگرفتن جهت RTL؛ [left] لبهٔ چپ کادر متن و [baseline] خط پایه است. */
-    private fun drawTextAuto(canvas: Canvas, text: String, left: Float, baseline: Float, paint: TextPaint) {
-        if (hasFa(text)) {
-            val sl = rtlLayout(text, paint)
-            canvas.save()
-            canvas.translate(left, baseline - sl.getLineBaseline(0))
-            sl.draw(canvas)
-            canvas.restore()
-        } else {
-            canvas.drawText(text, left, baseline, paint)
-        }
-    }
+    private fun timeLabelFull(t: Long): String = Fa.jalali(t)
 
     private fun bubble(canvas: Canvas, x: Float, y: Float, w: Float, text: String) {
         val r = RectF(x, y, x + w, y + Ui.dp(context, 18f))
         canvas.drawRoundRect(r, Ui.dp(context, 3f).toFloat(), Ui.dp(context, 3f).toFloat(), pBubble)
-        drawTextAuto(canvas, text, r.left + Ui.dp(context, 5f), r.bottom - Ui.dp(context, 4.5f), pBubbleTxt)
-    }
-
-    /**
-     * برچسبِ کادرِ رنگی با پس‌زمینه (مثل TradingView) — همیشه داخل ناحیهٔ چارت می‌ماند،
-     * در صورت برخورد با برچسبِ قبلی جابه‌جا می‌شود و هرگز روی محور قیمت سرریز نمی‌کند.
-     */
-    private fun labelBox(
-        canvas: Canvas,
-        text: String,
-        anchorX: Float,
-        anchorY: Float,
-        above: Boolean,
-        bgColor: Int,
-        priceH: Float,
-        used: MutableList<RectF>,
-        textColor: Int = Color.WHITE
-    ) {
-        val t = text.lineSequence().first().trim()
-        if (t.isEmpty()) return
-        val padX = Ui.dp(context, 5f)
-        val labelH = Ui.dp(context, 16f).toFloat()
-        val gap = Ui.dp(context, 4f).toFloat()
-        val w = textWidth(t, pLabelTxt) + padX * 2
-        var left = anchorX + gap
-        if (left + w > plotW - 2f) left = anchorX - gap - w
-        left = left.coerceIn(2f, (plotW - w - 2f).coerceAtLeast(2f))
-        var top = if (above) anchorY - gap - labelH else anchorY + gap
-        // اگر روی برچسب دیگری افتاد، تا ۵ پله جابه‌جا کن
-        var tries = 0
-        while (tries < 5 && used.any { RectF.intersects(it, RectF(left, top, left + w, top + labelH)) }) {
-            top += if (above) -(labelH + 2f) else (labelH + 2f)
-            tries++
-        }
-        top = top.coerceIn(2f, (priceH - labelH - 2f).coerceAtLeast(2f))
-        val rect = RectF(left, top, left + w, top + labelH)
-        used.add(rect)
-        pLabelBg.color = bgColor
-        canvas.drawRoundRect(rect, Ui.dp(context, 3f).toFloat(), Ui.dp(context, 3f).toFloat(), pLabelBg)
-        pLabelTxt.color = textColor
-        drawTextAuto(canvas, t, left + padX, top + labelH * 0.72f, pLabelTxt)
-        pLabelTxt.color = Color.WHITE
+        canvas.drawText(text, r.left + Ui.dp(context, 5f), r.bottom - Ui.dp(context, 4.5f), pBubbleTxt)
     }
 
     private fun drawLegend(canvas: Canvas) {
@@ -1278,60 +1128,50 @@ class ChartView @JvmOverloads constructor(
                 canvas.drawText("Z${Fa.d(z.idx.toString())}", left + Ui.dp(context, 5f), yT + Ui.dp(context, 12.5f), pLabelTxt)
             }
         }
-        // باکس‌های تاییدشدهٔ تریگر ۱ (ولوم کم) و تریگر ۲ (ولوم زیاد) ثبت‌شده در حافظهٔ مود انتخاب‌شده
+        // باکس‌های تاییدشدهٔ تریگر ۱ (ولوم کم) و تریگر ۲ (ولوم زیاد) ثبت‌شده در حافظهٔ مود انتخاب‌شده.
+        // §4-5 سند: باکس ناحیه با باطل شدن **پاک نمی‌شود**؛ خاکستری کم‌رنگ می‌شود و تا انتهای عمرش
+        // (endT) روی چارت می‌ماند و از فایل ذخیره‌شده هم دوباره فراخوانی می‌شود.
         if (showTrigger1Boxes) {
-            for (z in t1Zones) {
-                if (z.status != ZoneStatus.ACTIVE) continue
-                val startIdx = idxOfTime(z.createdT, z.createdBi).toFloat()
-                val x1 = xOf(startIdx)
-                val x2 = xOf(rightIdx + 2f)
-                if (x2 < -barW || x1 > plotW + barW) continue
-                val left = max(min(x1, x2), -barW)
-                val right = min(max(x1, x2), plotW + barW)
-                val yT = yOf(z.top)
-                val yB = yOf(z.bot)
-                pZoneFill.color = (Palette.gold and 0x00FFFFFF) or (28 shl 24)
-                pZoneFill.style = Paint.Style.FILL
-                canvas.drawRect(left, yT, right, yB, pZoneFill)
-                pDotted.color = (Palette.gold and 0x00FFFFFF) or 0xB0000000.toInt()
-                canvas.drawLine(left, yT, right, yT, pDotted)
-                canvas.drawLine(left, yB, right, yB, pDotted)
-                if (showBoxLabels && barW > 3.5f) {
-                    pLabelBg.color = (Palette.gold and 0x00FFFFFF) or 0xB0000000.toInt()
-                    canvas.drawRoundRect(
-                        RectF(left + 2f, yT + 2f, left + Ui.dp(context, 28f), yT + Ui.dp(context, 15f)),
-                        Ui.dp(context, 3f).toFloat(), Ui.dp(context, 3f).toFloat(), pLabelBg
-                    )
-                    canvas.drawText("T1", left + Ui.dp(context, 5f), yT + Ui.dp(context, 12.5f), pLabelTxt)
-                }
-            }
+            for (z in t1Zones) drawTBox(canvas, z, Palette.gold, "T1", firstT)
         }
         if (showTrigger2Boxes) {
-            for (z in t2Zones) {
-                if (z.status != ZoneStatus.ACTIVE) continue
-                val startIdx = idxOfTime(z.createdT, z.createdBi).toFloat()
-                val x1 = xOf(startIdx)
-                val x2 = xOf(rightIdx + 2f)
-                if (x2 < -barW || x1 > plotW + barW) continue
-                val left = max(min(x1, x2), -barW)
-                val right = min(max(x1, x2), plotW + barW)
-                val yT = yOf(z.top)
-                val yB = yOf(z.bot)
-                pZoneFill.color = (Palette.accent and 0x00FFFFFF) or (28 shl 24)
-                pZoneFill.style = Paint.Style.FILL
-                canvas.drawRect(left, yT, right, yB, pZoneFill)
-                pDotted.color = (Palette.accent and 0x00FFFFFF) or 0xB0000000.toInt()
-                canvas.drawLine(left, yT, right, yT, pDotted)
-                canvas.drawLine(left, yB, right, yB, pDotted)
-                if (showBoxLabels && barW > 3.5f) {
-                    pLabelBg.color = (Palette.accent and 0x00FFFFFF) or 0xB0000000.toInt()
-                    canvas.drawRoundRect(
-                        RectF(left + 2f, yT + 2f, left + Ui.dp(context, 28f), yT + Ui.dp(context, 15f)),
-                        Ui.dp(context, 3f).toFloat(), Ui.dp(context, 3f).toFloat(), pLabelBg
-                    )
-                    canvas.drawText("T2", left + Ui.dp(context, 5f), yT + Ui.dp(context, 12.5f), pLabelTxt)
-                }
-            }
+            for (z in t2Zones) drawTBox(canvas, z, Palette.accent, "T2", firstT)
+        }
+    }
+
+    /**
+     * رسم یک باکس تریگر۱/تریگر۲:
+     *  • زنده (ACTIVE) = رنگی، کشیده تا لبهٔ راست چارت، با برچسب T1/T2؛
+     *  • باطل/مصرف‌شده = خاکستری کم‌رنگ از createdT تا endT (§4-5 سند: باکس قدیمی پاک نمی‌شود).
+     */
+    private fun drawTBox(canvas: Canvas, z: ZoneBox, liveColor: Int, tag: String, firstT: Long) {
+        if (z.status == ZoneStatus.CAP) return
+        val alive = z.status == ZoneStatus.ACTIVE
+        if (!alive && !showDeletedStructureBoxes) return
+        if (!alive && z.endT > 0L && z.endT < firstT) return
+        val startIdx = idxOfTime(z.createdT, z.createdBi).toFloat()
+        val endIdx = if (alive) rightIdx + 2f else idxOfTime(z.endT, z.endBi).toFloat()
+        val x1 = xOf(startIdx)
+        val x2 = xOf(endIdx)
+        if (x2 < -barW || x1 > plotW + barW) return
+        val left = max(min(x1, x2), -barW)
+        val right = min(max(x1, x2), plotW + barW)
+        val yT = yOf(z.top)
+        val yB = yOf(z.bot)
+        val color = if (alive) liveColor else Color.parseColor("#5A6472")
+        pZoneFill.color = (color and 0x00FFFFFF) or ((if (alive) 28 else 12) shl 24)
+        pZoneFill.style = Paint.Style.FILL
+        canvas.drawRect(left, yT, right, yB, pZoneFill)
+        pDotted.color = (color and 0x00FFFFFF) or (if (alive) 0xB0000000.toInt() else 0x55000000)
+        canvas.drawLine(left, yT, right, yT, pDotted)
+        canvas.drawLine(left, yB, right, yB, pDotted)
+        if (showBoxLabels && alive && barW > 3.5f) {
+            pLabelBg.color = (color and 0x00FFFFFF) or 0xB0000000.toInt()
+            canvas.drawRoundRect(
+                RectF(left + 2f, yT + 2f, left + Ui.dp(context, 28f), yT + Ui.dp(context, 15f)),
+                Ui.dp(context, 3f).toFloat(), Ui.dp(context, 3f).toFloat(), pLabelBg
+            )
+            canvas.drawText(tag, left + Ui.dp(context, 5f), yT + Ui.dp(context, 12.5f), pLabelTxt)
         }
     }
 
@@ -1347,34 +1187,17 @@ class ChartView @JvmOverloads constructor(
         else -> true
     }
 
-    /**
-     * برچسب‌های استراتژی (کندل مهم/پین، روند، رخدادها).
-     *
-     * ⚠ دو ایراد جدی که در اسکرین‌شات کاربر دیده می‌شد این‌جا اصلاح شده است:
-     *  ۱) متن فارسی با `drawText` نوشته می‌شد و ترتیب کلمات برعکس بود (مثلاً
-     *     «بالاترین مهم کندل» به‌جای «کندل مهم بالاترین»)؛ حالا همهٔ متن‌ها از مسیر
-     *     RTL ([drawTextAuto]) می‌روند.
-     *  ۲) مثلث پین‌ها سمت اشتباه رسم می‌شد: pinBE (سقف/مقاومت) باید **بالای** سقفِ
-     *     کندل مهم و رو به بالا باشد و pinBU (کف/حمایت) **زیر** کف آن و رو به پایین؛
-     *     پیش‌تر برعکس بود و مارکر روی بدنهٔ کندل می‌افتاد.
-     *  ۳) برچسب‌ها بدون پس‌زمینه و بدون محدودکردن به ناحیهٔ نمودار نوشته می‌شدند،
-     *     روی کندل‌های همسایه می‌افتادند و تا ستون محور قیمت بیرون می‌زدند؛ حالا هر
-     *     برچسب داخل کادر رنگی خودش است، به ناحیهٔ نمودار محدود می‌شود و با برچسب‌های
-     *     دیگر برخورد نمی‌کند.
-     */
     private fun drawMarkers(canvas: Canvas, from: Int, to: Int, priceH: Float) {
         val firstT = if (candles.isNotEmpty()) candles.first().t else 0L
-        val used = ArrayList<RectF>()
-        val r = Ui.dp(context, 3f).toFloat()
         for (m in markers) {
             if (!isMarkerKindVisible(m.kind)) continue
             if (m.t > 0L && m.t < firstT) continue
             val mBi = idxOfTime(m.t, m.bi)
             if (mBi < from - 2 || mBi > to + 2) continue
             val x = xOf(mBi.toFloat())
-            if (x < -barW || x > plotW + barW) continue
+            if (x < 0 || x > plotW) continue
             val y = yOf(m.price)
-            if (y < -30 || y > priceH + 40) continue
+            if (y < -20 || y > priceH + 30) continue
             val col = when (m.kind) {
                 MarkerKind.PIN_BU -> Palette.accent
                 MarkerKind.PIN_BE -> Color.parseColor("#C2417C")
@@ -1385,69 +1208,71 @@ class ChartView @JvmOverloads constructor(
                 8 -> Palette.gold
                 9 -> Palette.violet
                 10 -> dnCol
-                11 -> Palette.grey
                 else -> Palette.grey
             }
+            val r = Ui.dp(context, 3f).toFloat()
             if (m.kind == MarkerKind.STRUCT) {
                 // برچسب ساختار HH / HL / LL / LH روی کندل مهمِ پین (سند §۴-۱ «روند»)
                 val isHigh = m.text == "HH" || m.text == "LH"
                 val structCol = if (isHigh) Color.parseColor("#C2417C") else Palette.accent
-                val labelW = textWidth(m.text, pLabelTxt) + Ui.dp(context, 10f)
-                val labelH = Ui.dp(context, 16f).toFloat()
-                val gap = Ui.dp(context, 12f).toFloat()
+                val labelW = pLabelTxt.measureText(m.text) + Ui.dp(context, 10f)
+                val labelH = Ui.dp(context, 17f).toFloat()
+                val gap = Ui.dp(context, 14f).toFloat()
                 val left = (x - labelW / 2f).coerceIn(2f, (plotW - labelW - 2f).coerceAtLeast(2f))
                 val wantedTop = if (isHigh) y - gap - labelH else y + gap
                 val top = wantedTop.coerceIn(2f, (priceH - labelH - 2f).coerceAtLeast(2f))
                 pLabelBg.color = (structCol and 0x00FFFFFF) or 0xE6000000.toInt()
                 val rect = RectF(left, top, left + labelW, top + labelH)
-                used.add(rect)
                 canvas.drawRoundRect(rect, Ui.dp(context, 3f).toFloat(), Ui.dp(context, 3f).toFloat(), pLabelBg)
                 pLabelTxt.color = Color.WHITE
-                drawTextAuto(canvas, m.text, left + Ui.dp(context, 5f), top + labelH * 0.72f, pLabelTxt)
+                canvas.drawText(m.text, left + Ui.dp(context, 5f), top + labelH * 0.72f, pLabelTxt)
                 continue
             }
             if (m.kind == MarkerKind.TREND_UP || m.kind == MarkerKind.TREND_DOWN) {
                 val up = m.kind == MarkerKind.TREND_UP
-                val tipY = if (up) y - r * 3.2f else y + r * 3.2f
-                val baseY = if (up) y + r * 0.6f else y - r * 0.6f
+                val tipY = if (up) y - r * 2.5f else y + r * 2.5f
+                val baseY = if (up) y + r * 1.5f else y - r * 1.5f
                 pBody.color = col
                 path.reset()
                 path.moveTo(x, tipY)
-                path.lineTo(x - r * 2.6f, baseY)
-                path.lineTo(x + r * 2.6f, baseY)
+                path.lineTo(x - r * 2.2f, baseY)
+                path.lineTo(x + r * 2.2f, baseY)
                 path.close()
                 canvas.drawPath(path, pBody)
+
                 if (showMarkerText && m.text.isNotEmpty()) {
-                    labelBox(canvas, m.text, x, y, above = up, bgColor = (col and 0x00FFFFFF) or 0xD9000000.toInt(),
-                        priceH = priceH, used = used)
+                    val labelW = pLabelTxt.measureText(m.text) + Ui.dp(context, 12f)
+                    val labelH = Ui.dp(context, 19f).toFloat()
+                    val gap = Ui.dp(context, 5f).toFloat()
+                    val dx = Ui.dp(context, 7f).toFloat()
+                    val left = if (x + dx + labelW <= plotW - 2f) x + dx
+                        else (x - dx - labelW).coerceAtLeast(2f)
+                    val wantedTop = if (up) y - r * 2.5f - labelH - gap else y + r * 2.5f + gap
+                    val top = wantedTop.coerceIn(2f, (priceH - labelH - 2f).coerceAtLeast(2f))
+                    pLabelBg.color = (col and 0x00FFFFFF) or 0xD9000000.toInt()
+                    val rect = RectF(left, top, left + labelW, top + labelH)
+                    canvas.drawRoundRect(rect, Ui.dp(context, 4f).toFloat(), Ui.dp(context, 4f).toFloat(), pLabelBg)
+                    pLabelTxt.color = Color.WHITE
+                    canvas.drawText(m.text, left + Ui.dp(context, 6f), top + labelH * 0.68f, pLabelTxt)
+                    pLabelTxt.color = Color.WHITE
                 }
                 continue
             }
-            // ── پین‌ها و رخدادها ──
-            val isPin = m.kind == MarkerKind.PIN_BU || m.kind == MarkerKind.PIN_BE
-            val above = m.kind == MarkerKind.PIN_BE     // pinBE بالای سقف، pinBU زیر کف
-            val tipY = if (above) y - r * 5.4f else y + r * 5.4f
-            val baseY = if (above) y - r * 1.2f else y + r * 1.2f
+            val cy = if (m.kind == MarkerKind.PIN_BU) y - r * 3 else y + r * 3
             pBody.color = col
             path.reset()
-            if (isPin) {
-                path.moveTo(x, tipY)
-                path.lineTo(x - r * 2.6f, baseY)
-                path.lineTo(x + r * 2.6f, baseY)
-            } else {
-                // رخدادهای دیگر: مثلث کوچک رو به قیمت
-                path.moveTo(x, y + (if (above) -2f else 2f))
-                path.lineTo(x - r * 1.8f, baseY)
-                path.lineTo(x + r * 1.8f, baseY)
-            }
+            path.moveTo(x, if (m.kind == MarkerKind.PIN_BU) y - 2f else y + 2f)
+            path.lineTo(x - r * 2, cy)
+            path.lineTo(x + r * 2, cy)
             path.close()
             canvas.drawPath(path, pBody)
-            if (showMarkerText && m.text.isNotEmpty() && barW > 3f && m.kind != 2 && m.kind != 6) {
-                labelBox(canvas, m.text, x, if (isPin) tipY else baseY, above = above,
-                    bgColor = (col and 0x00FFFFFF) or 0xCC000000.toInt(), priceH = priceH, used = used)
+            if (showMarkerText && barW > 4.2f && m.text.isNotEmpty() && m.kind != 2 && m.kind != 6) {
+                val t = m.text.lineSequence().first()
+                pTxtSm.color = col
+                canvas.drawText(t, x + r * 2.4f, cy, pTxtSm)
+                pTxtSm.color = axisText
             }
         }
-        // قیمتِ هر مارکر با یک نقطهٔ کوچک روی نوک مثلث مشخص می‌شود تا سطح دقیق معلوم باشد
     }
 
     /**
@@ -1490,7 +1315,7 @@ class ChartView @JvmOverloads constructor(
                 0 -> if (abs(net) >= 0.005) "BE " + Fa.signed(net) else "BE"
                 else -> "باز " + Fa.signed(net)
             }
-            val w = textWidth(text, pLabelTxt) + pad * 2
+            val w = pLabelTxt.measureText(text) + pad * 2
             var left = x1 + gap
             if (left + w > plotW - 2f) left = x1 - gap - w
             left = left.coerceIn(2f, (plotW - w - 2f).coerceAtLeast(2f))
@@ -1510,15 +1335,12 @@ class ChartView @JvmOverloads constructor(
             pLabelBg.color = (col and 0x00FFFFFF) or 0xE6000000.toInt()
             canvas.drawRoundRect(rect, round, round, pLabelBg)
             pLabelTxt.color = if (oc == 0) Color.parseColor("#1B2230") else Color.WHITE
-            drawTextAuto(canvas, text, left + pad, top + labelH * 0.72f, pLabelTxt)
+            canvas.drawText(text, left + pad, top + labelH * 0.72f, pLabelTxt)
             pLabelTxt.color = Color.WHITE
         }
     }
 
     private fun drawTradeLines(canvas: Canvas, priceH: Float) {
-        // برچسب سطوح (ناحیه/تایید میانی/فیبو/ولوم/ورود/حدضرر/TP) همه از یک x شروع
-        // می‌شوند؛ بدون مدیریت برخورد، چند برچسب روی هم می‌افتادند و ناخوانا می‌شدند.
-        val usedLabels = ArrayList<RectF>()
         fun line(price: Double, color: Int, label: String, fromIdx: Float) {
             if (price.isNaN()) return
             val y = yOf(price)
@@ -1528,22 +1350,10 @@ class ChartView @JvmOverloads constructor(
             canvas.drawLine(x0, y, plotW, y, pDashed)
             if (label.isNotEmpty()) {
                 pLabelBg.color = (color and 0x00FFFFFF) or 0xCC000000.toInt()
-                val padX = Ui.dp(context, 4f)
-                val w = textWidth(label, pLabelTxt) + padX * 2
-                var left = x0.coerceIn(2f, (plotW - w - 2f).coerceAtLeast(2f))
-                var top = y - Ui.dp(context, 7.5f)
-                // اگر روی برچسب قبلی افتاد، به راست و بعد به پایین جابه‌جا شود
-                var tries = 0
-                while (tries < 6 && usedLabels.any { RectF.intersects(it, RectF(left, top, left + w, top + Ui.dp(context, 15f))) }) {
-                    if (left + w + Ui.dp(context, 42f) < plotW) left += Ui.dp(context, 42f)
-                    else { top += Ui.dp(context, 16f); left = x0.coerceIn(2f, (plotW - w - 2f).coerceAtLeast(2f)) }
-                    tries++
-                }
-                top = top.coerceIn(2f, (priceH - Ui.dp(context, 15f) - 2f).coerceAtLeast(2f))
-                usedLabels.add(RectF(left, top, left + w, top + Ui.dp(context, 15f)))
-                canvas.drawRoundRect(RectF(left, top, left + w, top + Ui.dp(context, 15f)),
+                val w = Ui.dp(context, 5f) + pLabelTxt.measureText(label)
+                canvas.drawRoundRect(RectF(x0, y - Ui.dp(context, 7.5f), x0 + w, y + Ui.dp(context, 7.5f)),
                     Ui.dp(context, 3f).toFloat(), Ui.dp(context, 3f).toFloat(), pLabelBg)
-                drawTextAuto(canvas, label, left + padX, top + Ui.dp(context, 11f), pLabelTxt)
+                canvas.drawText(label, x0 + Ui.dp(context, 2.5f), y + Ui.dp(context, 3.5f), pLabelTxt)
             }
         }
         for (o in overlays) {

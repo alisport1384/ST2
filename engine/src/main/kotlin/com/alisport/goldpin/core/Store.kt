@@ -7,15 +7,10 @@ package com.alisport.goldpin.core
 // ═══════════════════════════════════════════════════════════════════════════════
 object Store {
     /** نسخهٔ هم‌ترازی تنظیمات با سند؛ فایل‌های با مقدار کمتر هنگام بارگذاری به پیش‌فرض‌های سند مهاجرت می‌کنند. */
-    const val SPEC_REV = 2
+    const val SPEC_REV = 5
 
 
-    /**
-     * ۴ = افزودن تاریخچهٔ تریگر۱/۲، `stageFa` و نقشهٔ زمان کندل‌ها به فایل.
-     * فایل‌های نسخهٔ ۳ هم بدون مشکل خوانده می‌شوند (کلیدهای تازه «اگر بود» خوانده می‌شوند)،
-     * فقط ستاپ‌های نیمه‌کاره‌ای که در آن فایل‌ها ذخیره شده‌اند تاریخچه ندارند.
-     */
-    const val FORMAT = 4
+    const val FORMAT = 3
 
     class Loaded(
         val cfg: Settings,
@@ -62,11 +57,12 @@ object Store {
         "tfMode" to c.tfMode, "tfS" to c.tfS, "tfM" to c.tfM, "tf1" to c.tf1, "tf2" to c.tf2,
         "vpRows" to c.vpRows, "vpVA" to c.vpVA, "vpSmooth" to c.vpSmooth, "distMode" to c.distMode,
         "minZoneRows" to c.minZoneRows, "drawZones" to c.drawZones, "showRejectedZones" to c.showRejectedZones,
-        "clearUsedZones" to c.clearUsedZones, "maxZoneBoxes" to c.maxZoneBoxes, "showPocVA" to c.showPocVA,
+        "clearUsedZones" to true, "maxZoneBoxes" to Int.MAX_VALUE, "showPocVA" to c.showPocVA,
         "maxSetups" to c.maxSetups, "midInvalidClose" to c.midInvalidClose,
         "hvScanFirstTouch" to c.hvScanFirstTouch, "hvMarkFirstIncrease" to c.hvMarkFirstIncrease,
         "rejectCandleNext" to c.rejectCandleNext,
         "mintick" to c.mintick, "slBufTicks" to c.slBufTicks, "entryBufTicks" to c.entryBufTicks, "minTPunits" to c.minTPunits,
+        "slipTicks" to c.slipTicks,
         "strategy" to c.strategy, "tpUnits" to c.tpUnits, "maxSlUnits" to c.maxSlUnits,
         "useRiskPct" to c.useRiskPct, "riskPct" to c.riskPct, "equityPct" to c.equityPct,
         "maxLeverage" to c.maxLeverage, "levModel" to 2, "roundQty" to c.roundQty,
@@ -90,7 +86,9 @@ object Store {
         c.vpRows = m["vpRows"].asI(); c.vpVA = m["vpVA"].asD(); c.vpSmooth = m["vpSmooth"].asI()
         c.distMode = m["distMode"].asI(); c.minZoneRows = m["minZoneRows"].asI()
         c.drawZones = m["drawZones"].asB(); c.showRejectedZones = m["showRejectedZones"].asB()
-        c.clearUsedZones = m["clearUsedZones"].asB(); c.maxZoneBoxes = m["maxZoneBoxes"].asI()
+        // تنظیمات قدیمی ممکن است ابطال را خاموش یا سقف باکس را محدود کرده باشند؛
+        // سند فعلی ابطال با کلوز و ذخیرهٔ نامحدود ناحیه‌ها را اجباری می‌داند.
+        c.clearUsedZones = true; c.maxZoneBoxes = Int.MAX_VALUE
         c.showPocVA = m["showPocVA"].asB()
         c.maxSetups = m["maxSetups"].asI(); c.midInvalidClose = m["midInvalidClose"].asB()
         c.hvScanFirstTouch = m["hvScanFirstTouch"].asB(); c.hvMarkFirstIncrease = m["hvMarkFirstIncrease"].asB()
@@ -102,10 +100,14 @@ object Store {
         c.contractSize = m["contractSize"].asD(); c.initialEquity = m["initialEquity"].asD()
         // کلیدهای جدید در فایل‌های قدیمی نیستند ⇒ مقدار پیش‌فرض Settings() می‌ماند (asB(null)=false درست نیست).
         if (m.containsKey("entryBufTicks")) c.entryBufTicks = m["entryBufTicks"].asD()
+        // §۵: لغزش یک تیک؛ فایل‌های قدیمی کلید ندارند ⇒ پیش‌فرض سند (۱ تیک) می‌ماند.
+        if (m.containsKey("slipTicks")) c.slipTicks = m["slipTicks"].asD()
         // استراتژی انتخابی: فایل‌های قدیمی کلید ندارند ⇒ استراتژی ۱ (سند) می‌ماند.
         if (m.containsKey("strategy") && Strategy.valid(m["strategy"].asI())) c.strategy = m["strategy"].asI()
         if (m.containsKey("tpUnits")) c.tpUnits = m["tpUnits"].asD()
-        // §18-31 سند: سقف فاصلهٔ حد ضرر (N)؛ فایل‌های قدیمی کلید ندارند ⇒ پیش‌فرض سند (۳) می‌ماند.
+        // §18-31 سند نهایی: سقف فاصلهٔ حد ضرر (N)؛ پیش‌فرض ویرایش جدید ۱۰ واحد است.
+        // برای حفظ تنظیمات سفارشی، فایل قدیمی‌ای که N را از مقدار پیش‌فرض قبلی (۳) تغییر داده
+        // باشد حفظ می‌شود؛ مقدار قدیمیِ پیش‌فرض ۳ به پیش‌فرض جدید ۱۰ مهاجرت می‌کند.
         if (m.containsKey("maxSlUnits")) c.maxSlUnits = m["maxSlUnits"].asD()
         if (m.containsKey("mmMode")) c.mmMode = m["mmMode"].asI()
         if (m.containsKey("minLotAuto")) c.minLotAuto = m["minLotAuto"].asB()
@@ -128,9 +130,27 @@ object Store {
         if (m.containsKey("lostResetAtFinalTp")) c.lostResetAtFinalTp = m["lostResetAtFinalTp"].asB()
         // مهاجرت به سند فعلی: فایل‌های قبل از specRev=۲ مقدارهای قدیمی اهرم/بافر سفارش/حداکثر ستاپ را داشتند
         // (۱۰ / ۲ تیک / ۶). سند: اهرم ۵۰۰ (§۵) ، بافر سفارش ۱ تیک (§۴-۸) ، حداکثر ستاپ ۱ (§۱۸-۱۹).
-        if (!m.containsKey("specRev") || m["specRev"].asI() < SPEC_REV) {
+        val savedSpecRev = if (m.containsKey("specRev")) m["specRev"].asI() else 0
+        if (savedSpecRev < 2) {
             c.maxLeverage = 500.0; c.entryBufTicks = 1.0; c.maxSetups = 1
         }
+        // §18-31: سند نهایی مقدار پیش‌فرض N را از ۳ به ۱۰ تغییر داده است.
+        // فایل‌های rev 0–2 که مقدار ۳ را فقط به‌عنوان پیش‌فرض قبلی ذخیره کرده‌اند مهاجرت می‌شوند؛
+        // مقادیر سفارشی دیگر حفظ می‌شوند.
+        if (savedSpecRev < 3 && (!m.containsKey("maxSlUnits") || m["maxSlUnits"].asD() == 3.0)) {
+            c.maxSlUnits = 10.0
+        }
+        // specRev 4 (ویرایش جدید سند): پیش‌فرض‌های §۴-۵ و §۱۸-۳۱ عوض شدند —
+        // «هموارسازی ۰» ، «مدل پخش حجم یکنواخت» و «N = ۳ واحد». فقط وقتی مقدار ذخیره‌شده
+        // دقیقاً همان پیش‌فرض قدیمی باشد مهاجرت می‌کند؛ عدد سفارشی کاربر دست نمی‌خورد.
+        if (savedSpecRev < 4) {
+            if (c.vpSmooth == 1) c.vpSmooth = 0
+            if (c.distMode == VolumeProfile.DIST_TRI_CLOSE) c.distMode = VolumeProfile.DIST_UNIFORM
+            if (c.maxSlUnits == 10.0) c.maxSlUnits = 3.0
+        }
+        // specRev 5 (ویرایش جدید سند): پیش‌فرض §۱۸-۳۱ از ۳ به ۲۰ رفت. مقدار ۳ که فقط
+        // پیش‌فرض نسخهٔ قبل بوده مهاجرت می‌کند؛ هر عدد سفارشی دیگری دست‌نخورده می‌ماند.
+        if (savedSpecRev < 5 && c.maxSlUnits == 3.0) c.maxSlUnits = 20.0
         return c
     }
 
@@ -199,17 +219,6 @@ object Store {
         o["lastBEpinRef"] = e.lastBEpinRef; o["lastBEpinLo"] = e.lastBEpinLo
         o["lastZoneTop"] = e.lastZoneTop; o["lastZoneBot"] = e.lastZoneBot
         o["zoneRefH"] = e.zoneRefH; o["zoneRefL"] = e.zoneRefL
-        o["stageFa"] = e.stageFa
-        // تاریخچهٔ کندل‌های تریگر۱ و تریگر۲ — اسکن LV (§18-16) و HV (§18-17) فقط روی همین
-        // بافرها کار می‌کند. اگر ذخیره نشوند، ستاپِ نیمه‌کاره بعد از هر ری‌استارت برای همیشه
-        // قفل می‌شود (کندل‌های قبل از ری‌استارت دیگر در دسترس نیستند و شرط `<= mcCloseBi` هیچ‌وقت برقرار نمی‌شود).
-        o["t1History"] = e.t1History.map {
-            listOf(it.bar.bi, it.bar.t, it.bar.o, it.bar.h, it.bar.l, it.bar.c, it.bar.v,
-                it.prevVol, it.startBi, it.closeBi, it.lowBi, it.highBi)
-        }
-        o["t2History"] = e.t2History.map {
-            listOf(it.bar.bi, it.bar.t, it.bar.o, it.bar.h, it.bar.l, it.bar.c, it.bar.v, it.prevVol)
-        }
         o["lastPocPx"] = e.lastPocPx; o["lastProfBars"] = e.lastProfBars
         o["lastEntryPx"] = e.lastEntryPx; o["lastSlPx"] = e.lastSlPx; o["lastTpPx"] = e.lastTpPx
         o["lastResult"] = e.lastResult
@@ -281,25 +290,6 @@ object Store {
         e.lastZoneTop = m["lastZoneTop"].asD(); e.lastZoneBot = m["lastZoneBot"].asD()
         if (m.containsKey("zoneRefH")) e.zoneRefH = m["zoneRefH"].asD()
         if (m.containsKey("zoneRefL")) e.zoneRefL = m["zoneRefL"].asD()
-        if (m.containsKey("stageFa")) e.stageFa = m["stageFa"].asS()
-        for (x in m["t1History"].asList()) {
-            val l = x.asList(); if (l.size < 12) continue
-            e.t1History.add(
-                Engine.T1Bar(
-                    Candle(l[0].asI(), l[1].asL(), l[2].asD(), l[3].asD(), l[4].asD(), l[5].asD(), l[6].asD()),
-                    l[7].asD(), l[8].asI(), l[9].asI(), l[10].asI(), l[11].asI()
-                )
-            )
-        }
-        for (x in m["t2History"].asList()) {
-            val l = x.asList(); if (l.size < 8) continue
-            e.t2History.add(
-                Engine.T2Bar(
-                    Candle(l[0].asI(), l[1].asL(), l[2].asD(), l[3].asD(), l[4].asD(), l[5].asD(), l[6].asD()),
-                    l[7].asD()
-                )
-            )
-        }
         e.lastPocPx = m["lastPocPx"].asD(); e.lastProfBars = m["lastProfBars"].asI()
         e.lastEntryPx = m["lastEntryPx"].asD(); e.lastSlPx = m["lastSlPx"].asD(); e.lastTpPx = m["lastTpPx"].asD()
         e.lastResult = m["lastResult"].asS()
@@ -484,9 +474,6 @@ object Store {
             candles.add(Candle(idx++, c.t, c.o, c.h, c.l, c.c, c.v))
         }
         val structureCandles = candleListFrom(root["structureCandles"])
-        // نقشهٔ «شمارهٔ کندل ← زمان» از همان کندل‌های بازیابی‌شده ساخته می‌شود تا مارکرهایی که
-        // بعد از ری‌استارت روی کندل‌های قبلی گذاشته می‌شوند جای درست خود را داشته باشند.
-        eng.seedBarTimes(candles)
         return Loaded(cfg, eng, broker, candles, structureCandles, root["meta"].asMap(), root["savedAt"].asL())
     }
 }

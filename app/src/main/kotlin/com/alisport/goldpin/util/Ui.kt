@@ -134,18 +134,9 @@ object Fa {
         return "$date ${d(String.format("%02d:%02d", hh, mm))}"
     }
 
-    /**
-     * تاریخ کوتاه شمسی (yy/mm/dd).
-     *
-     * [timeZone] پیش‌فرض = منطقهٔ زمانی دستگاه. محور زمان چارت با UTC کار می‌کند
-     * (چون همهٔ ساعت‌های سند — سشن، پنجرهٔ سفارش‌گیری ۰۱:۳۰ تا ۲۰:۰۰ و پایان زمان —
-     * به UTC هستند) و باید تاریخ را هم در همان منطقه حساب کند؛ وگرنه مرز «روز جدید»
-     * که با UTC سنجیده می‌شود با تاریخی که به وقت محلی نوشته می‌شود یکی نمی‌افتد و
-     * برچسب تاریخ یک روز جابه‌جا می‌شود.
-     */
-    fun jalaliShort(ms: Long, timeZone: TimeZone = TimeZone.getDefault()): String {
+    fun jalaliShort(ms: Long): String {
         if (ms <= 0) return "—"
-        val c = Calendar.getInstance(timeZone).apply { timeInMillis = ms }
+        val c = Calendar.getInstance().apply { timeInMillis = ms }
         val (jy, jm, jd) = toJalali(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH))
         return d(String.format("%02d/%02d/%02d", jy % 100, jm, jd))
     }

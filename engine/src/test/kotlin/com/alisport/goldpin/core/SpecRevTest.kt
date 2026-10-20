@@ -13,6 +13,9 @@ class SpecRevTest {
         assertEquals(500.0, c.maxLeverage)
         assertEquals(1.0, c.entryBufTicks)
         assertEquals(1, c.maxSetups)
+        assertEquals(20.0, c.maxSlUnits, "§18-31 ویرایش جدید: N پیش‌فرض ۲۰ است")
+        assertEquals(0, c.vpSmooth, "§۴-۵ ویرایش جدید: هموارسازی پیش‌فرض ۰")
+        assertEquals(VolumeProfile.DIST_UNIFORM, c.distMode, "§۴-۵ ویرایش جدید: مدل پخش حجم پیش‌فرض یکنواخت")
 
         val mmCfg = Settings().apply { mmMode = MoneyMode.MIXED; initialEquity = 1000.0 }
         val mm = MoneyManager(mmCfg)
@@ -25,6 +28,19 @@ class SpecRevTest {
     }
 
     @Test
+    fun `doc 18-32 fib anchor uses the trend-extreme pin rather than cleared HH or LL label`() {
+        val e = Engine(Settings())
+        e.trend = 1
+        e.HH = Double.NaN // برچسب HH ممکن است هنگام شکست به NaN برگردد، اما لنگر روند باقی است.
+        e.highestBE = 2_150.0
+        assertEquals(2_150.0, e.fibAnchor(bull = true), 1e-9)
+        e.trend = -1
+        e.LL = Double.NaN
+        e.lowestBUpin = 1_850.0
+        assertEquals(1_850.0, e.fibAnchor(bull = false), 1e-9)
+    }
+
+    @Test
     fun `old save files migrate to document defaults and plateau peak builds zone`() {
         val c = Settings().apply { maxLeverage = 10.0; entryBufTicks = 2.0; maxSetups = 6 }
         val e = Engine(c); val b = PaperBroker(c); e.broker = b; b.engine = e
@@ -33,6 +49,18 @@ class SpecRevTest {
         val l = Store.load(old).cfg
         assertEquals(500.0, l.maxLeverage); assertEquals(1.0, l.entryBufTicks); assertEquals(1, l.maxSetups)
         assertEquals(10.0, Store.load(j).cfg.maxLeverage)
+
+        // مهاجرت rev2 → rev5: مسیر پیش‌فرض‌های N عوض شده‌اند (۳ → ۱۰ → ۳ → ۲۰)؛ نتیجهٔ نهایی
+        // باید همان پیش‌فرض سند فعلی (۲۰) باشد و عدد سفارشی کاربر دست‌نخورده بماند.
+        val prevN = Settings().apply { maxSlUnits = 3.0 }
+        val prevEngine = Engine(prevN); val prevBroker = PaperBroker(prevN)
+        val prevJson = Store.save(prevN, prevEngine, prevBroker, emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":2")
+        assertEquals(20.0, Store.load(prevJson).cfg.maxSlUnits)
+        prevN.maxSlUnits = 7.0
+        val customJson = Store.save(prevN, Engine(prevN), PaperBroker(prevN), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":2")
+        assertEquals(7.0, Store.load(customJson).cfg.maxSlUnits)
 
         val rv = doubleArrayOf(50.0, 50.0, 40.0, 30.0, 35.0, 20.0, 10.0)
         val p = Profile(rv, 1000.0, 10.0, Double.NaN, Double.NaN, Double.NaN)
@@ -278,7 +306,7 @@ class SpecRevTest {
         bars.add(Candle(breakBi + 1, 29_520_000L, 2016.0, 2017.0, 2015.0, 2016.5, 100.0))
         e.runAll(bars)
         for (s in e.setups.filter { it.touchT > 0L }) {
-            assertEquals(8, s.stage, "پس از باطل شدن تایید میانیِ ناحیهٔ مصرف‌شده، ستاپ باید کامل باطل شود (§18-14 و §18-21)")
+            assertEquals(8, s.stage, "پس از باطل شدن تایید میانیِ ناحیهٔ مصرف‌شده، ستاپ باید کامل باطل شود (§18-14)")
             assertTrue(s.zGone)
         }
     }
@@ -408,7 +436,7 @@ class SpecRevTest {
     }
 
     @Test
-    fun `doc 4-9 oo level moves stop once candle closes fully outside HV without touching oo`() {
+    fun `doc 4-9 oo level moves stop on a post-entry close beyond oo without HV condition`() {
         val cfg = Settings().apply { initialEquity = 100000.0; maxSlUnits = 1_000_000.0 }
         val b = PaperBroker(cfg)
         val t0 = 1_699_948_800_000L // سه‌شنبه 2023-11-14 ساعت 08:00 UTC — داخل پنجرهٔ سفارش‌گیری (§18-26 سند)
@@ -425,12 +453,12 @@ class SpecRevTest {
         assertEquals(1, b.openTrades.size)
         val tr = b.openTrades[0]
         assertTrue(tr.slAdj.isNaN(), "کندل ورود نباید حد ضرر را به oo ببرد")
-        // کندلی که هنوز باکس HV را لمس می‌کند (کف 2009 < سقف باکس) ⇒ انتقال ممنوع
-        b.onBar(Candle(2, t0 + 120_000L, 2011.0, 2012.0, 2009.0, 2011.5, 100.0))
-        assertTrue(tr.slAdj.isNaN())
-        // کندل کاملاً خارج از باکس و کاملاً بالای oo بدون لمس آن ⇒ حد ضرر = oo
-        b.onBar(Candle(3, t0 + 180_000L, 2011.0, 2014.0, 2010.5, 2013.5, 100.0))
-        assertEquals(2010.01, tr.slAdj, 1e-9, "حد ضرر باید دقیقاً به سطح oo منتقل شود (§4-9)")
+        // مساوی‌بودن کلوز با oo کافی نیست؛ مقایسهٔ سند اکید است.
+        b.onBar(Candle(2, t0 + 120_000L, 2011.0, 2012.0, 2009.0, 2010.01, 100.0))
+        assertTrue(tr.slAdj.isNaN(), "کلوز مساوی oo نباید انتقال را فعال کند")
+        // §4-9 (نسخهٔ فعلی سند): فقط کلوز ملاک است؛ سایه و باکس HV شرط نیستند.
+        b.onBar(Candle(3, t0 + 180_000L, 2011.0, 2012.0, 2009.0, 2011.5, 100.0))
+        assertEquals(2010.01, tr.slAdj, 1e-9, "کلوز بالای oo باید حد ضرر را دقیقاً به oo منتقل کند (§4-9)")
         // ذخیره/بازیابی: لبه‌های HV و slAdj باید برگردند
         val e = Engine(cfg)
         val loaded = Store.load(Store.save(cfg, e, b, emptyList()))
@@ -442,51 +470,6 @@ class SpecRevTest {
         assertFalse(tr.open)
         assertEquals("خروج سر‌به‌سر", tr.reason)
         assertEquals(0.0, tr.grossPnl(), 1e-9)
-    }
-
-    @Test
-    fun `trend rotation keeps the pin registered in the same candle so LH and LL sit on real pins`() {
-        // §۴-۱ «چرخش روند» + §۱۸-۱ «توالی»: اگر در همان کندلی که روند از صعودی به نزولی
-        // می‌چرخد یک pinBE تازه Ready شود، همان پین باید آخرین پین بماند (پایهٔ LH بعدی).
-        // پیش‌تر این پین با پینِ قدیمیِ HH بازنویسی می‌شد و برچسب LH روی قیمت غلط می‌نشست.
-        val cfg = Settings().apply { tfS = Tf.M1; tfM = Tf.M1; tf1 = Tf.M1; tf2 = Tf.M1 }
-        val e = Engine(cfg)
-        e.trend = 1
-        e.HH = 120.0; e.HL = 111.0
-        e.hhPinHi = 120.0; e.hhPinRef = 116.0; e.hhPinLo = 114.0; e.hhPinSeq = 2
-        e.hlPinLo = 100.0; e.hlPinRef = 96.0; e.hlPinHi = 103.0; e.hlPinSeq = 1
-        e.lastBEpin = 120.0; e.lastBEpinRef = 116.0; e.lastBEpinLo = 114.0; e.beActive = true; e.beSeq = 2
-        e.lastBUpin = 100.0; e.lastBUpinRef = 96.0; e.lastBUpinHi = 103.0; e.buActive = true; e.buSeq = 1
-        e.expectedReady = -1
-        // کاندید تازهٔ pinBE: سطح تایید = کف کندل مهم = 112 ، سطح ابطال = 114
-        e.pins.add(Pin(-1, 118.0, 112.0, 1, 1, 114.0, 0))
-
-        val t0 = 1_699_948_800_000L // سه‌شنبه 2023-11-14 ساعت 08:00 UTC
-        val bars = listOf(
-            Candle(0, t0, 112.0, 115.0, 111.0, 114.0, 100.0),
-            Candle(1, t0 + 60_000L, 114.0, 118.0, 113.0, 116.0, 90.0),   // کندل مهم تازه
-            Candle(2, t0 + 120_000L, 113.0, 113.5, 109.0, 110.0, 120.0), // ReadyBE (کلوز ۱۱۰ < ۱۱۲) و هم‌زمان کلوز زیر HL (۱۱۱)
-            Candle(3, t0 + 180_000L, 110.0, 110.5, 109.0, 110.2, 100.0), // بستن کندل ۲
-            Candle(4, t0 + 240_000L, 107.0, 109.5, 106.0, 109.0, 110.0), // ReadyBU در روند نزولی ⇒ LL/LH
-            Candle(5, t0 + 300_000L, 109.0, 109.5, 108.5, 109.2, 100.0)
-        )
-        // تا کندل ۳ (چرخش روند) پردازش می‌کنیم؛ سپس کاندید pinBU را که در کندل‌های بعد Ready می‌شود می‌دهیم.
-        e.feed(bars.subList(0, 4), lastIsClosed = true)
-        assertEquals(1, e.expectedReady, "بعد از pinBE طبق توالی، پین بعدی pinBU است")
-        assertTrue(e.buSeq == -1 || !e.buActive, "با چرخش روند، pinBU قبلی باید باطل شده باشد")
-        e.pins.add(Pin(1, 108.0, 104.0, 3, 3, 103.0, 0))
-        e.feed(bars, lastIsClosed = true)
-
-        assertEquals(-1, e.trend, "کلوز زیر HL باید روند را به نزولی بچرخاند")
-        assertTrue(e.HH.isNaN() && e.HL.isNaN(), "برچسب‌های HH/HL باید پاک شوند")
-        assertTrue(e.beActive, "pinBE تازه باید زنده بماند")
-        assertEquals(118.0, e.lastBEpin, 1e-9, "پینِ تازه‌Ready (۱۱۸) باید آخرین pinBE بماند، نه پینِ قدیمیِ HH (۱۲۰)")
-        assertEquals(-1, e.expectedReady, "پس از Ready شدن pinBU، پین بعدی باید pinBE باشد")
-        assertTrue(e.markers.any { it.kind == MarkerKind.PIN_BE && it.price == 118.0 },
-            "مارکر کندل مهمِ تازه باید روی چارت بماند")
-
-        assertEquals(104.0, e.LL, 1e-9, "اولین pinBU در روند نزولی باید LL شود")
-        assertEquals(118.0, e.LH, 1e-9, "LH باید سقف همان pinBE تازه باشد (۱۱۸)، نه HH قدیمی")
     }
 
     @Test
@@ -532,5 +515,69 @@ class SpecRevTest {
         assertTrue(dn.buActive && dn.lastBUpin == 90.0, "LL باید به pinBU برگردد، نه اینکه پین حذف شود")
         assertTrue(dn.beActive && dn.lastBEpin == 100.0, "LH باید به pinBE برگردد")
         assertEquals(-1, dn.expectedReady, "بعد از pinBU طبق توالی پین بعدی pinBE است")
+    }
+
+    @Test
+    fun `doc 4-8 stop loss is taken from middle confirmation not HV box`() {
+        // همان سری کندلیِ تست §18-16/§18-17: کف تایید میانی = ۲۰۰۲٫۰ ، باکس HV = ۲۰۰۷٫۰..۲۰۱۰٫۰ ،
+        // سطح سفارش = ۲۰۱۰٫۰۱. با قاعدهٔ جدید §۴-۸ حد ضرر باید از کف تایید میانی ساخته شود.
+        val cfg = Settings().apply {
+            tfMode = 1
+            tfS = Tf.H1; tfM = Tf.M15; tf1 = Tf.M5; tf2 = Tf.M1
+            maxSlUnits = 1_000_000.0
+            slBufTicks = 2.0
+        }
+        val e = Engine(cfg)
+        val b = PaperBroker(cfg)
+        e.broker = b; b.engine = e
+        e.HH = 2100.0; e.HL = 1980.0; e.trend = 1
+        val s = Setup(1L, 1, 1, 2010.0, 2000.0, 1, -1).apply {
+            zT = 28_800_000L; touchBi = 0; touchT = 28_800_000L; touchMidStart = 28_800_000L
+        }
+        e.setups.add(s)
+
+        val bars = ArrayList<Candle>()
+        var bi = 0
+        fun addM1(o: Double, h: Double, l: Double, c: Double, v: Double) {
+            bars.add(Candle(bi, 28_800_000L + bi * 60_000L, o, h, l, c, v)); bi++
+        }
+        addM1(2008.0, 2009.0, 2005.0, 2006.0, 200.0)
+        addM1(2006.0, 2007.0, 2004.0, 2004.5, 200.0)
+        addM1(2004.5, 2006.0, 2002.0, 2005.5, 200.0)   // کف تایید میانی = 2002.0
+        addM1(2005.5, 2008.0, 2005.0, 2007.5, 200.0)
+        addM1(2007.5, 2009.0, 2007.0, 2008.5, 200.0)
+        addM1(2008.5, 2009.0, 2007.0, 2007.5, 50.0)
+        addM1(2007.5, 2008.0, 2006.0, 2007.2, 40.0)    // کف ناحیهٔ LV = 2006.0
+        addM1(2007.2, 2010.0, 2007.0, 2009.5, 80.0)    // HV: 2007..2010
+        addM1(2009.5, 2011.0, 2009.2, 2010.5, 60.0)    // تایید HV ⇒ مسلح‌شدن روی 2010.01
+        addM1(2010.5, 2011.0, 2010.2, 2010.8, 70.0)
+        addM1(2010.8, 2012.0, 2010.5, 2011.5, 90.0)
+        addM1(2011.5, 2013.0, 2011.2, 2012.5, 100.0)
+        addM1(2012.5, 2014.0, 2012.0, 2013.5, 110.0)
+        addM1(2013.5, 2015.0, 2013.0, 2014.5, 100.0)
+        addM1(2014.5, 2016.0, 2014.0, 2015.5, 100.0)
+        addM1(2015.5, 2016.5, 2015.0, 2016.0, 100.0)
+
+        e.feed(bars, lastIsClosed = true)
+
+        assertEquals(2002.0, s.midRef, 1e-9, "کف تایید میانی باید ۲۰۰۲٫۰ باشد")
+        assertEquals(2010.01, b.pendingOrders[0].price, 1e-9, "سطح سفارش = سقف باکس HV + ۱ تیک")
+        // §4-8 ویرایش جدید: حد ضرر = کف تایید میانی (۲۰۰۲٫۰) − ۲ تیک = ۲۰۰۱٫۹۸ — نه کف باکس HV (۲۰۰۶٫۹۸)
+        assertEquals(2001.98, s.sl, 1e-9, "حد ضرر باید از کف تایید میانی ساخته شود، نه از کف باکس HV")
+        assertEquals(2001.98, b.pendingOrders[0].sl, 1e-9)
+    }
+
+    @Test
+    fun `doc 20-2 mixed resets lost to zero when capital falls back below M`() {
+        val cfg = Settings().apply {
+            mmMode = MoneyMode.MIXED; initialEquity = 1000.0
+            minLotAuto = false; minLotManual = 10.0
+        }
+        val mm = MoneyManager(cfg)
+        mm.lost = 250.0
+        mm.onCapitalUpdated(1300.0)     // M = 1200 ⇒ ManageCM ، Lost حفظ می‌شود
+        assertEquals(250.0, mm.lost, 1e-9)
+        mm.onCapitalUpdated(1150.0)     // Capital < M ⇒ ManageNothing و lost = ۰
+        assertEquals(0.0, mm.lost, 1e-9)
     }
 }

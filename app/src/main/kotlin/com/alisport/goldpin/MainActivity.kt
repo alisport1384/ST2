@@ -256,7 +256,11 @@ class MainActivity : Activity() {
             val trend = if (s.cfg.strategy == Strategy.NO_TREND) "ندارد (استراتژی ۲)"
                 else when (s.engine.trend) { 1 -> "صعودی"; -1 -> "نزولی"; else -> "بدون روند" }
             headerStatus.text = buildString {
-                append(if (s.liveRunning) "● لایو" else "○ لایو خاموش")
+                if (s.sessionMode == SessionMode.INTERNAL) {
+                    append("▣ بک‌تست داخلی")
+                } else {
+                    append(if (s.liveRunning) "● لایو" else "○ لایو خاموش")
+                }
                 append("  |  ${Tf.label(s.chartTfSec)}  |  روند: $trend")
                 append("  |  معاملات: ${Fa.d(s.tradesSnapshot().count { !it.open }.toString())}")
                 // Capital = سرمایهٔ اولیه + سود/زیان معاملات بسته‌شده (همان عدد تب سود و زیان و §۲۰)؛
@@ -1053,6 +1057,9 @@ class MainActivity : Activity() {
             "کشیدن روی محور قیمت = فشرده/باز کردن مقیاس · دو ضربه = بازنشانی نما · دو ضربه روی محور قیمت = مقیاس خودکار · " +
             "نگه‌داشتن = کراس‌هیر و منوی چارت", 10.5f, Palette.dim))
 
+        // ── داده و نشست (طرح B) ──
+        addBacktestSection(v)
+
         // ── هشدارها ──
         v.addView(Ui.section(this, "① هشدار و نوتیفیکیشن"))
         v.addView(switchRow("حالت هشدار (کلی)", Alerts.enabled) { b -> Alerts.setEnabled(this, b) })
@@ -1153,8 +1160,15 @@ class MainActivity : Activity() {
         v.addView(numRow("حداقل ردیف یک ناحیه", s.cfg.minZoneRows.toDouble()) { s.cfg.minZoneRows = it.toInt(); s.rebuildAsync() })
         // §v1.4.9: باکس‌ها با «کلوز از سمت دور» پاک می‌شوند؛ محدودیت تعداد غیرفعال (نامحدود).
         v.addView(Ui.tv(this, "حداکثر باکس روی چارت: نامحدود (پاک‌سازی با کلوز از سمت دور)", 11f, Palette.dim))
-        v.addView(switchRow("نمایش ناحیه‌های ردشده", s.cfg.showRejectedZones) { s.cfg.showRejectedZones = it; s.rebuildAsync() })
-        v.addView(switchRow("پاک کردن باکس با کلوز از سمت دور", s.cfg.clearUsedZones) { s.cfg.clearUsedZones = it; s.rebuildAsync() })
+        // §4-5: ناحیهٔ ردشده «روی چارت با خط‌چین خاکستری دیده می‌شود، ولی در معامله استفاده
+        // نمی‌شود». این سوییچ باید واقعاً نمایش چارت را عوض کند؛ قبلاً فقط یک فیلد ذخیره می‌شد
+        // و هیچ‌جا خوانده نمی‌شد (سوییچ بی‌اثر در تنظیمات).
+        v.addView(switchRow("نمایش ناحیه‌های ردشده", s.cfg.showRejectedZones) {
+            s.cfg.showRejectedZones = it
+            s.showRejectedStructureBoxes = it
+            applyAndSaveChartVis()
+        })
+        v.addView(Ui.tv(this, "ابطال ناحیه با کلوز از سمت دور: طبق سند همیشه فعال", 11f, Palette.dim))
         val dists = arrayOf("مثلثی حول Close", "مثلثی حول Typical", "یکنواخت")
         dists.forEachIndexed { i, n ->
             v.addView(Ui.btn(this, "توزیع حجم: $n", if (s.cfg.distMode == i) Palette.accent else Palette.panel2,
@@ -1172,10 +1186,13 @@ class MainActivity : Activity() {
 
         // ── معامله ──
         v.addView(Ui.section(this, "⑥ معامله و بک‌تست"))
-        v.addView(numRow("بافر حدضرر (تیک)", s.cfg.slBufTicks) { s.cfg.slBufTicks = it; s.rebuildAsync() })
-        // §4-8 سند: «سطح سفارش = سقف/کف باکس HV ± ۲ تیک بافر … تعداد تیک بافر قابل تغییر است»
+        // §4-8 (ویرایش جدید): حد ضرر از کف/سقف **تایید میانی** ± بافر ساخته می‌شود.
+        v.addView(numRow("بافر حدضرر (تیک) — از کف/سقف تایید میانی", s.cfg.slBufTicks) { s.cfg.slBufTicks = it; s.rebuildAsync() })
+        // §4-8 سند: «سطح سفارش = سقف/کف باکس HV ± ۱ تیک بافر … تعداد تیک بافر قابل تغییر است»
         v.addView(numRow("بافر سطح سفارش (تیک)", s.cfg.entryBufTicks) { s.cfg.entryBufTicks = it; s.rebuildAsync() })
-        // §18-31 سند: سفارش با فاصلهٔ حد ضرر بیشتر از N ثبت نمی‌شود (SL>N)؛ پیش‌فرض ۳
+        // §۵ سند: «اپ اندروید: بدون کارمزد (لغزش ۱ تیک)» — فقط روی خروج با حد ضرر اعمال می‌شود.
+        v.addView(numRow("لغزش خروج با حد ضرر (تیک)", s.cfg.slipTicks) { s.cfg.slipTicks = it; s.rebuildAsync() })
+        // §18-31 سند: سفارش با فاصلهٔ حد ضرر بیشتر از N ثبت نمی‌شود (SL>N)؛ پیش‌فرض سند ۲۰
         v.addView(numRow("حداکثر فاصلهٔ حد ضرر N (واحد)", s.cfg.maxSlUnits) { s.cfg.maxSlUnits = it; s.rebuildAsync() })
         if (s.cfg.strategy == Strategy.NO_TREND) {
             // استراتژی ۲: حد سود فقط «واحد» است (بدون فیبو و بدون TP1/TP2)؛ پیش‌فرض ۱۰
@@ -1259,6 +1276,88 @@ class MainActivity : Activity() {
             "معاملات کاغذی است؛ به کارگزار وصل نیست. همهٔ محاسبات داخل گوشی انجام می‌شود.\n" +
             "مستندات کامل پروژه در پوشهٔ docs مخزن گیت‌هاب است.", 10.5f, Palette.dim))
         return scroll
+    }
+
+    /**
+     * بخش «داده و نشست» — کلید روشن/خاموش تاریخچهٔ داخلی (طرح B).
+     *
+     * دو نشست کاملاً جدا: «زنده» با فید شبکه و فایل خودش، «بک‌تست داخلی» با دادهٔ یک‌سالهٔ
+     * M1 و فایل خودش. با روشن/خاموش کردن این کلید، هیچ‌کدام از داده‌های دیگری استفاده نمی‌کند.
+     */
+    private fun addBacktestSection(v: LinearLayout) {
+        v.addView(Ui.section(this, "⓪-ب داده و نشست (بک‌تست داخلی)"))
+        val internal = s.sessionMode == SessionMode.INTERNAL
+        v.addView(Ui.tv(this,
+            "نشست فعال: " + (if (internal) "بک‌تست داخلی — فید شبکه خاموش است"
+                              else "زنده — فید شبکه و ذخیرهٔ خودکار"),
+            11.5f, Palette.gold, true))
+        v.addView(Ui.tv(this,
+            "دادهٔ بک‌تست: " + s.backtestDataText(this), 10.5f, Palette.dim))
+        v.addView(switchRow("تاریخچهٔ داخلی (یک سال M1 با حجم)", internal) { on ->
+            (if (on) SessionMode.INTERNAL else SessionMode.LIVE).let { target ->
+                toast(if (on) "رفتن به بک‌تست داخلی…" else "بازگشت به حالت زنده…")
+                s.switchSession(applicationContext, target) { msg ->
+                    runOnUiThread {
+                        AlertDialog.Builder(this)
+                            .setTitle(if (on) "بک‌تست داخلی" else "حالت زنده")
+                            .setMessage(msg).setPositiveButton("باشه", null).show()
+                        showTab(4)
+                    }
+                }
+            }
+        })
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(Ui.btn(this, if (s.hasBacktestData(this)) "دانلود مجدد داده" else "دانلود دادهٔ یک‌ساله",
+            Palette.panel2, Palette.txt, 11f).apply {
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("دانلود دادهٔ بک‌تست")
+                    .setMessage("یک فایل ≈۵ مگابایتی (۳۵۱٬۸۹۴ کندل M1 با حجم، ۲۰۲۵-۰۸-۲۱ تا ۲۰۲۶-۰۸-۲۰) " +
+                        "از GitHub دانلود و در حافظهٔ اپ ذخیره می‌شود. داخل APK نیست.")
+                    .setPositiveButton("دانلود") { _, _ ->
+                        toast("دانلود آغاز شد…")
+                        s.downloadBacktestData(applicationContext) { msg ->
+                            runOnUiThread { AlertDialog.Builder(this@MainActivity).setTitle("نتیجه").setMessage(msg)
+                                .setPositiveButton("باشه", null).show(); showTab(4) }
+                        }
+                    }.setNegativeButton("نه", null).show()
+            }
+        })
+        if (s.hasBacktestData(this)) {
+            row.addView(Ui.btn(this, "حذف داده", Palette.panel2, Palette.down, 11f).apply {
+                setOnClickListener {
+                    AlertDialog.Builder(this@MainActivity).setTitle("حذف دادهٔ بک‌تست؟")
+                        .setMessage("فایل دادهٔ یک‌ساله پاک می‌شود (نتیجهٔ بک‌تست در فایل نشست می‌ماند).")
+                        .setPositiveButton("بله") { _, _ -> toast(s.deleteBacktestData(applicationContext)); showTab(4) }
+                        .setNegativeButton("نه", null).show()
+                }
+            })
+        }
+        v.addView(row)
+        if (internal) {
+            if (s.backtestStale) {
+                v.addView(Ui.tv(this, "⚠ تنظیمات از آخرین اجرا عوض شده — نتیجه کهنه است؛ دوباره اجرا کنید.",
+                    11f, Palette.down, true))
+            }
+            v.addView(Ui.btn(this, "اجرای مجدد بک‌تست (۳۵۲ هزار کندل)", Palette.accent, Palette.bg, 11.5f).apply {
+                setOnClickListener {
+                    toast("اجرای بک‌تست آغاز شد…")
+                    s.runInternalBacktest(applicationContext) { msg ->
+                        runOnUiThread {
+                            AlertDialog.Builder(this@MainActivity).setTitle("بک‌تست داخلی").setMessage(msg)
+                                .setPositiveButton("باشه", null).show(); showTab(0)
+                        }
+                    }
+                }
+            })
+            if (s.backtestInfo.isNotEmpty()) {
+                v.addView(Ui.tv(this, s.backtestInfo, 10.5f, Palette.dim))
+            }
+            v.addView(Ui.tv(this,
+                "در این حالت: دانلود تاریخچه، سرویس زنده و پر شدن سفارش با قیمت زنده خاموش‌اند؛ " +
+                    "چارت روی کل یک سال جابه‌جا (lookback) می‌شود و نواحی ساختار/LV/HV قابل بررسی‌اند.",
+                10f, Palette.dim))
+        }
     }
 
     /** §۲۰ سند: مدیریت مالی و مدیریت زیان (ManageAllLost / Mixed). پیش‌فرض خاموش = همان حجم §۵. */
@@ -1531,8 +1630,18 @@ class MainActivity : Activity() {
         add("قیمت ورود", Fa.n(t.entry))
         add("حجم", "${Fa.n(t.qty, 3)} اونس")
         add("حد ضرر اولیه", Fa.n(t.sl0))
-        add("TP1 / TP2", "${Fa.n(t.tp1)} / ${Fa.n(t.tp2)}")
-        add("حد سود نهایی (۱٫۲۷۲)", Fa.n(t.tpX))
+        // §18-33 سند (ویرایش جدید): در «همهٔ» مودها TP1 و TP2 و TPX باید با **عدد و نتیجه** نشان داده شوند.
+        fun tpResult(kind: String): String {
+            val f = t.fills.firstOrNull { it.kind == kind }
+            return if (f != null) "✔ لمس شد — ${Fa.n(f.qty, 2)} @ ${Fa.n(f.price)} · ${Fa.signed(f.pnl)} دلار"
+                   else "— لمس نشد"
+        }
+        add("TP1 (۰٫۳۸۲ فیبو) · ${Fa.n(t.tp1)}", tpResult("TP1"),
+            if (t.fills.any { it.kind == "TP1" }) Palette.up else Palette.dim)
+        add("TP2 (۰٫۵ فیبو) · ${Fa.n(t.tp2)}", tpResult("TP2"),
+            if (t.fills.any { it.kind == "TP2" }) Palette.up else Palette.dim)
+        add("TPX (۱٫۲۷۲ فیبو) · ${Fa.n(t.tpX)}", tpResult("TPX"),
+            if (t.fills.any { it.kind == "TPX" }) Palette.up else Palette.dim)
         add("ناحیهٔ ساختار", "${Fa.n(t.zoneBot)} تا ${Fa.n(t.zoneTop)}")
         if (!t.open) {
             add("زمان خروج", Fa.jalali(t.exitT ?: 0))
@@ -1708,6 +1817,11 @@ class MainActivity : Activity() {
 
     // ══════════════════════════════════════════════════════════════════════════
     private fun toggleLive() {
+        // نگهبان طرح B: در نشست بک‌تست داخلی، سرویس زنده اصلاً روشن نمی‌شود.
+        if (s.sessionMode == SessionMode.INTERNAL) {
+            toast("در حالت بک‌تست داخلی، فید زنده خاموش است")
+            return
+        }
         if (s.liveRunning) {
             EngineService.stop(this)
             Log.i(Log.CAT_LIVE, "ارزیابی زنده متوقف شد")
