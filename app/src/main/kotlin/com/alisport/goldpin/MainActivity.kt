@@ -256,7 +256,11 @@ class MainActivity : Activity() {
             val trend = if (s.cfg.strategy == Strategy.NO_TREND) "ندارد (استراتژی ۲)"
                 else when (s.engine.trend) { 1 -> "صعودی"; -1 -> "نزولی"; else -> "بدون روند" }
             headerStatus.text = buildString {
-                append(if (s.liveRunning) "● لایو" else "○ لایو خاموش")
+                if (s.sessionMode == SessionMode.INTERNAL) {
+                    append("▣ بک‌تست داخلی")
+                } else {
+                    append(if (s.liveRunning) "● لایو" else "○ لایو خاموش")
+                }
                 append("  |  ${Tf.label(s.chartTfSec)}  |  روند: $trend")
                 append("  |  معاملات: ${Fa.d(s.tradesSnapshot().count { !it.open }.toString())}")
                 // Capital = سرمایهٔ اولیه + سود/زیان معاملات بسته‌شده (همان عدد تب سود و زیان و §۲۰)؛
@@ -1053,6 +1057,9 @@ class MainActivity : Activity() {
             "کشیدن روی محور قیمت = فشرده/باز کردن مقیاس · دو ضربه = بازنشانی نما · دو ضربه روی محور قیمت = مقیاس خودکار · " +
             "نگه‌داشتن = کراس‌هیر و منوی چارت", 10.5f, Palette.dim))
 
+        // ── داده و نشست (طرح B) ──
+        addBacktestSection(v)
+
         // ── هشدارها ──
         v.addView(Ui.section(this, "① هشدار و نوتیفیکیشن"))
         v.addView(switchRow("حالت هشدار (کلی)", Alerts.enabled) { b -> Alerts.setEnabled(this, b) })
@@ -1268,6 +1275,88 @@ class MainActivity : Activity() {
             "معاملات کاغذی است؛ به کارگزار وصل نیست. همهٔ محاسبات داخل گوشی انجام می‌شود.\n" +
             "مستندات کامل پروژه در پوشهٔ docs مخزن گیت‌هاب است.", 10.5f, Palette.dim))
         return scroll
+    }
+
+    /**
+     * بخش «داده و نشست» — کلید روشن/خاموش تاریخچهٔ داخلی (طرح B).
+     *
+     * دو نشست کاملاً جدا: «زنده» با فید شبکه و فایل خودش، «بک‌تست داخلی» با دادهٔ یک‌سالهٔ
+     * M1 و فایل خودش. با روشن/خاموش کردن این کلید، هیچ‌کدام از داده‌های دیگری استفاده نمی‌کند.
+     */
+    private fun addBacktestSection(v: LinearLayout) {
+        v.addView(Ui.section(this, "⓪-ب داده و نشست (بک‌تست داخلی)"))
+        val internal = s.sessionMode == SessionMode.INTERNAL
+        v.addView(Ui.tv(this,
+            "نشست فعال: " + (if (internal) "بک‌تست داخلی — فید شبکه خاموش است"
+                              else "زنده — فید شبکه و ذخیرهٔ خودکار"),
+            11.5f, Palette.gold, true))
+        v.addView(Ui.tv(this,
+            "دادهٔ بک‌تست: " + s.backtestDataText(this), 10.5f, Palette.dim))
+        v.addView(switchRow("تاریخچهٔ داخلی (یک سال M1 با حجم)", internal) { on ->
+            (if (on) SessionMode.INTERNAL else SessionMode.LIVE).let { target ->
+                toast(if (on) "رفتن به بک‌تست داخلی…" else "بازگشت به حالت زنده…")
+                s.switchSession(applicationContext, target) { msg ->
+                    runOnUiThread {
+                        AlertDialog.Builder(this)
+                            .setTitle(if (on) "بک‌تست داخلی" else "حالت زنده")
+                            .setMessage(msg).setPositiveButton("باشه", null).show()
+                        showTab(4)
+                    }
+                }
+            }
+        })
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        row.addView(Ui.btn(this, if (s.hasBacktestData(this)) "دانلود مجدد داده" else "دانلود دادهٔ یک‌ساله",
+            Palette.panel2, Palette.txt, 11f).apply {
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("دانلود دادهٔ بک‌تست")
+                    .setMessage("یک فایل ≈۵ مگابایتی (۳۵۱٬۸۹۴ کندل M1 با حجم، ۲۰۲۵-۰۸-۲۱ تا ۲۰۲۶-۰۸-۲۰) " +
+                        "از GitHub دانلود و در حافظهٔ اپ ذخیره می‌شود. داخل APK نیست.")
+                    .setPositiveButton("دانلود") { _, _ ->
+                        toast("دانلود آغاز شد…")
+                        s.downloadBacktestData(applicationContext) { msg ->
+                            runOnUiThread { AlertDialog.Builder(this@MainActivity).setTitle("نتیجه").setMessage(msg)
+                                .setPositiveButton("باشه", null).show(); showTab(4) }
+                        }
+                    }.setNegativeButton("نه", null).show()
+            }
+        })
+        if (s.hasBacktestData(this)) {
+            row.addView(Ui.btn(this, "حذف داده", Palette.panel2, Palette.down, 11f).apply {
+                setOnClickListener {
+                    AlertDialog.Builder(this@MainActivity).setTitle("حذف دادهٔ بک‌تست؟")
+                        .setMessage("فایل دادهٔ یک‌ساله پاک می‌شود (نتیجهٔ بک‌تست در فایل نشست می‌ماند).")
+                        .setPositiveButton("بله") { _, _ -> toast(s.deleteBacktestData(applicationContext)); showTab(4) }
+                        .setNegativeButton("نه", null).show()
+                }
+            })
+        }
+        v.addView(row)
+        if (internal) {
+            if (s.backtestStale) {
+                v.addView(Ui.tv(this, "⚠ تنظیمات از آخرین اجرا عوض شده — نتیجه کهنه است؛ دوباره اجرا کنید.",
+                    11f, Palette.down, true))
+            }
+            v.addView(Ui.btn(this, "اجرای مجدد بک‌تست (۳۵۲ هزار کندل)", Palette.accent, Palette.bg, 11.5f).apply {
+                setOnClickListener {
+                    toast("اجرای بک‌تست آغاز شد…")
+                    s.runInternalBacktest(applicationContext) { msg ->
+                        runOnUiThread {
+                            AlertDialog.Builder(this@MainActivity).setTitle("بک‌تست داخلی").setMessage(msg)
+                                .setPositiveButton("باشه", null).show(); showTab(0)
+                        }
+                    }
+                }
+            })
+            if (s.backtestInfo.isNotEmpty()) {
+                v.addView(Ui.tv(this, s.backtestInfo, 10.5f, Palette.dim))
+            }
+            v.addView(Ui.tv(this,
+                "در این حالت: دانلود تاریخچه، سرویس زنده و پر شدن سفارش با قیمت زنده خاموش‌اند؛ " +
+                    "چارت روی کل یک سال جابه‌جا (lookback) می‌شود و نواحی ساختار/LV/HV قابل بررسی‌اند.",
+                10f, Palette.dim))
+        }
     }
 
     /** §۲۰ سند: مدیریت مالی و مدیریت زیان (ManageAllLost / Mixed). پیش‌فرض خاموش = همان حجم §۵. */
@@ -1717,6 +1806,11 @@ class MainActivity : Activity() {
 
     // ══════════════════════════════════════════════════════════════════════════
     private fun toggleLive() {
+        // نگهبان طرح B: در نشست بک‌تست داخلی، سرویس زنده اصلاً روشن نمی‌شود.
+        if (s.sessionMode == SessionMode.INTERNAL) {
+            toast("در حالت بک‌تست داخلی، فید زنده خاموش است")
+            return
+        }
         if (s.liveRunning) {
             EngineService.stop(this)
             Log.i(Log.CAT_LIVE, "ارزیابی زنده متوقف شد")

@@ -418,7 +418,10 @@ class Engine(val cfg: Settings) {
     private fun processClosed(cd: Candle, i: Int, prev: Candle?) {
         curBi = i; curT = cd.t; curVol = cd.v
         times[i] = cd.t
-        if (times.size > 200000) times.clear()
+        // ⚠ سقف قبلی ۲۰۰٬۰۰۰ بود؛ بک‌تست یک‌سالهٔ M1 (۳۵۲ هزار کندل) وسط اجرا از این سقف
+        // می‌گذشت و `times` پاک می‌شد ⇒ مارکرهای کندل‌های قدیمی دیگر `t` نداشتند و زمانشان
+        // غلط ثبت می‌شد. حالا سقف ۱ میلیون است (≈۲٫۵ سال M1) و پاک‌سازی عملاً هرگز رخ نمی‌دهد.
+        if (times.size > 1_000_000) times.clear()
         val isNewS = Tf.isNewBarStart(tfS(), cd.t, prev?.t)
         val isNewM = Tf.isNewBarStart(tfM(), cd.t, prev?.t)
         val isNew1 = Tf.isNewBarStart(tf1(), cd.t, prev?.t)

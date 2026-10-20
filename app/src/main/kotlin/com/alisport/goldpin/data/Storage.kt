@@ -19,6 +19,10 @@ import java.util.zip.GZIPOutputStream
 object Storage {
 
     const val FILE_NAME = "goldpin_state.json.gz"
+    /** نشست بک‌تست داخلی — جدا از فایل زنده تا هیچ‌وقت با فید شبکه قاطی نشود (طرح B). */
+    const val INTERNAL_FILE_NAME = "goldpin_backtest.json.gz"
+    /** فایل دادهٔ یک‌سالهٔ M1 (از GitHub Release دانلود می‌شود؛ داخل APK نیست). */
+    const val DATA_FILE_NAME = "goldpin_xauusd_m1_1y.csv.gz"
 
     fun dir(ctx: Context): File {
         val ext = ctx.getExternalFilesDir(null)
@@ -26,6 +30,13 @@ object Storage {
     }
 
     fun autoFile(ctx: Context): File = File(dir(ctx), FILE_NAME)
+
+    fun internalFile(ctx: Context): File = File(dir(ctx), INTERNAL_FILE_NAME)
+
+    fun dataFile(ctx: Context): File = File(dir(ctx), DATA_FILE_NAME)
+
+    /** فایل موقت دانلود داده؛ فقط بعد از تأیید هش به نام نهایی تغییر نام می‌دهد. */
+    fun dataPartFile(ctx: Context): File = File(dir(ctx), DATA_FILE_NAME + ".part")
 
     /**
      * نوشتن اتمیک وضعیت: ابتدا در فایل موقت، سپس جای‌گزینی با فایل اصلی.
