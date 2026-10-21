@@ -783,6 +783,7 @@ class AppState {
 
     fun setCandles(list: List<Candle>, rebuildNow: Boolean = true) {
         Log.i(Log.CAT_FEED, "داده در اپ گذاشته شد", "کندل=${list.size}")
+        if (list.isNotEmpty()) stateLoaded = true
         busy = true
         try {
             val copy = ArrayList(list)
@@ -1035,6 +1036,26 @@ class AppState {
     }
 
     /** ادغام دنبالهٔ تازه در سری چارت (بر اساس زمان — بدون تکرار و بدون ریپینت) */
+    /** حداکثر پرش مجاز قیمت در یک تیک لایو (۰٫۲٪ ≈ ۸ دلار روی طلای ۴۱۰۰) — بیشتر = منبع ناسازگار */
+    private val MAX_LIVE_PRICE_JUMP = 0.002
+
+    /**
+     * آیا وضعیت از فایل نشست بازیابی شده است؟ تا وقتی false باشد، هیچ نوشتن/ساختن سری تازه‌ای
+     * مجاز نیست؛ وگرنه یک ایندکس خالی روی فایل سالمِ کاربر نوشته می‌شود (باگ «تاریخچه غیب شد»).
+     */
+    @Volatile var stateLoaded: Boolean = false
+
+    @Volatile private var restoreRequested = false
+
+    /** بازیابی وضعیت را یک‌بار (و فقط یک‌بار) در پس‌زمینه می‌خواهد. */
+    fun requestRestoreOnce() {
+        if (restoreRequested || stateLoaded) return
+        val ctx = appCtx ?: return
+        restoreRequested = true
+        Log.i(Log.CAT_LIVE, "وضعیت بازیابی‌نشده بود — بازیابی خودکار شروع شد")
+        io.execute { restoreLiveBlocking(ctx); main.post { notifyUi() } }
+    }
+
     /** فاصلهٔ میانی کندل‌ها بر حسب ثانیه (برای تشخیص تایم‌فریم واقعی یک سری) */
     private fun medianStepSec(list: List<Candle>): Long {
         if (list.size < 2) return 0L
@@ -1109,19 +1130,59 @@ class AppState {
         }
     }
 
+    /**
+     * ادغام دنبالهٔ لایو در سری مود.
+     *
+     * ⚠ **باگی که تاریخچهٔ سفارش‌ها را پاک می‌کرد:** نسخه‌های قبل هنگام هر «ناسازگاری» سری را
+     * کامل جایگزین می‌کردند (`setCandles(tail, rebuildNow = true)`) و `rebuild()` طبق طراحی
+     * کارگزار را از صفر می‌سازد ⇒ همهٔ سفارش‌ها/معاملات/موجودی می‌رفت و گزارش «هیچ معامله‌ای
+     * بسته نشده» می‌داد. این حالت با یک تیک ناقص (دنبالهٔ خیلی کوتاه)، با قطع موقت Yahoo و
+     * سوئیچ بی‌صدای منبع (PAXG با مقیاس حجم/قیمت متفاوت) هم رخ می‌داد.
+     *
+     * حالا در لایو **هیچ تیکی سری را جایگزین نمی‌کند**؛ تیک مشکوک دور ریخته می‌شود و
+     * وضعیت (سفارش‌ها، معاملات، باکس‌ها) دست‌نخورده می‌ماند. جایگزینی سری فقط با درخواست صریح
+     * کاربر (دکمهٔ ↻ / تغییر تنظیمات) انجام می‌شود.
+     */
     fun mergeTail(tail: List<Candle>) {
         if (tail.isEmpty()) return
         val baseSeries = if (modeCandles.isNotEmpty()) modeCandles else candles
         val before = baseSeries.size
-        if (baseSeries.isEmpty()) { setCandles(tail, rebuildNow = true); return }
-        val curStep = medianStepSec(baseSeries)
+        if (baseSeries.isEmpty()) {
+            // حالت فقط‌اولین‌بار: هنوز هیچ داده‌ای در حافظه نیست. اگر وضعیت بازیابی‌نشده باشد،
+            // ساختن سری از این دنباله یعنی پاک‌کردن تاریخچهٔ ذخیره‌شده؛ پس اول بازیابی می‌کنیم.
+            if (!stateLoaded) {
+                Log.w(Log.CAT_LIVE, "دنبالهٔ لایو قبل از بازیابی وضعیت رسید — دور ریخته شد",
+                    "دنباله=${tail.size} · منتظر بازیابی فایل نشست")
+                requestRestoreOnce()
+                return
+            }
+            setCandles(tail, rebuildNow = true); return
+        }
+        // ① دنبالهٔ کوتاه: فاصلهٔ زمانی‌اش قابل اندازه‌گیری نیست ⇒ نمی‌شود در مورد ناسازگاری قضاوت کرد.
         val tailStep = medianStepSec(tail)
-        if (!sameTimeframe(curStep, tailStep)) {
-            Log.w(Log.CAT_LIVE, "series timeframe mismatch -> replacing series",
-                "sari=$before ba faseleye ${curStep}s · donbale=${tail.size} ba faseleye ${tailStep}s · " +
-                    "chart=${com.alisport.goldpin.core.Tf.label(chartTfSec)}")
-            setCandles(tail, rebuildNow = true)   // rebuild() خودش ساکت اجرا می‌شود
+        if (tail.size < 3 || tailStep <= 0L) {
+            Log.w(Log.CAT_LIVE, "تیک لایو دور ریخته شد — دنبالهٔ کوتاه",
+                "دنباله=${tail.size} فاصله=${tailStep}s")
             return
+        }
+        val curStep = medianStepSec(baseSeries)
+        if (curStep > 0L && !sameTimeframe(curStep, tailStep)) {
+            Log.w(Log.CAT_LIVE, "تیک لایو دور ریخته شد — ناسازگاری تایم‌فریم دنباله",
+                "سری=$before با فاصلهٔ ${curStep}s · دنباله=${tail.size} با فاصلهٔ ${tailStep}s · " +
+                    "chart=${com.alisport.goldpin.core.Tf.label(chartTfSec)}")
+            return
+        }
+        // ② پرش قیمت: منبع پشتیبان (PAXG) با قیمت/حجم متفاوت. ادغامش یعنی باکس‌های جعلی و
+        //    حجم‌های ۲۵٬۰۰۰ برابری، پس تیک دور ریخته می‌شود.
+        val lastBase = baseSeries.last().c
+        val firstTail = tail.first().o
+        if (lastBase > 0 && firstTail > 0) {
+            val dev = kotlin.math.abs(firstTail - lastBase) / lastBase
+            if (dev > MAX_LIVE_PRICE_JUMP) {
+                Log.w(Log.CAT_LIVE, "تیک لایو دور ریخته شد — پرش قیمت (منبع ناسازگار؟)",
+                    "سری=${Fa.n(lastBase, 2)} دنباله=${Fa.n(firstTail, 2)} اختلاف=${Fa.n(dev * 100, 2)}٪")
+                return
+            }
         }
         val firstNew = tail.first().t
         // حذف بخش هم‌پوشان از انتهای سری فعلی
@@ -1300,6 +1361,19 @@ class AppState {
     fun saveToAutoFile(ctx: Context): String {
         val t0 = System.currentTimeMillis()
         return try {
+            // ── گاردِ «فایل سالم را با وضعیت خالی خراب نکن» ─────────────────────────────
+            // باگ گزارش‌شده: بعد از مدتی در لایو، همهٔ سفارش‌ها/معاملات غیب می‌شدند. یکی از
+            // مسیرها این بود: سرویس/اپ با وضعیت خالی بالا می‌آمد و ذخیرهٔ خودکار، همان خالی را
+            // روی فایل پرِ قبلی می‌نوشت ⇒ تاریخچه برای همیشه از بین می‌رفت.
+            // حالا اگر حافظه خالی است ولی فایل موجودِ پر داریم، نوشتن انجام نمی‌شود.
+            if (!stateLoaded && engine.processed == 0 && broker.orders.isEmpty() && broker.trades.isEmpty()) {
+                val f = sessionFile(ctx)
+                if (f.exists() && f.length() > 4096) {
+                    Log.w(Log.CAT_STORE, "ذخیرهٔ خودکار رد شد — وضعیت خالی روی فایل سالم نوشته نمی‌شود",
+                        "فایل=${f.name} بایت=${f.length()}")
+                    return "ذخیره نشد: وضعیت بازیابی نشده است (فایل سالم دست‌نخورده ماند)"
+                }
+            }
             busy = true
             val json = buildJson()
             val main = sessionFile(ctx)
@@ -1387,6 +1461,7 @@ class AppState {
                 }
                 publishSnapshot()
             }
+            stateLoaded = true
             if (!applySettings && settingsDiffer) {
                 // تنظیمات کاربر مقدس است: وضعیت بازگردانده می‌شود، ولی موتور با
                 // تنظیمات فعلی از نو ساخته می‌شود تا باکس/سفارش‌های مود قبلی نمانند.

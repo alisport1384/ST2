@@ -556,6 +556,10 @@ class Engine(val cfg: Settings) {
                 zb.endBi = i; zb.endT = cd.t
             }
         }
+        // چرخهٔ عمر باکس‌های LV/HV (تریگر ۱ و ۲): این باکس‌ها قبلاً فقط با فراخوانی صریح ستاپ
+        // بسته می‌شدند؛ اگر ستاپ پاک/جایگزین/بازسازی می‌شد، باکس بی‌مالک می‌ماند و تا ابد
+        // ACTIVE روی چارت کشیده می‌شد. هر باکس ACTIVE که هیچ ستاپی مالکش نیست، همین‌جا بسته می‌شود.
+        sweepOrphanBoxes(i, cd.t)
         if (agg1.closedNow && agg1.cl != null) prevT1Vol = agg1.cl!!.v
         prevChartVol = cd.v
         cnt.zoneCount = zones.size
@@ -1052,6 +1056,11 @@ class Engine(val cfg: Settings) {
         while (setups.size > trackedCap) {
             val pick = setups.indexOfFirst { it.stage == 8 }
             if (pick < 0) break
+            // باگ «باکس باطل‌شده روی چارت می‌ماند»: اگر ستاپِ پایان‌یافته حذف می‌شد، باکس‌های
+            // LV/HV آن هیچ مالکی نداشتند و تا ابد ACTIVE می‌ماندند (روی چارت کشیده می‌شدند).
+            val dead = setups[pick]
+            closeT1Box(dead, ZoneStatus.DELETED, curBi, curT)
+            closeT2Box(dead, ZoneStatus.DELETED, curBi, curT)
             setups.removeAt(pick)
         }
     }
@@ -1068,6 +1077,34 @@ class Engine(val cfg: Settings) {
         events.add("[${s.id}] سفارش معلق لغو شد — $reason")
         lg("ENGINE", "سفارش معلق لغو شد ($reason) · ستاپ #${s.id}", "bar=$curBi")
         alarm(AlertKind.CANCEL, "سفارش معلق لغو شد", "ستاپ #${s.id} · $reason")
+    }
+
+    /**
+     * باکس‌های LV/HV بی‌مالک را می‌بندد.
+     *
+     * قاعدهٔ سند: هر باکس تریگر ۱/۲ فقط تا وقتی معتبر است که ستاپش زنده باشد. ولی بستن باکس‌ها
+     * دستی و پراکنده بود (هر شاخهٔ ابطال/پایان خودش صدا می‌زد) و بعضی شاخه‌ها جا می‌افتاد؛ نتیجه:
+     * باکس باطل‌شده روی چارت می‌ماند و کاربر فکر می‌کند ناحیه هنوز معتبر است.
+     * این جارو تضمین می‌کند هیچ باکس ACTIVE بدون مالک باقی نماند.
+     */
+    private fun sweepOrphanBoxes(bi: Int, t: Long) {
+        if (t1Zones.isEmpty() && t2Zones.isEmpty()) return
+        val lvOwned = HashSet<Long>()
+        val hvOwned = HashSet<Long>()
+        for (s in setups) {
+            if (s.lvZoneId >= 0) lvOwned.add(s.lvZoneId)
+            if (s.hvZoneId >= 0) hvOwned.add(s.hvZoneId)
+        }
+        var n = 0
+        for (z in t1Zones) {
+            if (z.status != ZoneStatus.ACTIVE || z.id in lvOwned) continue
+            z.status = ZoneStatus.DELETED; z.endBi = bi; z.endT = t; n++
+        }
+        for (z in t2Zones) {
+            if (z.status != ZoneStatus.ACTIVE || z.id in hvOwned) continue
+            z.status = ZoneStatus.DELETED; z.endBi = bi; z.endT = t; n++
+        }
+        if (n > 0) lg("ENGINE", "باکس بی‌مالک بسته شد", "تعداد=$n bar=$bi")
     }
 
     private fun closeT1Box(s: Setup, status: Int, endBi: Int = curBi, endT: Long = curT) {

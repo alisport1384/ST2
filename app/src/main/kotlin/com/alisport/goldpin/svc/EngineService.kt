@@ -114,6 +114,14 @@ class EngineService : Service() {
         Alerts.inBacktest = false
         Log.i(Log.CAT_LIVE, "سرویس ارزیابی زنده شروع شد", "فاصله=${state.livePollMs}ms نماد=${state.symbol}")
         startForeground(NOTIF_ID, buildNotification())
+        // باگ «تاریخچه در لایو غیب می‌شود»: اگر سرویس با وضعیت خالی بالا بیاید (پروسه بعد از
+        // kill شدن سیستم دوباره ساخته شده و MainActivity هنوز اجرا نشده)، اولین تیک روی یک
+        // ایندکس خالی موتور را اجرا می‌کرد و ذخیرهٔ خودکار همان خالی را روی فایل کاربر می‌نوشت.
+        // حالا وضعیت ذخیره‌شده پیش از شروع تیک‌ها بازیابی می‌شود.
+        if (!state.stateLoaded) {
+            Log.w(Log.CAT_LIVE, "سرویس با وضعیت خالی شروع شد — بازیابی وضعیت ذخیره‌شده")
+            state.io.execute { state.restoreOrSample(applicationContext) { } }
+        }
         val h = ensureTickThread()
         h.removeCallbacks(tick)
         h.post(tick)
