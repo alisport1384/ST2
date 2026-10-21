@@ -62,6 +62,7 @@ class SlLimitAndPinAlternationTest {
     fun `doc 18-31 engine keeps HV and setup but never arms when SL exceeds N`() {
         fun run(maxSl: Double): Pair<Setup, PaperBroker> {
             val cfg = Settings().apply {
+                    hvScanFirstTouch = false   // §۱۸-۱۷: اسکن از کف ناحیهٔ LV
                 tfMode = 1
                 tfS = Tf.H1; tfM = Tf.M15; tf1 = Tf.M5; tf2 = Tf.M1
                 maxSlUnits = maxSl

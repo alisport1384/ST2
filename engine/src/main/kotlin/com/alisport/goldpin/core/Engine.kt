@@ -1453,6 +1453,13 @@ class Engine(val cfg: Settings) {
      * در صورت پیدا شدن (و تایید شدن)، مسلح می‌شود؛ در صورت پیدا نشدن، اسکن برای ناحیهٔ جدید ادامه می‌یابد.
      */
     private fun scanHvFromLvExtreme(s: Setup, upToBi: Int, bull: Boolean) {
+        // §۴-۸ سند (پیش‌فرض): «اسکن کندل حجم زیاد بعد از تایید شدن باکس حجم کم، **از اولین برگشت و
+        // برخورد یا ورود قیمت به باکس حجم کم** شروع می‌شود». پیش‌تر این تابع `lvReEntered` را
+        // همان لحظهٔ تایید LV روی true می‌گذاشت؛ نتیجه: اسکن از لحظهٔ تایید آغاز می‌شد، «اولین
+        // برگشت» هرگز سنجیده نمی‌شد و کلید «اسکن ولوم زیاد از اولین برگشت به باکس» در تنظیمات
+        // هیچ اثری نداشت. حالا در حالت پیش‌فرض (hvScanFirstTouch=true) این تابع کاری نمی‌کند و
+        // شروع اسکن فقط با بازگشت قیمت به باکس LV در [trigger2Engine] رقم می‌خورد.
+        if (cfg.hvScanFirstTouch) return
         s.lvReEntered = true
         s.hvScanBi = curBi
         if (t2History.isEmpty()) return
@@ -1835,30 +1842,44 @@ class Engine(val cfg: Settings) {
                 }
                 if (brokenMid) {
                     val old = s.midRef
-                    if (s.stage == 6) broker?.onSetupInvalidated(s, curT, curBi)
-                    closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
-                    closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
-                    s.midRef = Double.NaN; s.midBi = -1; s.midT = 0L; s.markBi = -1
-                    clearSetupFib(s)
-                    if (s.zUsed) {
-                        // §18-14: ناحیهٔ ساختار مصرف شده بود ⇒ ستاپ باطل و تا لمس ناحیهٔ بعدی غیرفعال
-                        s.zGone = true
-                        s.stage = 8
-                        s.note = "ابطال تایید میانی پس از مصرف ناحیهٔ ساختار — ستاپ باطل"
-                        events.add("[${s.id}] تایید میانی باطل شد و ناحیهٔ ساختار مصرف شده بود — ستاپ باطل")
+                    if (s.stage == 6) {
+                        // §۴-۸ (ویرایش فعلی سند): فهرست لغو سفارش معلق «شکست ناحیهٔ ساختار، تغییر روند،
+                        // ابطال/مصرف LV و انقضا» است و **ابطال تایید میانی در آن نیست**. پیش‌تر همین
+                        // بررسی در مسیر تریگر۲ (هر کندل M1) سفارش مسلح را لغو می‌کرد، در حالی که مسیر
+                        // کندل میانی (middleEngine) سفارش را نگه می‌داشت و فقط سطح تایید را پاک می‌کرد
+                        // ⇒ دو رفتار متناقض از یک قاعده. حالا هر دو مسیر یکسان‌اند: سفارش مسلح
+                        // می‌ماند، باکس‌های LV/HV دست‌نخورده‌اند و فقط تایید میانی پاک می‌شود.
+                        s.midRef = Double.NaN; s.midBi = -1; s.midT = 0L; s.markBi = -1
+                        clearSetupFib(s)
+                        addMarker(curBi, old, 10, "تایید میانی باطل شد (سفارش مسلح پابرجاست)")
+                        lg("ENGINE", "تایید میانی باطل شد — سفارش مسلح لغو نشد (§4-8 سند) · ستاپ #${s.id}",
+                            "سطح قبلی=${f2(old)} bar=$curBi · تریگر۲")
+                        // ادامهٔ بررسی‌های همین کندل (پر شدن/انقضا/نقض HV) مسدود نمی‌شود.
                     } else {
-                        // §18-8: کندل میانی‌ای که تیک شکست در آن رخ داده، هنگام بسته شدن می‌تواند خودش تایید میانی جدید باشد
-                        s.touchMidStart = Tf.bucket(cfg.tfM, cd.t)
-                        s.stage = 1
+                        closeT1Box(s, ZoneStatus.DELETED, curBi, curT)
+                        closeT2Box(s, ZoneStatus.DELETED, curBi, curT)
+                        s.midRef = Double.NaN; s.midBi = -1; s.midT = 0L; s.markBi = -1
+                        clearSetupFib(s)
+                        if (s.zUsed) {
+                            // §18-14: ناحیهٔ ساختار مصرف شده بود ⇒ ستاپ باطل و تا لمس ناحیهٔ بعدی غیرفعال
+                            s.zGone = true
+                            s.stage = 8
+                            s.note = "ابطال تایید میانی پس از مصرف ناحیهٔ ساختار — ستاپ باطل"
+                            events.add("[${s.id}] تایید میانی باطل شد و ناحیهٔ ساختار مصرف شده بود — ستاپ باطل")
+                        } else {
+                            // §18-8: کندل میانی‌ای که تیک شکست در آن رخ داده، هنگام بسته شدن می‌تواند خودش تایید میانی جدید باشد
+                            s.touchMidStart = Tf.bucket(cfg.tfM, cd.t)
+                            s.stage = 1
+                        }
+                        s.lvBi = -1; s.lvT = 0L; s.lvConfBi = -1; s.lvConfT = 0L; s.lvH = Double.NaN; s.lvL = Double.NaN
+                        s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.hvScanBi = -1; s.runMax = Double.NaN
+                        s.lvTouched = false; s.lvUsed = false; s.lvReEntered = false; s.lvUses = 0
+                        s.orderId = -1
+                        addMarker(curBi, old, 10, "تایید میانی باطل شد")
+                        lg("ENGINE", "تایید میانی باطل شد · ستاپ #${s.id}",
+                            "سطح قبلی=${f2(old)} bar=$curBi · تریگر۲")
+                        continue
                     }
-                    s.lvBi = -1; s.lvT = 0L; s.lvConfBi = -1; s.lvConfT = 0L; s.lvH = Double.NaN; s.lvL = Double.NaN
-                    s.hvBi = -1; s.hvT = 0L; s.hvConfBi = -1; s.hvConfT = 0L; s.hvScanBi = -1; s.runMax = Double.NaN
-                    s.lvTouched = false; s.lvUsed = false; s.lvReEntered = false; s.lvUses = 0
-                    s.orderId = -1
-                    addMarker(curBi, old, 10, "تایید میانی باطل شد")
-                    lg("ENGINE", "تایید میانی باطل شد · ستاپ #${s.id}",
-                        "سطح قبلی=${f2(old)} bar=$curBi · تریگر۲")
-                    continue
                 }
             }
 

@@ -321,6 +321,9 @@ class SpecRevTest {
             tfMode = 1
             tfS = Tf.H1; tfM = Tf.M15; tf1 = Tf.M5; tf2 = Tf.M1
             maxSlUnits = 1_000_000.0
+            // §۱۸-۱۷: «اسکن از کف ناحیهٔ تاییدشدهٔ LV» — این حالت با خاموش‌کردن پیش‌فرض §۴-۸
+            // («از اولین برگشت به باکس») قابل انتخاب است.
+            hvScanFirstTouch = false
         }
         val e = Engine(cfg)
         val b = PaperBroker(cfg)
@@ -390,6 +393,7 @@ class SpecRevTest {
         val cfg = Settings().apply {
             tfMode = 2
             tfS = Tf.M30; tfM = Tf.M5; tf1 = Tf.M1; tf2 = Tf.M1
+            hvScanFirstTouch = false   // §۱۸-۱۷: اسکن از کف ناحیهٔ LV (نه اولین برگشت)
             maxSlUnits = 1_000_000.0
         }
         val e = Engine(cfg)
@@ -521,6 +525,7 @@ class SpecRevTest {
         // همان سری کندلیِ تست §18-16/§18-17: کف تایید میانی = ۲۰۰۲٫۰ ، باکس HV = ۲۰۰۷٫۰..۲۰۱۰٫۰ ،
         // سطح سفارش = ۲۰۱۰٫۰۱. صفت «ناحیهٔ حجم زیاد» یعنی همان باکس HV، پس حد ضرر = ۲۰۰۷٫۰ − ۲ تیک.
         val cfg = Settings().apply {
+            hvScanFirstTouch = false   // همان سری دادهٔ §۱۸-۱۷
             tfMode = 1
             tfS = Tf.H1; tfM = Tf.M15; tf1 = Tf.M5; tf2 = Tf.M1
             maxSlUnits = 1_000_000.0
