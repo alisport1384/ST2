@@ -14,6 +14,13 @@ class SpecRevTest {
         assertEquals(1.0, c.entryBufTicks)
         assertEquals(1, c.maxSetups)
         assertEquals(3.0, c.maxSlUnits, "§18-31 سند: N پیش‌فرض ۳ است")
+        // پیش‌فرض‌های نسخهٔ ۷ (سند ۷، §۵-۴) — این‌ها نباید بی‌صدا عوض شوند
+        assertEquals(true, c.trigger2Fade, "نسخهٔ ۷: تریگر ۲ معکوس پیش‌فرض روشن است")
+        assertEquals(4.0, c.trigger2TargetR, "نسخهٔ ۷: هدف پیش‌فرض ۴R")
+        assertEquals(6.0, c.minSlCostMult, "نسخهٔ ۷: فیلتر کارمزد ۶")
+        assertEquals(false, c.minLotAuto, "نسخهٔ ۷: MinLot خاموش")
+        assertEquals(10.0, c.minLotManual, "نسخهٔ ۷: مقدار دستی ۱۰")
+        assertEquals(false, c.lostResetAtFinalTp, "نسخهٔ ۷: lost با حد سود نهایی صفر نمی‌شود")
         assertEquals(0, c.vpSmooth, "§۴-۵ ویرایش جدید: هموارسازی پیش‌فرض ۰")
         assertEquals(VolumeProfile.DIST_UNIFORM, c.distMode, "§۴-۵ ویرایش جدید: مدل پخش حجم پیش‌فرض یکنواخت")
 
@@ -525,6 +532,7 @@ class SpecRevTest {
         // همان سری کندلیِ تست §18-16/§18-17: کف تایید میانی = ۲۰۰۲٫۰ ، باکس HV = ۲۰۰۷٫۰..۲۰۱۰٫۰ ،
         // سطح سفارش = ۲۰۱۰٫۰۱. صفت «ناحیهٔ حجم زیاد» یعنی همان باکس HV، پس حد ضرر = ۲۰۰۷٫۰ − ۲ تیک.
         val cfg = Settings().apply {
+            trigger2Fade = false; trigger2TargetR = 0.0   // هندسهٔ سند ۵
             hvScanFirstTouch = false   // همان سری دادهٔ §۱۸-۱۷
             tfMode = 1
             tfS = Tf.H1; tfM = Tf.M15; tf1 = Tf.M5; tf2 = Tf.M1

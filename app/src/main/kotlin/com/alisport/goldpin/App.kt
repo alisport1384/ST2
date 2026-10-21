@@ -75,7 +75,7 @@ class AppState {
     var symbol: String = Feed.SYMBOL_DEFAULT
     var baseTfSec: Int = Tf.M1
     var chartTfSec: Int = Tf.M1
-    var depth: Int = 2                 // ۱=کوتاه ، ۲=متوسط ، ۳=عمیق
+    var depth: Int = 3                 // ۱=کوتاه ، ۲=متوسط ، ۳=عمیق (نسخهٔ ۷: پیش‌فرض عمیق)
     var useSyntheticVolume: Boolean = true
     var livePollMs: Long = 10000L
     var liveRunning: Boolean = false

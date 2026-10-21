@@ -38,6 +38,8 @@ class HvScanStartTest {
             maxSlUnits = 3.0; maxLeverage = 500.0; riskPct = 1.0; initialEquity = 100000.0
             contractSize = 1.0; strategy = Strategy.DOC; mmMode = MoneyMode.NONE
             hvScanFirstTouch = true   // پیش‌فرض سند
+            trigger2Fade = false      // این تست قاعدهٔ سند ۵ (جهت ساختار) را می‌سنجد
+            trigger2TargetR = 0.0     // هدف‌های فیبوناچی سند ۵
         }
         val e = Engine(cfg)
         val b = PaperBroker(cfg)

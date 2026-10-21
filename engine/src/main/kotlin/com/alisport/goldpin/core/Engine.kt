@@ -92,19 +92,19 @@ class Settings {
      * HV ادامه دارد، ولی روی آن HV سفارشی ثبت نمی‌شود و در بک‌تست هم سفارشی حساب نمی‌شود.
      * N در تنظیمات قابل تغییر است؛ **پیش‌فرض سند: ۳ واحد قیمت** (§18-31).
      */
-    var maxSlUnits: Double = 3.0
+    var maxSlUnits: Double = 3.0          // §18-31: N = ۳ (تصمیم مالک — نسخهٔ ۷ هم همان ۳)
 
     // ── سند ۶ (تریگر ۲ معکوس) ─────────────────────────────────────────────────
     /** `true` ⇒ جهت معاملهٔ تریگر ۲ برعکسِ جهت ساختار است (سند ۶ / گزینهٔ ۳).
      *  زنجیرهٔ ساختار، نواحی، LV/HV و لحظهٔ مسلح‌شدن دقیقاً مثل سند ۵ می‌مانند؛ فقط
      *  جهت سفارش و هندسهٔ حد ضرر/حد سود آینه می‌شود. پیش‌فرض `false` = رفتار سند ۵. */
-    var trigger2Fade: Boolean = false
+    var trigger2Fade: Boolean = true       // نسخهٔ ۷: پیش‌فرض = تریگر ۲ معکوس
     /** هدف تریگر ۲ بر حسب R (فاصلهٔ حد ضرر). ۰ = پله‌های فیبوی سند ۵.
      *  برای حالت معکوس، مقدار پیشنهادی ۳ تا ۵ (بر پایهٔ آزمون عددی؛ با کارمزد ۰٫۲ دلاری ۴). */
-    var trigger2TargetR: Double = 0.0
+    var trigger2TargetR: Double = 4.0      // نسخهٔ ۷: هدف پیش‌فرض ۴R
     /** فیلتر کارمزد: فاصلهٔ حد ضرر باید دست‌کم این ضریب × اسپرد/کارمزد هر واحد باشد.
      *  ۰ = خاموش. پیشنهاد آزمون: ۶ (اگر R کوچک‌تر از ۶ برابر هزینه باشد، معامله بی‌معناست). */
-    var minSlCostMult: Double = 0.0
+    var minSlCostMult: Double = 6.0        // نسخهٔ ۷: R ≥ ۶× هزینهٔ رفت‌وبرگشت
 
     var useRiskPct: Boolean = true
     var riskPct: Double = 1.0
@@ -125,8 +125,8 @@ class Settings {
     /** [MoneyMode]: ۰ = خاموش (§۵) · ۱ = ManageAllLost · ۲ = Mixed. پیش‌فرض ۰ (تصمیم مالک). */
     var mmMode: Int = MoneyMode.NONE
     /** MinLot: true = خودکار (NakedCapital × risk)/100 ؛ false = دستی ([minLotManual]). */
-    var minLotAuto: Boolean = true
-    var minLotManual: Double = 1.0
+    var minLotAuto: Boolean = false        // نسخهٔ ۷: MinLot خاموش
+    var minLotManual: Double = 10.0        // نسخهٔ ۷: مقدار دستی ۱۰
     /** div: true = |ورودِ سفارش − حدسود نهایی| ؛ false = دستی ([divManual]). */
     var divAuto: Boolean = true
     var divManual: Double = 10.0
@@ -153,7 +153,7 @@ class Settings {
     /** گام حجم در مودهای §۲۰ — مثال‌های سند به ۰٫۰۱ کف شده‌اند. ۰ = بدون گرد کردن. */
     var lotStep: Double = 0.01
     /** true = با رسیدن معامله به حد سود نهایی، Lost صفر می‌شود (سند: lost = 0.0 بعد از TP)؛ false = فقط به اندازهٔ سود واقعی کم می‌شود. */
-    var lostResetAtFinalTp: Boolean = true
+    var lostResetAtFinalTp: Boolean = false  // نسخهٔ ۷: خاموش
 
     fun copy(): Settings = Settings().also {
         it.tfMode = tfMode; it.tfS = tfS; it.tfM = tfM; it.tf1 = tf1; it.tf2 = tf2
@@ -215,6 +215,16 @@ class Engine(val cfg: Settings) {
     var bullSetup = false; var bearSetup = false
     var expectedReady = 0
     var lowestBUpin = Double.NaN; var highestBE = Double.NaN
+    /**
+     * بالاترین سقف / پایین‌ترین کف **از زمان تغییر روند تا این لحظه** (روی کندل‌های بستهٔ ساختار).
+     *
+     * چرا لازم است: لنگر صفر فیبوناچی طبق §4-8 «بالاترین سقف HH (صعودی‌ترین pinBE بعد از تغییر روند)»
+     * است. اما وقتی قیمت از آخرین pinBE بالاتر می‌رود و پین تازه‌ای هنوز ثبت نشده، آن لنگر **کهنه**
+     * می‌ماند و زیر «کف تأیید میانی» می‌افتد؛ در نتیجه کد فیبو را نامعتبر می‌دانست و به حد سود
+     * جایگزین ۱۰ واحد می‌رفت (اندازه‌گیری: ۱۵٪ ستاپ‌ها). با این دو اکسترمم، لنگر صفر همیشه
+     * بالاترین سقف واقعی روند است و فیبو معتبر می‌ماند.
+     */
+    var trendHigh = Double.NaN; var trendLow = Double.NaN
     var lastBUpin = Double.NaN; var lastBEpin = Double.NaN
 
     // ── چرخهٔ عمر پین‌ها و روندِ توالی‌محور (سند نهایی §4-3/§4-4) ────────────────
@@ -300,6 +310,7 @@ class Engine(val cfg: Settings) {
         bearBE1High = Double.NaN; bearBULow = Double.NaN; bearBE2High = Double.NaN; bearBE2Bi = -1
         bullSetup = false; bearSetup = false; expectedReady = 0
         lowestBUpin = Double.NaN; highestBE = Double.NaN; lastBUpin = Double.NaN; lastBEpin = Double.NaN
+        trendHigh = Double.NaN; trendLow = Double.NaN
         buActive = false; beActive = false
         pinSeq = 0; buSeq = -1; beSeq = -1
         lastBUpinRef = Double.NaN; lastBUpinHi = Double.NaN
@@ -667,6 +678,11 @@ class Engine(val cfg: Settings) {
         pins.removeAll { it.status != 0 }
         while (pins.size > 400) pins.removeAt(0)
 
+        // ── اکسترمم جاری روند (پایهٔ لنگر صفر فیبوناچی، §4-8) ──
+        // قبل از منطق پین/روند به‌روز می‌شود تا لنگر هیچ‌وقت از قیمتِ واقعیِ روند عقب نماند.
+        if (trend == 1) { if (trendHigh.isNaN() || sb.h > trendHigh) trendHigh = sb.h }
+        else if (trend == -1) { if (trendLow.isNaN() || sb.l < trendLow) trendLow = sb.l }
+
         // ── تعیین / ادامه / تغییر روند و ابطال پین‌ها (§4-1 سند نهایی) ──
         var evTrendUp = false; var evTrendDn = false
         var evChgUp = false; var evChgDn = false
@@ -677,6 +693,7 @@ class Engine(val cfg: Settings) {
                         val top = tempBoxTop; val bot = tempBoxBot
                         trend = 1; evTrendUp = true
                         highestBE = top; lowestBUpin = bot
+                        trendHigh = top; trendLow = bot
                         tempBoxTop = Double.NaN; tempBoxBot = Double.NaN
                         HH = Double.NaN; HL = Double.NaN
                         // در شروع روند صعودی، pinBU پایهٔ HL بعدی می‌ماند و منتظر اولین pinBE (HH) هستیم.
@@ -696,6 +713,7 @@ class Engine(val cfg: Settings) {
                         val top = tempBoxTop; val bot = tempBoxBot
                         trend = -1; evTrendDn = true
                         highestBE = top; lowestBUpin = bot
+                        trendHigh = top; trendLow = bot
                         tempBoxTop = Double.NaN; tempBoxBot = Double.NaN
                         LL = Double.NaN; LH = Double.NaN
                         // در شروع روند نزولی، pinBE پایهٔ LH بعدی می‌ماند و منتظر اولین pinBU (LL) هستیم.
@@ -2224,12 +2242,10 @@ class Engine(val cfg: Settings) {
         s.prevEntry = eRef
         // §4-8: انقضای سفارش معلق با عبور باز/کلوز از HH (خرید) / LL (فروش) در لحظهٔ مسلح‌شدن
         s.priceExpiryRef = if (bull) HH else LL
-        if (targets.fibDeleted) {
-            // §4-8: اگر فیبوناچی نامعتبر باشد یا فاصلهٔ حد سود نهایی فیبوناچی از ورود کمتر از ۱۰ واحد باشد، فیبوناچی در آن معامله حذف می‌شود.
-            clearSetupFib(s)
-        } else {
-            updateSetupFib(s)
-        }
+        // §4-8: اگر فاصلهٔ حد سود نهایی فیبوناچی از ورود کمتر از ۱۰ واحد باشد، هدف‌ها «جایگزین ۱۰ واحد»
+        // می‌شوند. ولی فیبوناچی از چارت حذف نمی‌شود — رسم آن اطلاعات است و همیشه درست رسم می‌شود
+        // (اصلاح نسخهٔ ۷: لنگر صفر = بالاترین سقف واقعی روند، نه آخرین pinBE کهنه).
+        updateSetupFib(s)
         s.rearmAllowed = false
         s.stage = 6
         cnt.hv++
@@ -2367,7 +2383,13 @@ class Engine(val cfg: Settings) {
      * با شکست سطح پاک (NaN) می‌شود و تا ثبت پین بعدی فیبو را بی‌دلیل نامعتبر می‌کرد.
      * §4-8 سند هم لنگر صفر را «بالاترین سقف (HH)» می‌نامد که با همین تعریف می‌خواند.
      */
-    fun fibAnchor(bull: Boolean): Double = if (bull) highestBE else lowestBUpin
+    fun fibAnchor(bull: Boolean): Double = if (bull) maxOfOr(highestBE, trendHigh) else minOfOr(lowestBUpin, trendLow)
+
+    private fun maxOfOr(a: Double, b: Double): Double =
+        if (a.isNaN()) b else if (b.isNaN()) a else maxOf(a, b)
+
+    private fun minOfOr(a: Double, b: Double): Double =
+        if (a.isNaN()) b else if (b.isNaN()) a else minOf(a, b)
 
     /** §18-5 و §18-32: رسم فیبوناچی ریتریسمنت از جدیدترین HH (خرید) / LL (فروش) تا کف/سقف تایید میانی. */
     private fun updateSetupFib(s: Setup) {
