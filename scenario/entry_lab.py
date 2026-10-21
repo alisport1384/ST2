@@ -11,6 +11,7 @@ import statistics
 from collections import defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+DATA = os.environ.get("GOLDPIN_DATA", "/home/user/data")
 TICK = 0.01
 BUFFER_BARS = 60
 SL_SLIP = 1

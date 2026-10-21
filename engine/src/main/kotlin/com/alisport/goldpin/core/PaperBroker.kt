@@ -126,7 +126,7 @@ class PaperBroker(private val cfg: Settings) {
         val activeCount = activeCount()
         if (cfg.strategy == Strategy.NO_TREND) {
             // استراتژی ۲: خرید و فروش هم‌زمان مجازند؛ از هر جهت فقط یک سفارش (معلق یا باز).
-            if (hasActiveOrder(s.dir)) {
+            if (hasActiveOrder(s.tradeDir)) {
                 lastError = "از هر جهت فقط یک سفارش (معلق یا باز) مجاز است"
                 return false
             }
@@ -171,22 +171,24 @@ class PaperBroker(private val cfg: Settings) {
             return false
         }
         val o = Order(
-            id = orderSeq++, setupId = s.id, dir = s.dir, type = "LIMIT",
+            id = orderSeq++, setupId = s.id, dir = s.tradeDir, type = "LIMIT",
             price = entryPx, sl = s.sl, tp1 = s.tp1, tp2 = s.tp2, tpX = s.tpx,
             qty = qty, zoneTop = s.zTop, zoneBot = s.zBot,
             placedT = bar.t, placedBi = bar.bi
         )
         o.mmNote = mmNote
         o.mmCm = mmCm
+        // سند ۶: سطح از سمت ساختار لمس می‌شود، ولی پوزیشن در جهت معامله باز می‌شود.
+        o.touchDir = if (cfg.trigger2Fade) s.dir else s.tradeDir
         o.hvTop = s.hvH
         o.hvBot = s.hvL
         s.orderId = o.id
         orders.add(o)
         pendings.add(o)
         lg("ORDER", "سفارش ورود ثبت شد (آماده) · ستاپ #${s.id}",
-            "type=${if (s.dir == 1) "BUY_LIMIT" else "SELL_LIMIT"} price=${fmt(entryPx)} sl=${fmt(s.sl)} tp1=${fmt(s.tp1)} tp2=${fmt(s.tp2)} tp=${fmt(s.tpx)} qty=${fmt(qty)} active=$activeCount+1/${cfg.maxSetups} bar=${bar.bi}" +
+            "type=${if (s.tradeDir == 1) "BUY_LIMIT" else "SELL_LIMIT"} price=${fmt(entryPx)} sl=${fmt(s.sl)} tp1=${fmt(s.tp1)} tp2=${fmt(s.tp2)} tp=${fmt(s.tpx)} qty=${fmt(qty)} active=$activeCount+1/${cfg.maxSetups} bar=${bar.bi}" +
                 (if (mmNote.isNotEmpty()) " mm=[$mmNote]" else ""))
-        alarm(AlertKind.ARMED, if (s.dir == 1) "سفارش خرید آماده شد" else "سفارش فروش آماده شد",
+        alarm(AlertKind.ARMED, if (s.tradeDir == 1) "سفارش خرید آماده شد" else "سفارش فروش آماده شد",
             "ستاپ #${s.id} · ورود ${fmt(entryPx)} · حدضرر ${fmt(s.sl)} · حدسود ${fmt(s.tpx)} · حجم ${fmt(qty)}")
         return true
     }
@@ -252,7 +254,7 @@ class PaperBroker(private val cfg: Settings) {
         val pendingSnapshot = ArrayList(pendings)
         for (p in pendingSnapshot) {
             if (p.status != OrderStatus.PENDING) continue
-            val touched = if (p.dir == 1) cd.l <= p.price else cd.h >= p.price
+            val touched = if (p.touchDir == 1) cd.l <= p.price else cd.h >= p.price
             val sameBarAsArmed = cd.bi == p.placedBi
             if (touched && !sameBarAsArmed) fillEntry(p, cd)
         }
@@ -296,7 +298,7 @@ class PaperBroker(private val cfg: Settings) {
                 if (!st.lvUsed && st.lvBi >= 0 && st.lvConfBi >= 0 && st.lvUses >= 2 &&
                     forming.l <= st.lvH && forming.h >= st.lvL) continue
             }
-            val touched = if (p.dir == 1) forming.l <= p.price else forming.h >= p.price
+            val touched = if (p.touchDir == 1) forming.l <= p.price else forming.h >= p.price
             if (touched) { fillEntry(p, forming, live = true); n++ }
         }
         if (n > 0) refreshEquity(forming)      // معامله باز شد ⇒ equity (کمیسیون/شناور) همان لحظه درست باشد

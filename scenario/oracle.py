@@ -12,6 +12,7 @@ import json
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+DATA = os.environ.get("GOLDPIN_DATA", "/home/user/data")
 MS = 1000
 H1, M15, M5, M1 = 3600, 900, 300, 60
 MINTICK = 0.01

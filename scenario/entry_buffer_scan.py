@@ -5,11 +5,12 @@ import os, statistics
 import entry_lab as L
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+DATA = os.environ.get("GOLDPIN_DATA", "/home/user/data")
 WINDOWS = [("A", "xau_m1.csv", "lab_setups.csv"), ("B", "xau_m1_b.csv", "lab_setups_b.csv")]
 BUF = [0, 1, 2, 3, 5, 8, 13]
 rows = []
 for label, bf, sf in WINDOWS:
-    bars = L.load_m1(os.path.join(HERE, bf))
+    bars = L.load_m1(os.path.join(DATA if ("xau_m1" in bf or "btc_m1" in bf) else HERE, bf))
     setups = [s for s in L.load_setups(os.path.join(HERE, sf)) if s["hvTop"] == s["hvTop"] and s["sl"] == s["sl"]]
     for b in BUF:
         vals, fills = [], 0

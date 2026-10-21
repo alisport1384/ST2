@@ -64,6 +64,7 @@ object Store {
         "mintick" to c.mintick, "slBufTicks" to c.slBufTicks, "entryBufTicks" to c.entryBufTicks, "minTPunits" to c.minTPunits,
         "slipTicks" to c.slipTicks,
         "strategy" to c.strategy, "tpUnits" to c.tpUnits, "maxSlUnits" to c.maxSlUnits,
+        "trigger2Fade" to c.trigger2Fade, "trigger2TargetR" to c.trigger2TargetR, "minSlCostMult" to c.minSlCostMult,
         "useRiskPct" to c.useRiskPct, "riskPct" to c.riskPct, "equityPct" to c.equityPct,
         "maxLeverage" to c.maxLeverage, "levModel" to 2, "roundQty" to c.roundQty,
         "contractSize" to c.contractSize, "initialEquity" to c.initialEquity,
@@ -109,6 +110,9 @@ object Store {
         // برای حفظ تنظیمات سفارشی، فایل قدیمی‌ای که N را از مقدار پیش‌فرض قبلی (۳) تغییر داده
         // باشد حفظ می‌شود؛ مقدار قدیمیِ پیش‌فرض ۳ به پیش‌فرض جدید ۱۰ مهاجرت می‌کند.
         if (m.containsKey("maxSlUnits")) c.maxSlUnits = m["maxSlUnits"].asD()
+        if (m.containsKey("trigger2Fade")) c.trigger2Fade = m["trigger2Fade"].asB()
+        if (m.containsKey("trigger2TargetR")) c.trigger2TargetR = m["trigger2TargetR"].asD()
+        if (m.containsKey("minSlCostMult")) c.minSlCostMult = m["minSlCostMult"].asD()
         if (m.containsKey("mmMode")) c.mmMode = m["mmMode"].asI()
         if (m.containsKey("minLotAuto")) c.minLotAuto = m["minLotAuto"].asB()
         if (m.containsKey("minLotManual")) c.minLotManual = m["minLotManual"].asD()
@@ -365,7 +369,7 @@ object Store {
         // §۲۰: وضعیت مدیریت زیان (فایل‌های قدیمی این کلیدها را ندارند ⇒ ۰)
         o["mmLost"] = b.mm.lost; o["mmCmsnLost"] = b.mm.cmsnLost; o["mmNaked"] = b.mm.nakedCapital()
         // ۱۹ ستون اول مثل قبل؛ ستون ۲۰ و ۲۱ (§۲۰): توضیح محاسبهٔ حجم، فاز ManageCM
-        o["orders"] = b.orders.map { listOf(it.id, it.setupId, it.dir, it.type, it.price, it.sl, it.tp1, it.tp2, it.tpX, it.qty, it.zoneTop, it.zoneBot, it.placedT, it.placedBi, it.status, it.filledT ?: 0L, it.filledBi ?: -1, it.closedT ?: 0L, it.cancelReason ?: "", it.mmNote, it.mmCm, it.hvTop, it.hvBot) }
+        o["orders"] = b.orders.map { listOf(it.id, it.setupId, it.dir, it.type, it.price, it.sl, it.tp1, it.tp2, it.tpX, it.qty, it.zoneTop, it.zoneBot, it.placedT, it.placedBi, it.status, it.filledT ?: 0L, it.filledBi ?: -1, it.closedT ?: 0L, it.cancelReason ?: "", it.mmNote, it.mmCm, it.hvTop, it.hvBot, it.touchDir) }
         o["trades"] = b.trades.map { t ->
             linkedMapOf<String, Any?>(
                 "id" to t.id, "orderId" to t.orderId, "setupId" to t.setupId, "dir" to t.dir,
@@ -400,6 +404,7 @@ object Store {
             val l = x.asList(); if (l.size < 19) continue
             val or = Order(l[0].asL(), l[1].asL(), l[2].asI(), l[3].asS(), l[4].asD(), l[5].asD(), l[6].asD(),
                 l[7].asD(), l[8].asD(), l[9].asD(), l[10].asD(), l[11].asD(), l[12].asL(), l[13].asI(), l[14].asI())
+            or.touchDir = if (l.size >= 24) l[23].asI() else l[2].asI()
             or.filledT = if (l[15].asL() == 0L) null else l[15].asL()
             or.filledBi = if (l[16].asI() < 0) null else l[16].asI()
             or.closedT = if (l[17].asL() == 0L) null else l[17].asL()

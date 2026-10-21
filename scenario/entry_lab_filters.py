@@ -14,7 +14,8 @@ import statistics
 import entry_lab as L
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-bars = L.load_m1(os.path.join(HERE, "xau_m1.csv"))
+DATA = os.environ.get("GOLDPIN_DATA", "/home/user/data")
+bars = L.load_m1(os.path.join(DATA, "xau_m1.csv"))
 raw = L.load_setups(os.path.join(HERE, "lab_setups.csv"))
 usable = [s for s in raw if s["hvTop"] == s["hvTop"] and s["sl"] == s["sl"]]
 

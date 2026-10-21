@@ -94,6 +94,18 @@ class Settings {
      */
     var maxSlUnits: Double = 3.0
 
+    // ── سند ۶ (تریگر ۲ معکوس) ─────────────────────────────────────────────────
+    /** `true` ⇒ جهت معاملهٔ تریگر ۲ برعکسِ جهت ساختار است (سند ۶ / گزینهٔ ۳).
+     *  زنجیرهٔ ساختار، نواحی، LV/HV و لحظهٔ مسلح‌شدن دقیقاً مثل سند ۵ می‌مانند؛ فقط
+     *  جهت سفارش و هندسهٔ حد ضرر/حد سود آینه می‌شود. پیش‌فرض `false` = رفتار سند ۵. */
+    var trigger2Fade: Boolean = false
+    /** هدف تریگر ۲ بر حسب R (فاصلهٔ حد ضرر). ۰ = پله‌های فیبوی سند ۵.
+     *  برای حالت معکوس، مقدار پیشنهادی ۳ تا ۵ (بر پایهٔ آزمون عددی؛ با کارمزد ۰٫۲ دلاری ۴). */
+    var trigger2TargetR: Double = 0.0
+    /** فیلتر کارمزد: فاصلهٔ حد ضرر باید دست‌کم این ضریب × اسپرد/کارمزد هر واحد باشد.
+     *  ۰ = خاموش. پیشنهاد آزمون: ۶ (اگر R کوچک‌تر از ۶ برابر هزینه باشد، معامله بی‌معناست). */
+    var minSlCostMult: Double = 0.0
+
     var useRiskPct: Boolean = true
     var riskPct: Double = 1.0
     var equityPct: Double = 100.0
@@ -155,6 +167,7 @@ class Settings {
         it.slipTicks = slipTicks
         it.strategy = strategy; it.tpUnits = tpUnits
         it.maxSlUnits = maxSlUnits
+        it.trigger2Fade = trigger2Fade; it.trigger2TargetR = trigger2TargetR; it.minSlCostMult = minSlCostMult
         it.useRiskPct = useRiskPct; it.riskPct = riskPct; it.equityPct = equityPct
         it.maxLeverage = maxLeverage; it.roundQty = roundQty
         it.contractSize = contractSize; it.initialEquity = initialEquity
@@ -2006,6 +2019,8 @@ class Engine(val cfg: Settings) {
             //   ترتیب محافظه‌کارانه، مطابق §۴-۹ و PaperBroker.manageBar:
             //   حد ضرر → حد سود نهایی → حد سود اول → حد سود دوم.
             if (s.stage == 7 && !s.sl.isNaN() && !s.tpx.isNaN()) {
+                // سند ۶: حد ضرر/حد سود با «جهت معامله» سنجیده می‌شود (در حالت معکوس برعکس ساختار).
+                val tdBull = s.tradeDir == 1
                 var done = false
                 var px = Double.NaN
                 var note = ""
@@ -2014,7 +2029,7 @@ class Engine(val cfg: Settings) {
                 // کندلی که تا حد سود نهایی رفته است (قیمت برای رسیدن به ۱.۲۷۲ ناچار از
                 // ۰.۳۸۲ و ۰.۵ گذشته). پیش‌تر شاخهٔ «حد سود نهایی» پیش از این پله‌ها معامله را
                 // می‌بست و TP1/TP2 نه روی چارت مارک می‌شدند و نه در گزارش سفارش‌ها می‌آمدند.
-                fun crossedTp(level: Double): Boolean = if (bull) high >= level else low <= level
+                fun crossedTp(level: Double): Boolean = if (tdBull) high >= level else low <= level
                 fun markTpLegs() {
                     // §4-9: اگر در کندل ورود هم حد سود اول (۰.۳۸۲ فیبو) و هم قیمت ورود لمس شود،
                     // ورود ثبت می‌شود، حد سود اول ۰.۵ فیبو و حد سود نهایی ۱.۲۷۲ فیبو محاسبه می‌شود (۵۰٪/۵۰٪)
@@ -2041,11 +2056,11 @@ class Engine(val cfg: Settings) {
                         alarm(AlertKind.TP2, "TP2 (۵۰٪) لمس شد", "ستاپ #${s.id} · قیمت ${f2(s.tp2)}")
                     }
                 }
-                val hitStopE = if (bull) low <= s.sl else high >= s.sl
+                val hitStopE = if (tdBull) low <= s.sl else high >= s.sl
                 // §4-9 سند: بلوک «انتقال حد ضرر به سطح oo با کلوز تریگر۲» در ویرایش فعلی سند داخل
                 // بلوک «به تعویق افتاده و در کد ایجاد نمی‌شود» است ⇒ در این شبیه‌ساز هم اجرا نمی‌شود.
                 // حد ضرر فقط با حد سود اول به نقطهٔ ورود (سر‌به‌سر) می‌رود و پیش از آن ثابت است.
-                val hitFinalE = if (bull) high >= s.tpx else low <= s.tpx
+                val hitFinalE = if (tdBull) high >= s.tpx else low <= s.tpx
                 if (MarketHours.isOrderTimeExit(cd.t)) {
                     // §18-27 سند: رأس ۲۰:۰۰ UTC معاملهٔ باز با قیمت لحظهٔ ۲۰:۰۰ (بازشدن
                     // همین کندل) بسته و نتیجه محاسبه و ثبت می‌شود — دلیل: پایان زمان.
@@ -2053,14 +2068,14 @@ class Engine(val cfg: Settings) {
                     done = true; px = open; note = "پایان زمان"
                 } else if (hitStopE) {
                     val isBe = s.be
-                    done = true; px = cfg.exitFill(bull, s.sl, isBe); note = if (isBe) "خروج سر‌به‌سر" else "حد ضرر"
+                    done = true; px = cfg.exitFill(tdBull, s.sl, isBe); note = if (isBe) "خروج سر‌به‌سر" else "حد ضرر"
                 }
                 else if (hitFinalE) {
                     markTpLegs()
                     done = true; px = s.tpx; note = "حد سود نهایی (1.272)"
                 } else {
                     markTpLegs()
-                    val backToEntry = if (bull) low <= s.entry else high >= s.entry
+                    val backToEntry = if (tdBull) low <= s.entry else high >= s.entry
                     if (!entrySameBar && s.be && backToEntry) { done = true; px = s.entry; note = "خروج سر‌به‌سر" }
                 }
                 if (done) {
@@ -2112,11 +2127,20 @@ class Engine(val cfg: Settings) {
         }
         // §4-8 سند: سطح سفارش = سقف باکس HV + ۱ تیک بافر (خرید) / کف باکس HV − ۱ تیک بافر (فروش)
         val eRef = entryLevel(s, bull)
+        // ── سند ۶ (§۴-۸ جدید): «تریگر ۲ معکوس» ──────────────────────────────────
+        // سطح ورود همان لبهٔ باکس حجم زیاد می‌ماند (همان جایی که قیمت برگشت می‌کند)، ولی
+        // جهت معامله برعکسِ جهت ساختار است، حد ضرر آینهٔ همان فاصله (R) در آن‌طرف ورود
+        // گذاشته می‌شود و حد سود = ضریب k × R (پیش‌فرض کد ۳؛ آزمون عددی: ۳ تا ۵).
+        val td = if (cfg.trigger2Fade) -s.dir else s.dir
+        val docSl = if (bull) s.hvL - cfg.slBufTicks * cfg.mintick else s.hvH + cfg.slBufTicks * cfg.mintick
+        val rDoc = abs(eRef - docSl)
         // §4-8 سند (بازگردانده‌شده): حد ضرر از **ناحیهٔ حجم زیاد** ساخته می‌شود، نه از تایید میانی —
         //   خرید: کف ناحیهٔ حجم زیاد − ۲ تیک بافر · فروش: سقف ناحیهٔ حجم زیاد + ۲ تیک بافر.
         // «ناحیهٔ حجم زیاد» همان باکس HV است که سطح سفارش هم از آن گرفته می‌شود.
         val slBuf = cfg.slBufTicks * cfg.mintick
-        s.sl = if (bull) s.hvL - slBuf else s.hvH + slBuf
+        // حالت عادی: حد ضرر از باکس HV (سند ۵). حالت معکوس: آینهٔ همان فاصله در جهت معامله.
+        s.dirTrade = td
+        s.sl = if (td != s.dir) eRef - rDoc * td else (if (bull) s.hvL - slBuf else s.hvH + slBuf)
         // §4-8 / §18-5 / §18-32: لنگر صفر فیبوناچی = جدیدترین HH یعنی بالاترین pinBE بعد از تغییر
         // روند به صعودی (خرید) / پایین‌ترین pinBU بعد از تغییر روند به نزولی (فروش)؛
         // لنگر ۱۰۰٪ = سطح تایید میانی (کف برای خرید، سقف برای فروش).
@@ -2126,13 +2150,31 @@ class Engine(val cfg: Settings) {
         val targets = if (cfg.strategy == Strategy.NO_TREND)
             calculateTargetLevels(bull, eRef, Double.NaN, Double.NaN, maxOf(cfg.tpUnits, cfg.mintick))
         else calculateTargetLevels(bull, eRef, a0, a1, cfg.minTPunits)
-        s.tp1 = targets.tp1
-        s.tp2 = targets.tp2
-        s.tpx = targets.tpx
+        if (cfg.trigger2TargetR > 0.0 && rDoc > 0.0) {
+            // سند ۶: یک حد سود واحد بر حسب R (پله‌های فیبو حذف می‌شوند).
+            s.tp1 = Double.NaN
+            s.tp2 = Double.NaN
+            s.tpx = eRef + cfg.trigger2TargetR * rDoc * td
+        } else {
+            s.tp1 = targets.tp1
+            s.tp2 = targets.tp2
+            s.tpx = targets.tpx
+        }
         // §18-31 سند: سفارشی که فاصلهٔ حد ضررش از سطح سفارش بیشتر از N است ثبت نمی‌شود و
         // سفارش باطل است (علت: SL>N). HV مطابق ستاپ می‌ماند و ستاپ تا پر/منقضی/باطل‌شدن HV
         // ادامه دارد، ولی روی این HV سفارشی ثبت نمی‌شود و در بک‌تست هم حسابی ندارد.
         val slDist = abs(eRef - s.sl)
+        // سند ۶ (§۵-۳): فاصلهٔ حد ضرر باید دست‌کم «ضریب × هزینهٔ رفت‌وبرگشت» باشد؛ در غیر این
+        // صورت کارمزد کل سود انتظاری را می‌خورد و سفارش ثبت نمی‌شود.
+        val costPerUnit = broker?.mm?.spread() ?: 0.0
+        if (cfg.minSlCostMult > 0.0 && costPerUnit > 0.0 && slDist < cfg.minSlCostMult * costPerUnit) {
+            if (s.slBlockedHvBi != s.hvBi) {
+                s.slBlockedHvBi = s.hvBi
+                lg("ENGINE", "سفارش ستاپ #${s.id} ثبت نمی‌شود — فاصلهٔ حد ضرر (${f2(slDist)}) کمتر از ${f2(cfg.minSlCostMult)}×هزینه (${f2(costPerUnit)}) است (§۵-۳ سند ۶)",
+                    "entry=${f2(eRef)} sl=${f2(s.sl)} bar=$curBi")
+            }
+            return
+        }
         if (slDist > cfg.maxSlUnits) {
             if (s.slBlockedHvBi != s.hvBi) {
                 s.slBlockedHvBi = s.hvBi
@@ -2154,8 +2196,8 @@ class Engine(val cfg: Settings) {
         // استراتژی ۲: خرید و فروش هم‌زمان مجازند ولی از هر جهت فقط یک سفارش (معلق یا باز).
         val limit = max(1, cfg.maxSetups)
         val activeNow = if (cfg.strategy == Strategy.NO_TREND)
-            max(setups.count { it.id != s.id && it.dir == s.dir && (it.stage == 6 || it.stage == 7) },
-                broker?.activeCount(s.dir) ?: 0)
+            max(setups.count { it.id != s.id && it.tradeDir == s.tradeDir && (it.stage == 6 || it.stage == 7) },
+                broker?.activeCount(s.tradeDir) ?: 0)
         else
             max(setups.count { it.id != s.id && (it.stage == 6 || it.stage == 7) }, broker?.activeCount() ?: 0)
         val hasPendingSetupOrder = activeNow >= limit
@@ -2470,6 +2512,10 @@ class Setup(
     var zIdx: Int,
     var zBi: Int
 ) {
+    /** جهت معامله (۰ = همان جهت ساختار). در حالت «تریگر ۲ معکوس» برعکس [dir] است. */
+    var dirTrade: Int = 0
+    /** جهت مؤثر معامله — حد ضرر/حد سود و سفارش از این استفاده می‌کنند. */
+    val tradeDir: Int get() = if (dirTrade == 0) dir else dirTrade
     var zT = 0L
     var touchBi = -1
     var touchMidStart = 0L

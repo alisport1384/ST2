@@ -1183,6 +1183,13 @@ class MainActivity : Activity() {
         v.addView(switchRow("شکست تایید میانی با کلوز (خاموش = سایه)", s.cfg.midInvalidClose) { s.cfg.midInvalidClose = it; s.rebuildAsync() })
         v.addView(switchRow("اسکن ولوم زیاد از اولین برگشت به باکس", s.cfg.hvScanFirstTouch) { s.cfg.hvScanFirstTouch = it; s.rebuildAsync() })
         v.addView(switchRow("کندل ولوم زیاد = اولین افزایش حجم", s.cfg.hvMarkFirstIncrease) { s.cfg.hvMarkFirstIncrease = it; s.rebuildAsync() })
+        // ── سند ۶: تریگر ۲ معکوس (پیش‌فرض خاموش = رفتار سند ۵) ──
+        v.addView(switchRow("تریگر ۲ معکوس (سند ۶): ورود برعکس جهت ساختار", s.cfg.trigger2Fade) { s.cfg.trigger2Fade = it; s.rebuildAsync() })
+        v.addView(numRow("هدف تریگر ۲ بر حسب R (۰ = فیبوی سند ۵)", s.cfg.trigger2TargetR) { s.cfg.trigger2TargetR = it; s.rebuildAsync() })
+        v.addView(numRow("حداقل حد ضرر نسبت به کارمزد (ضریب، ۰ = خاموش)", s.cfg.minSlCostMult) { s.cfg.minSlCostMult = it; s.rebuildAsync() })
+        v.addView(Ui.tv(this, "سند ۶: ورود برعکس ساختار در لبهٔ باکس، حد ضرر آینه، تک‌هدف k×R. " +
+            "برای آزمون: کلید روشن، هدف ۴، ضریب کارمزد ۶، و کارمزد واقعی بروکر را در «معامله و بک‌تست» وارد کنید.",
+            10.5f, Palette.dim), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         // ── معامله ──
         v.addView(Ui.section(this, "⑥ معامله و بک‌تست"))

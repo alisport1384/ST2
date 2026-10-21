@@ -1421,6 +1421,7 @@ class AppState {
         to.slipTicks = c.slipTicks
         to.strategy = c.strategy; to.tpUnits = c.tpUnits
         to.maxSlUnits = c.maxSlUnits
+        to.trigger2Fade = c.trigger2Fade; to.trigger2TargetR = c.trigger2TargetR; to.minSlCostMult = c.minSlCostMult
         to.useRiskPct = c.useRiskPct; to.riskPct = c.riskPct; to.equityPct = c.equityPct
         to.maxLeverage = c.maxLeverage; to.roundQty = c.roundQty
         to.contractSize = c.contractSize; to.initialEquity = c.initialEquity

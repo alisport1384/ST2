@@ -14,9 +14,15 @@ class EntryLabDumpTest {
     fun dumpArmedSetups() {
         val csv = System.getenv("LAB_CSV") ?: "../scenario/xau_m1.csv"
         val outFile = File(System.getenv("LAB_OUT") ?: "../scenario/lab_setups.csv")
+        val f = File(csv)
+        if (!f.exists()) {
+            // دادهٔ واقعی در مخزن نیست (حجیم است)؛ آزمایشگاه با LAB_CSV اجرا می‌شود.
+            println("LAB: فایل $csv موجود نیست — تست رد شد (skip)")
+            return
+        }
         val bars = ArrayList<Candle>()
         var bi = 0
-        File(csv).forEachLine { ln ->
+        f.forEachLine { ln ->
             val s = ln.trim()
             if (s.isEmpty() || s.startsWith("time")) return@forEachLine
             val p = s.split(',')

@@ -6,6 +6,7 @@ import os, statistics
 import entry_lab as L
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+DATA = os.environ.get("GOLDPIN_DATA", "/home/user/data")
 WINDOWS = [("A", "xau_m1.csv", "lab_setups.csv"), ("B", "xau_m1_b.csv", "lab_setups_b.csv")]
 BUCKETS = [(0.0, 1.0), (1.0, 1.5), (1.5, 2.5), (2.5, 99.0)]
 
@@ -16,7 +17,7 @@ def atr(bars, bi, n=60):
 lines = ["═══ نسبت حد ضرر به نویز M1 ═══",
          f"{'پنجره':<6}{'نسبت SL/ATR':<14}{'n':>5}{'R/ستاپ سند':>12}{'نرخ برد':>9}{'R/ستاپ بازار':>14}", "─" * 62]
 for label, bf, sf in WINDOWS:
-    bars = L.load_m1(os.path.join(HERE, bf))
+    bars = L.load_m1(os.path.join(DATA if ("xau_m1" in bf or "btc_m1" in bf) else HERE, bf))
     setups = [s for s in L.load_setups(os.path.join(HERE, sf)) if s["hvTop"] == s["hvTop"] and s["sl"] == s["sl"]]
     recs = []
     for s in setups:
@@ -44,7 +45,7 @@ for label, bf, sf in WINDOWS:
 # آزمون همبستگی: آیا نسبت بالاتر ⇒ نتیجهٔ بهتر؟
 import math
 for label, bf, sf in WINDOWS:
-    bars = L.load_m1(os.path.join(HERE, bf))
+    bars = L.load_m1(os.path.join(DATA if ("xau_m1" in bf or "btc_m1" in bf) else HERE, bf))
     setups = [s for s in L.load_setups(os.path.join(HERE, sf)) if s["hvTop"] == s["hvTop"] and s["sl"] == s["sl"]]
     xs, ys = [], []
     for s in setups:

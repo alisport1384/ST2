@@ -10,6 +10,7 @@ import statistics
 import entry_lab as L
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+DATA = os.environ.get("GOLDPIN_DATA", "/home/user/data")
 WINDOWS = [
     ("پنجرهٔ A (۱۲۰ روز اخیر)", "xau_m1.csv", "lab_setups.csv"),
     ("پنجرهٔ B (۱۲۰ روز قبل‌تر)", "xau_m1_b.csv", "lab_setups_b.csv"),
@@ -105,7 +106,7 @@ NAMES = ["A0_edge", "A1_edge_d3", "A4_market", "A5_next_close", "A6_hybrid", "A7
 pooled = {n: [] for n in NAMES}
 per_window = {}
 for label, bars_file, setups_file in WINDOWS:
-    bars = L.load_m1(os.path.join(HERE, bars_file))
+    bars = L.load_m1(os.path.join(DATA if bars_file.endswith(".csv") and ("xau_m1" in bars_file or "btc_m1" in bars_file) else HERE, bars_file))
     setups = [s for s in L.load_setups(os.path.join(HERE, setups_file))
               if s["hvTop"] == s["hvTop"] and s["sl"] == s["sl"]]
     per_window[label] = {}
