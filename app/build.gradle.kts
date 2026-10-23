@@ -43,11 +43,10 @@ android {
         resources.excludes += setOf("META-INF/*.kotlin_module", "META-INF/versions/**")
     }
 
-    // دادهٔ یک‌سالهٔ بک‌تست (gzip) داخل APK باندل شده است. فشرده‌سازی دوبارهٔ یک فایل gzip
-    // تقریباً هیچ سودی ندارد، ولی استخراجش را کند و `openFd` را غیرممکن می‌کند؛ پس خاموش است.
-    androidResources {
-        noCompress += "gz"
-    }
+    // نکتهٔ بسته‌بندی: دادهٔ یک‌سالهٔ بک‌تست به‌صورت دارایی (`app/src/main/assets`) داخل APK
+    // باندل شده است. AGP دارایی‌های `.gz` را خودش باز می‌کند و پسوند را برمی‌دارد، پس داخل
+    // APK نامش `assets/goldpin_xauusd_m1_1y.csv` است و `Storage.BUNDLED_DATA_ASSETS` هر دو
+    // نام را امتحان می‌کند.
 
     lint { abortOnError = false }
 

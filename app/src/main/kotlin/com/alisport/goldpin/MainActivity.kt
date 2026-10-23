@@ -1376,7 +1376,7 @@ class MainActivity : Activity() {
             row.addView(Ui.btn(this, "حذف داده", Palette.panel2, Palette.down, 11f).apply {
                 setOnClickListener {
                     AlertDialog.Builder(this@MainActivity).setTitle("حذف دادهٔ بک‌تست؟")
-                        .setMessage("فایل دادهٔ یک‌ساله از حافظهٔ اپ پاک می‌شود (۵ مگابایت آزاد؛ نتیجهٔ بک‌تست در فایل نشست می‌ماند). " +
+                        .setMessage("فایل دادهٔ یک‌ساله از حافظهٔ اپ پاک می‌شود (نتیجهٔ بک‌تست در فایل نشست می‌ماند). " +
                             "چون داده داخل خود اپ است، دفعهٔ بعد خودکار بازگردانی می‌شود.")
                         .setPositiveButton("بله") { _, _ -> toast(s.deleteBacktestData(applicationContext)); showTab(4) }
                         .setNegativeButton("نه", null).show()

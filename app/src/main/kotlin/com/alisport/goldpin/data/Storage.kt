@@ -23,13 +23,20 @@ object Storage {
     const val INTERNAL_FILE_NAME = "goldpin_backtest.json.gz"
     /** فایل دادهٔ یک‌سالهٔ M1 در حافظهٔ اپ (از دارایی داخل APK استخراج می‌شود). */
     const val DATA_FILE_NAME = "goldpin_xauusd_m1_1y.csv.gz"
+
     /**
      * دارایی **باندل‌شدهٔ** دادهٔ یک‌ساله — همان فایل، داخل خود APK.
      *
      * پیش‌تر این داده فقط با دانلود از GitHub Release به‌دست می‌آمد؛ حالا کل یک سال
      * (۳۵۱٬۸۹۴ کندل M1 با حجم) همراه اپ نصب می‌شود و دانلود اختیاری است.
+     *
+     * ⚠ دو نام، چون بسته‌بندی اندروید (AGP) دارایی‌های `.gz` را **باز** می‌کند و پسوندشان را
+     * حذف می‌کند: در مخزن `goldpin_xauusd_m1_1y.csv.gz` است و داخل APK
+     * `assets/goldpin_xauusd_m1_1y.csv` (محتوای CSV باز، ۲۱٬۷۶۵٬۳۶۶ بایت). در APK واقعی
+     * v1.4.41 با `unzip -l` دیده و تأیید شد. دقیقاً همان کاری که `Feed.openSampleAsset`
+     * برای نمونهٔ کوچک می‌کند؛ هر دو نام امتحان می‌شوند.
      */
-    const val BUNDLED_DATA_ASSET = "goldpin_xauusd_m1_1y.csv.gz"
+    val BUNDLED_DATA_ASSETS = listOf("goldpin_xauusd_m1_1y.csv.gz", "goldpin_xauusd_m1_1y.csv")
 
     fun dir(ctx: Context): File {
         val ext = ctx.getExternalFilesDir(null)
@@ -49,48 +56,52 @@ object Storage {
     // همهٔ مسیرهای بک‌تست همان فایل `dataFile(ctx)` را می‌خوانند؛ پس کافی است دارایی
     // یک‌بار (و فقط وقتی نیست یا ناقص است) کنار همان نام استخراج شود. با این کار نه
     // موتور، نه کارگزار و نه فایل نشست تغییری می‌بینند.
+    //
+    // نکتهٔ محتوا: پارسر اپ (`Feed.parseCsvStream`) gzip را از روی امضای بایت می‌شناسد،
+    // پس فرقی نمی‌کند فایل روی گوشی gzip باشد (نسخهٔ دانلودی از سرور) یا CSV باز
+    // (نسخهٔ استخراج‌شده از APK) — هر دو درست خوانده می‌شوند.
+
+    /** باز کردن دارایی دادهٔ یک‌ساله با هر نامی که بسته‌بندی برایش انتخاب کرده است. */
+    fun openBundledDataAsset(ctx: Context): InputStream {
+        var last: Exception? = null
+        for (n in BUNDLED_DATA_ASSETS) {
+            try {
+                return ctx.assets.open(n)
+            } catch (e: Exception) {
+                last = e
+            }
+        }
+        throw FeedException("دارایی دادهٔ یک‌ساله داخل APK پیدا نشد (${last?.message ?: "بدون جزئیات"})")
+    }
 
     /** آیا دارایی یک‌ساله داخل این APK بسته‌بندی شده است؟ */
     fun bundledDataAvailable(ctx: Context): Boolean = try {
-        ctx.assets.open(BUNDLED_DATA_ASSET).use { it.read() >= 0 }
+        openBundledDataAsset(ctx).use { it.read() >= 0 }
         true
     } catch (e: Exception) {
         false
     }
 
     /**
-     * اندازهٔ دقیق دارایی باندل‌شده (برای تشخیص فایل استخراج‌شدهٔ ناقص).
+     * تضمین وجود فایل دادهٔ یک‌ساله: اگر نیست یا ناقص است، از داخل APK استخراج می‌شود.
+     * خروجی همیشه همان [dataFile] است ⇒ بقیهٔ کد دست‌نخورده می‌ماند.
      *
-     * `openFd` فقط وقتی کار می‌کند که دارایی در APK فشرده نشده باشد (`noCompress += "gz"`
-     * در build.gradle). اگر نشد، ‏`-1` برمی‌گردد و بررسی اندازه ساده‌تر می‌شود.
-     */
-    fun bundledDataAssetBytes(ctx: Context): Long = try {
-        ctx.assets.openFd(BUNDLED_DATA_ASSET).use { it.length }
-    } catch (e: Exception) {
-        -1L
-    }
-
-    /**
-     * تضمین وجود فایل دادهٔ یک‌ساله: اگر نیست یا اندازه‌اش با دارایی نمی‌خواند، از داخل
-     * APK استخراج می‌شود. خروجی همیشه همان [dataFile] است ⇒ بقیهٔ کد دست‌نخورده می‌ماند.
-     *
-     * نوشتن اتمیک است (اول فایل موقت، بعد rename) تا قطع شدن اپ وسط کار، فایل سالم را
-     * خراب نکند.
+     * نوشتن اتمیک است (اول فایل موقت، بعد rename): اگر اپ وسط استخراج کشته شود، فایل
+     * ناقص هرگز جای فایل سالم را نمی‌گیرد و دفعهٔ بعد از نو استخراج می‌شود.
      */
     fun ensureBundledData(ctx: Context): File {
         val dest = dataFile(ctx)
-        val want = bundledDataAssetBytes(ctx)
-        if (dest.exists() && dest.length() > 1_000_000 && (want < 0L || dest.length() == want)) return dest
+        if (dest.exists() && dest.length() > 1_000_000) return dest
         val t0 = System.currentTimeMillis()
         val d = dir(ctx)
         if (!d.exists()) d.mkdirs()
         val tmp = File(d, DATA_FILE_NAME + ".asset")
         try {
-            ctx.assets.open(BUNDLED_DATA_ASSET).use { ins ->
+            openBundledDataAsset(ctx).use { ins ->
                 java.io.BufferedOutputStream(tmp.outputStream(), 1 shl 16).use { out -> ins.copyTo(out) }
             }
-            if (want > 0L && tmp.length() != want) {
-                throw FeedException("استخراج دادهٔ باندل‌شده ناتمام ماند (بایت=${tmp.length()} انتظار=${want})")
+            if (tmp.length() <= 1_000_000) {
+                throw FeedException("استخراج دادهٔ باندل‌شده ناتمام ماند (بایت=${tmp.length()})")
             }
             if (dest.exists()) dest.delete()
             if (!tmp.renameTo(dest)) {
