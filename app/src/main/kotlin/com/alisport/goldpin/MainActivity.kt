@@ -1214,6 +1214,9 @@ class MainActivity : Activity() {
         v.addView(numRow("لغزش خروج با حد ضرر (تیک)", s.cfg.slipTicks) { s.cfg.slipTicks = it; s.rebuildAsync() })
         // §18-31 سند: سفارش با فاصلهٔ حد ضرر بیشتر از N ثبت نمی‌شود (SL>N)؛ پیش‌فرض سند ۳
         v.addView(numRow("حداکثر فاصلهٔ حد ضرر N (واحد)", s.cfg.maxSlUnits) { s.cfg.maxSlUnits = it; s.rebuildAsync() })
+        // فاصلهٔ حد ضرر نباید از کارمزد کوچک‌تر باشد؛ اگر باکس خیلی تنگ بود، حد ضرر همان‌قدر
+        // دورتر می‌رود (و حد سود هم با همان R). ۰ = خاموش (پیش‌فرض سند).
+        v.addView(numRow("حداقل فاصلهٔ حد ضرر (واحد)", s.cfg.minSlUnits) { s.cfg.minSlUnits = it; s.rebuildAsync() })
         // ── فیلتر کارمزد (§۵-۳) ──────────────────────────────────────────────────
         // باگ گزارش‌شده: با روشن‌کردن مود §۲۰، اسپرد بروکر (مثلاً ۰٫۶۶) در تنظیمات ذخیره می‌شود و
         // آستانهٔ ۶× هزینه به ۳٫۹۶ می‌رسد؛ چون فاصلهٔ حد ضرر این استراتژی حدود ۱٫۴ تا ۲ دلار است،
@@ -1256,6 +1259,9 @@ class MainActivity : Activity() {
 
         // ── مدیریت مالی و مدیریت زیان (§۲۰ سند) ──
         addMoneyManagementSection(v)
+
+        // ── تطبیق خودکار با داده/کارمزد ──
+        addAdaptSection(v)
 
         // ── فید ──
         v.addView(Ui.section(this, "⑦ فید داده (طلا)"))
@@ -1324,6 +1330,72 @@ class MainActivity : Activity() {
             "معاملات کاغذی است؛ به کارگزار وصل نیست. همهٔ محاسبات داخل گوشی انجام می‌شود.\n" +
             "مستندات کامل پروژه در پوشهٔ docs مخزن گیت‌هاب است.", 10.5f, Palette.dim))
         return scroll
+    }
+
+    /**
+     * §تطبیق — یک جا: استراتژی × مود مالی × تریگر ۲ معکوس × کارمزد واقعی.
+     *
+     * چرا: هر ترکیب، پارامتر بهینهٔ خودش را دارد و کارمزد واقعی آستانه‌ها را جابه‌جا می‌کند
+     * (با کارمزد ۰٫۷، ضریب پیش‌فرض ۶ آستانهٔ ۴٫۲ می‌سازد که از سقف N=۳ بزرگ‌تر است ⇒ صفر سفارش).
+     * پیش‌تنظیم‌ها از جاروب پارامتر روی **دادهٔ یک‌سالهٔ داخل اپ** آمده‌اند، نه از حدس.
+     */
+    private fun addAdaptSection(v: LinearLayout) {
+        v.addView(Ui.section(this, "⑥-ج تطبیق خودکار (استراتژی × مود × کارمزد)"))
+        val c = s.cfg
+        val cmsn = s.effectiveCmsn()
+        val med = s.engine.slDistMedian()
+        v.addView(Ui.tv(this,
+            "الان: ${Strategy.label(c.strategy)} · مود مالی ${MoneyMode.label(c.mmMode)} · " +
+                (if (c.trigger2Fade) "تریگر ۲ معکوس روشن" else "تریگر ۲ معکوس خاموش (سند ۵)") +
+                " · هدف R=${Fa.n(c.trigger2TargetR, 1)} · کارمزد ${Fa.n(cmsn, 2)}",
+            11f, Palette.gold, true))
+        v.addView(Ui.tv(this,
+            "حداقل فاصلهٔ حد ضرر ${Fa.n(c.minSlUnits, 2)} · سقف N=${Fa.n(c.maxSlUnits, 2)} · " +
+                "ضریب فیلتر کارمزد ${Fa.n(c.minSlCostMult, 2)}" +
+                (if (med.isNaN()) "" else " · میانهٔ فاصلهٔ حد ضرر در آخرین اجرا ${Fa.n(med, 2)}"),
+            10.5f, Palette.dim))
+        if (cmsn > 0.0 && c.minSlCostMult * cmsn > c.maxSlUnits) {
+            v.addView(Ui.tv(this,
+                "⚠ ناسازگار: آستانهٔ فیلتر کارمزد (${Fa.n(c.minSlCostMult * cmsn, 2)}) از سقف N " +
+                    "(${Fa.n(c.maxSlUnits, 2)}) بزرگ‌تر است ⇒ هیچ سفارشی ثبت نمی‌شود. دکمهٔ تطبیق را بزنید.",
+                10.5f, Palette.down, true))
+        }
+        v.addView(Ui.btn(this,
+            "تطبیق با کارمزد واردشده (پیشنهاد حداقل حد ضرر: ${Fa.n(s.suggestedMinSlUnits(), 2)})",
+            Palette.accent, Palette.bg, 11.5f).apply {
+            setOnClickListener {
+                val msg = s.adaptToCommission()
+                toast(msg)
+                if (s.sessionMode == SessionMode.INTERNAL) showTab(4)
+            }
+        })
+        v.addView(Ui.tv(this,
+            "پیش‌تنظیم‌های آزموده‌شده روی دادهٔ یک‌سالهٔ داخل اپ (کارمزد مرجع ${Fa.n(s.adaptCmsn, 2)}):",
+            10.5f, Palette.dim))
+        for (p in s.adaptPresets) {
+            v.addView(Ui.btn(this, p.label, Palette.panel2, Palette.txt, 11f).apply {
+                setOnClickListener {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle(p.label)
+                        .setMessage(p.note + "\n\nکارمزد ${Fa.n(p.cmsn, 2)} · هدف R=${Fa.n(p.targetR, 1)}" +
+                            (if (p.strategy == Strategy.NO_TREND) " · حد سود ${Fa.n(p.tpUnits, 1)} واحد" else "") +
+                            " · حداقل حد ضرر ${Fa.n(p.minSl, 2)} · سقف N=${Fa.n(p.maxSl, 2)}" +
+                            (if (s.sessionMode == SessionMode.INTERNAL)
+                                "\n\nدر نشست بک‌تست داخلی، بعد از این تغییر «اجرای مجدد بک‌تست» را بزنید."
+                            else ""))
+                        .setPositiveButton("اعمال") { _, _ ->
+                            toast(s.applyAdaptPreset(p))
+                            showTab(4)
+                        }
+                        .setNegativeButton("نه", null).show()
+                }
+            })
+            v.addView(Ui.spacer(this, 2f))
+        }
+        v.addView(Ui.tv(this,
+            "نکتهٔ مود خاموش (§۵): در مود «بدون مدیریت» کارمزد از سود کسر **نمی‌شود** (طبق سند)؛ " +
+                "پس عدد سود آن خوش‌بینانه است. برای دیدن اثر واقعی کارمزد، مود Mixed را انتخاب کنید.",
+            10f, Palette.dim))
     }
 
     /**

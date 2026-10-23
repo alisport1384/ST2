@@ -7,7 +7,7 @@ package com.alisport.goldpin.core
 // ═══════════════════════════════════════════════════════════════════════════════
 object Store {
     /** نسخهٔ هم‌ترازی تنظیمات با سند؛ فایل‌های با مقدار کمتر هنگام بارگذاری به پیش‌فرض‌های سند مهاجرت می‌کنند. */
-    const val SPEC_REV = 8
+    const val SPEC_REV = 9
 
 
     const val FORMAT = 3
@@ -64,6 +64,7 @@ object Store {
         "mintick" to c.mintick, "slBufTicks" to c.slBufTicks, "entryBufTicks" to c.entryBufTicks, "minTPunits" to c.minTPunits,
         "slipTicks" to c.slipTicks,
         "strategy" to c.strategy, "tpUnits" to c.tpUnits, "maxSlUnits" to c.maxSlUnits,
+        "minSlUnits" to c.minSlUnits,
         "trigger2Fade" to c.trigger2Fade, "trigger2TargetR" to c.trigger2TargetR, "minSlCostMult" to c.minSlCostMult,
         "useRiskPct" to c.useRiskPct, "riskPct" to c.riskPct, "equityPct" to c.equityPct,
         "maxLeverage" to c.maxLeverage, "levModel" to 2, "roundQty" to c.roundQty,
@@ -110,6 +111,7 @@ object Store {
         // برای حفظ تنظیمات سفارشی، فایل قدیمی‌ای که N را از مقدار پیش‌فرض قبلی (۳) تغییر داده
         // باشد حفظ می‌شود؛ مقدار قدیمیِ پیش‌فرض ۳ به پیش‌فرض جدید ۱۰ مهاجرت می‌کند.
         if (m.containsKey("maxSlUnits")) c.maxSlUnits = m["maxSlUnits"].asD()
+        if (m.containsKey("minSlUnits")) c.minSlUnits = m["minSlUnits"].asD()
         if (m.containsKey("trigger2Fade")) c.trigger2Fade = m["trigger2Fade"].asB()
         if (m.containsKey("trigger2TargetR")) c.trigger2TargetR = m["trigger2TargetR"].asD()
         if (m.containsKey("minSlCostMult")) c.minSlCostMult = m["minSlCostMult"].asD()
@@ -180,6 +182,19 @@ object Store {
             if (c.cmsnManual <= 0.0) c.cmsnManual = 0.20
             c.cmsnAuto = false
             c.cmsnMigratedFromAuto = c.cmsnAutoValue
+        }
+        // specRev 9 (۱٫۴٫۴۲): تنظیمِ آزموده‌شده با داده ([Tuned]) جای پیش‌فرض سند ۷ می‌نشیند.
+        // با کارمزد ۰٫۷ دلار، پیش‌فرض سند ۷ روی دادهٔ یک‌سالهٔ خود اپ **صفر سفارش** می‌دهد
+        // (آستانهٔ فیلتر ۴٫۲ > سقف N=۳) و حد ضرر ۲ تیکی هم داخل نویز است. فقط فایل‌هایی مهاجرت
+        // می‌شوند که مقدارهایشان دقیقاً همان پیش‌فرض دست‌نخوردهٔ سند ۷ باشد؛ تنظیم دستی کاربر
+        // دست‌نخورده می‌ماند (و هر زمان بخواهد از بخش «تطبیق» در اپ برمی‌گردد).
+        if (savedSpecRev < 9 && Tuned.isUntouchedDoc7(c)) {
+            // کارمزد: اگر فایل همین حالا مبنای کارمزد دارد (اسپرد خودکار معقولِ بروکر، یا عدد
+            // دستی کاربر — مثلاً همان ۰٫۲۰ که مهاجرت نسخهٔ ۸ گذاشته)، آن عدد واقعی بر حدسِ
+            // مرجع (۰٫۷) اولویت دارد و دست‌نخورده می‌ماند. فقط وقتی هیچ مبنایی نبود، مرجع
+            // آزموده‌شده می‌نشیند.
+            val hasBasis = c.cmsnManual > 0.0 || (c.cmsnAuto && c.cmsnAutoValue > 0.0)
+            Tuned.apply(c, if (hasBasis) 0.0 else Tuned.CMSN)
         }
         return c
     }

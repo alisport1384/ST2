@@ -36,14 +36,20 @@ class SpecRevTest {
 
     @Test
     fun `spec rev 7 upgrades untouched trading-mode defaults and keeps custom ones`() {
-        // فایل نسخهٔ ۶ با پیش‌فرض‌های قدیمی (معکوس خاموش / هدف ۰ / فیلتر ۰) ⇒ پیش‌فرض‌های سند ۷
-        val old = Settings().apply { trigger2Fade = false; trigger2TargetR = 0.0; minSlCostMult = 0.0 }
+        // فایل نسخهٔ ۶ با پیش‌فرض‌های قدیمی (معکوس خاموش / هدف ۰ / فیلتر ۰) ⇒ پیش‌فرض‌های سند ۷.
+        // بافر حد ضرر عمداً سفارشی (۵۰ تیک) است تا مهاجرت نسخهٔ ۹ اجرا **نشود**: آن مهاجرت فقط
+        // فایل‌هایی را می‌برد که تمام پیش‌فرض‌های سند ۷ دست‌نخورده باشد. پس اینجا نتیجهٔ خالصِ
+        // مهاجرت نسخهٔ ۷ دیده می‌شود (پوشش نسخهٔ ۹ در آزمون جداگانهٔ خودش است).
+        val old = Settings().apply {
+            trigger2Fade = false; trigger2TargetR = 0.0; minSlCostMult = 0.0; slBufTicks = 50.0
+        }
         val oldJson = Store.save(old, Engine(old), PaperBroker(old), emptyList())
             .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":6")
         val migrated = Store.load(oldJson).cfg
         assertTrue(migrated.trigger2Fade, "سند ۷: تریگر ۲ معکوس پیش‌فرض روشن است")
         assertEquals(4.0, migrated.trigger2TargetR, "سند ۷: هدف پیش‌فرض ۴R")
         assertEquals(6.0, migrated.minSlCostMult, "سند ۷: فیلتر کارمزد ۶")
+        assertEquals(50.0, migrated.slBufTicks, 1e-9, "بافر سفارشی کاربر دست‌نخورده می‌ماند")
 
         // اگر کاربر حتی یکی از این سه را دست‌کاری کرده باشد، هیچ‌کدام عوض نمی‌شود
         val custom = Settings().apply { trigger2Fade = false; trigger2TargetR = 3.0; minSlCostMult = 0.0 }
@@ -57,6 +63,66 @@ class SpecRevTest {
         // پروندهٔ تازه (specRev جاری) دست‌نخورده می‌ماند
         val fresh = Store.save(Settings(), Engine(Settings()), PaperBroker(Settings()), emptyList())
         assertTrue(Store.load(fresh).cfg.trigger2Fade)
+    }
+
+    @Test
+    fun `spec rev 9 tunes untouched doc 7 defaults with the data-verified optimum`() {
+        // فایل نسخهٔ ۷ با **تمام** پیش‌فرض‌های دست‌نخوردهٔ سند ۷ ⇒ تنظیم آزموده‌شده با داده.
+        // دلیل: با کارمزد ۰٫۷، همان پیش‌فرض روی دادهٔ یک‌سالهٔ خود اپ صفر سفارش می‌داد
+        // (آستانهٔ فیلتر ۴٫۲ > سقف N=۳) و حد ضرر ۲ تیکی هم داخل نویز بود.
+        val doc7 = Settings()
+        val json = Store.save(doc7, Engine(doc7), PaperBroker(doc7), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":7")
+        val m = Store.load(json).cfg
+        assertFalse(m.trigger2Fade, "تنظیم آزموده‌شده: هم‌جهت با ساختار")
+        assertEquals(7.0, m.trigger2TargetR, 1e-9)
+        assertEquals(200.0, m.slBufTicks, 1e-9, "بافر حد ضرر باید از نویز بیرون بیاید")
+        assertEquals(-2.0, m.entryBufTicks, 1e-9)
+        assertEquals(10.0, m.maxSlUnits, 1e-9, "سقف N باید از فاصلهٔ جدید حد ضرر بزرگ‌تر باشد")
+        assertEquals(0.0, m.minSlCostMult, 1e-9, "فیلتر کارمزد خاموش: خودش مانع صفر‌سفارشی بود")
+        assertEquals(0.7, m.cmsnManual, 1e-9, "هیچ مبنای کارمزدی در فایل نبود ⇒ مرجع آزموده‌شده")
+        assertFalse(m.cmsnAuto)
+
+        // زنجیرهٔ کامل: فایل نسخهٔ ۶ هم اول به سند ۷ می‌رسد و بعد به همین تنظیم.
+        val v6 = Settings().apply { trigger2Fade = false; trigger2TargetR = 0.0; minSlCostMult = 0.0 }
+        val j6 = Store.save(v6, Engine(v6), PaperBroker(v6), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":6")
+        val m6 = Store.load(j6).cfg
+        assertEquals(7.0, m6.trigger2TargetR, 1e-9)
+        assertEquals(200.0, m6.slBufTicks, 1e-9)
+
+        // عدد دستی کاربر بر مرجع ۰٫۷ اولویت دارد (هندسه تنظیم می‌شود، کارمزد دست نمی‌خورد).
+        val withCmsn = Settings().apply { cmsnManual = 0.35 }
+        val jc = Store.save(withCmsn, Engine(withCmsn), PaperBroker(withCmsn), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":7")
+        val mc = Store.load(jc).cfg
+        assertEquals(0.35, mc.cmsnManual, 1e-9, "کارمزد واقعی کاربر نباید با حدس عوض شود")
+        assertEquals(200.0, mc.slBufTicks, 1e-9)
+
+        // اسپرد خودکارِ معقولِ بروکر هم دست‌نخورده می‌ماند.
+        val auto = Settings().apply { cmsnAuto = true; cmsnAutoValue = 0.18 }
+        val ja = Store.save(auto, Engine(auto), PaperBroker(auto), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":7")
+        val ma = Store.load(ja).cfg
+        assertTrue(ma.cmsnAuto, "اسپرد معقول خودکار نباید خاموش شود")
+        assertEquals(0.18, ma.cmsnAutoValue, 1e-9)
+        assertEquals(0.0, ma.cmsnManual, 1e-9)
+
+        // اگر کاربر حتی یکی از کلیدهای هندسی را دست‌کاری کرده باشد، هیچ‌چیز عوض نمی‌شود.
+        val custom = Settings().apply { slBufTicks = 50.0 }
+        val jx = Store.save(custom, Engine(custom), PaperBroker(custom), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":7")
+        val mx = Store.load(jx).cfg
+        assertEquals(50.0, mx.slBufTicks, 1e-9, "انتخاب کاربر باید بماند")
+        assertTrue(mx.trigger2Fade, "بقیهٔ پیش‌فرض‌های سند ۷ هم دست‌نخورده می‌مانند")
+        assertEquals(4.0, mx.trigger2TargetR, 1e-9)
+        assertEquals(3.0, mx.maxSlUnits, 1e-9)
+
+        // پروندهٔ تازه (specRev جاری) هیچ مهاجرتی نمی‌بیند.
+        val fresh = Store.save(Settings(), Engine(Settings()), PaperBroker(Settings()), emptyList())
+        val mf = Store.load(fresh).cfg
+        assertTrue(mf.trigger2Fade)
+        assertEquals(2.0, mf.slBufTicks, 1e-9)
     }
 
     @Test
@@ -114,7 +180,11 @@ class SpecRevTest {
 
     @Test
     fun `old save files migrate to document defaults and plateau peak builds zone`() {
-        val c = Settings().apply { maxLeverage = 10.0; entryBufTicks = 2.0; maxSetups = 6 }
+        // trigger2Fade=false عمداً: تا مهاجرت نسخهٔ ۹ (که فقط پیش‌فرض‌های دست‌نخوردهٔ سند ۷ را
+        // به تنظیم آزموده‌شده می‌برد) اجرا نشود و نتیجهٔ خالص مهاجرت‌های اهرم/بافر/N دیده شود.
+        val c = Settings().apply {
+            maxLeverage = 10.0; entryBufTicks = 2.0; maxSetups = 6; trigger2Fade = false
+        }
         val e = Engine(c); val b = PaperBroker(c); e.broker = b; b.engine = e
         val j = Store.save(c, e, b, listOf(Candle(0, 28_800_000L, 1.0, 2.0, 0.5, 1.5, 10.0)))
         val old = j.replace("\"specRev\"", "\"zz_specRev\"")
@@ -125,7 +195,7 @@ class SpecRevTest {
         // مهاجرت N: پیش‌فرض سند در نسخهٔ ۱.۴.۳۱ برابر ۲۰ بود و اکنون به ۳ برگشته است.
         //  • فایلی که مقدار ۲۰ دارد (پیش‌فرض نسخهٔ قبل) باید ۳ شود؛
         //  • عدد سفارشی کاربر (مثل ۷) دست‌نخورده می‌ماند.
-        val prevN = Settings().apply { maxSlUnits = 20.0 }
+        val prevN = Settings().apply { maxSlUnits = 20.0; trigger2Fade = false }
         val prevJson = Store.save(prevN, Engine(prevN), PaperBroker(prevN), emptyList())
             .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":5")
         assertEquals(3.0, Store.load(prevJson).cfg.maxSlUnits, "پیش‌فرض ۲۰ نسخهٔ قبل باید به ۳ مهاجرت کند")
@@ -133,7 +203,8 @@ class SpecRevTest {
         val customJson = Store.save(customN, Engine(customN), PaperBroker(customN), emptyList())
             .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":5")
         assertEquals(7.0, Store.load(customJson).cfg.maxSlUnits, "عدد سفارشی کاربر نباید عوض شود")
-        val defaultJson = Store.save(Settings(), Engine(Settings()), PaperBroker(Settings()), emptyList())
+        val defOld = Settings().apply { trigger2Fade = false }
+        val defaultJson = Store.save(defOld, Engine(defOld), PaperBroker(defOld), emptyList())
             .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":2")
         assertEquals(3.0, Store.load(defaultJson).cfg.maxSlUnits, "پرونده‌های قدیمی هم باید به پیش‌فرض ۳ برسند")
 

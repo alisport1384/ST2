@@ -147,8 +147,11 @@ class AppState {
         "$symbol/${c.tfS}/${c.tfM}/${c.tf1}/${c.tf2}/${c.strategy}/${c.vpRows}/${c.vpVA}/" +
             "${c.vpSmooth}/${c.distMode}/${c.minZoneRows}/${c.maxSetups}/${c.midInvalidClose}/" +
             "${c.hvScanFirstTouch}/${c.hvMarkFirstIncrease}/${c.minTPunits}/${c.maxSlUnits}/" +
-            "${c.slBufTicks}/${c.entryBufTicks}/${c.slipTicks}/${c.mintick}/${c.maxLeverage}/" +
-            "${c.useRiskPct}/${c.riskPct}/${c.initialEquity}/${c.mmMode}/${c.contractSize}/${c.tpUnits}"
+            "${c.minSlUnits}/${c.slBufTicks}/${c.entryBufTicks}/${c.slipTicks}/${c.mintick}/${c.maxLeverage}/" +
+            "${c.useRiskPct}/${c.riskPct}/${c.initialEquity}/${c.mmMode}/${c.contractSize}/${c.tpUnits}/" +
+            // کلیدهای تریگر ۲ معکوس و کارمزد هم باید نتیجه را کهنه کنند (بخش تطبیق این‌ها را عوض می‌کند)
+            "${c.trigger2Fade}/${c.trigger2TargetR}/${c.minSlCostMult}/${c.cmsnAuto}/${c.cmsnManual}/" +
+            "${c.minLotAuto}/${c.minLotManual}/${c.divAuto}/${c.divManual}/${c.mixedGrowthPct}"
 
     /** امضای تنظیمات فعلی. */
     fun backtestSignature(): String = signatureOf(cfg)
@@ -647,6 +650,9 @@ class AppState {
             if (st.slNBlocked > 0) {
                 parts.add("${Fa.d(st.slNBlocked.toString())} سفارش با سقف حد ضرر N=${Fa.n(cfg.maxSlUnits, 2)} رد شد")
             }
+            if (st.slMinBlocked > 0) {
+                parts.add("${Fa.d(st.slMinBlocked.toString())} سفارش با حداقل فاصلهٔ حد ضرر ${Fa.n(cfg.minSlUnits, 2)} رد شد")
+            }
             if (engine.processed == 0) parts.add("هیچ کندلی به موتور نرسید")
         }
         val reason = if (parts.isEmpty()) null else parts.joinToString(" · ")
@@ -685,6 +691,101 @@ class AppState {
         val k = median * 0.8 / cost
         // حداقل ۱ (کمتر از یک یعنی «فیلتر عملاً خاموش»)؛ با یک رقم اعشار.
         return Math.round(maxOf(1.0, k) * 10.0) / 10.0
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  بخش تطبیق — پارامترهای آزموده‌شده روی دادهٔ واقعی یک‌سالهٔ باندل‌شده
+    //
+    //  چرا این بخش لازم است: سه کلید (استراتژی، مود مالی §۲۰، تریگر ۲ معکوس) هر کدام
+    //  «بهترین» پارامتر متفاوتی می‌خواهند و مهم‌تر از همه، **کارمزد واقعی** آستانه‌ها را
+    //  جابه‌جا می‌کند. با کارمزد ۰٫۷ دلار، پیش‌فرض‌های سند ۷ (ضریب ۶ ⇒ آستانهٔ ۴٫۲ در برابر
+    //  سقف N=۳) عملاً **همهٔ** سفارش‌ها را رد می‌کنند؛ و در مود خاموش که کارمزد کسر نمی‌شود،
+    //  معامله‌های کم‌فاصله (R کوچک) با هزینهٔ واقعی بازنده‌اند.
+    //
+    //  عددهای هر پیش‌تنظیم از جاروب پارامتر روی همان ۳۵۱٬۸۹۴ کندل M1 داخل اپ گرفته شده
+    //  (گزارش: `sweep/` در مخزن) — نه از حدس.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /** یک پیش‌تنظیم تطبیق: مجموعهٔ پارامترهایی که **با هم** روی دادهٔ یک‌ساله آزموده شده‌اند. */
+    class AdaptPreset(
+        val id: String,
+        val label: String,
+        val strategy: Int,
+        val mm: Int,
+        val fade: Boolean,
+        val targetR: Double,
+        val tpUnits: Double,
+        val costMult: Double,
+        val minSl: Double,
+        val maxSl: Double,
+        val cmsn: Double,
+        val slBufTicks: Double,
+        val entryBufTicks: Double,
+        val note: String
+    )
+
+    /** کارمزد مرجع این پیش‌تنظیم‌ها (واحد قیمت). اگر کارمزد کاربر فرق دارد، «تطبیق از داده» را بزند. */
+    val adaptCmsn = 0.7
+
+    val adaptPresets: List<AdaptPreset> = ADAPT_PRESETS
+
+    /** کارمزد مؤثر از تنظیمات (خودکارِ بروکر یا دستی) — مستقل از مود مالی. */
+    fun effectiveCmsn(): Double =
+        if (cfg.cmsnAuto && cfg.cmsnAutoValue > 0.0) cfg.cmsnAutoValue else Math.max(0.0, cfg.cmsnManual)
+
+    /**
+     * حداقل فاصلهٔ حد ضرر پیشنهادی از روی کارمزد واقعی.
+     *
+     * کارمزد هر معامله بر حسب R برابر `cmsn / R` است (چون حجم با ۱/R مقیاس می‌شود). پس برای
+     * اینکه هزینه بیشتر از [costRatioInR] از R نشود: `R ≥ cmsn / costRatioInR`.
+     * پیش‌فرض ۰٫۲۵ یعنی هزینه حداکثر یک‌چهارم R.
+     */
+    fun suggestedMinSlUnits(costRatioInR: Double = 0.25): Double {
+        val cmsn = effectiveCmsn()
+        if (cmsn <= 0.0 || costRatioInR <= 0.0) return 0.0
+        return Math.round(cmsn / costRatioInR * 10.0) / 10.0
+    }
+
+    /**
+     * تطبیق خودکار با کارمزد واردشده: حداقل/حداکثر فاصلهٔ حد ضرر و ضریب فیلتر کارمزد را
+     * طوری تنظیم می‌کند که (۱) معاملهٔ کم‌فاصلهٔ بازنده ثبت نشود و (۲) آستانه‌ها با سقف N
+     * سازگار بمانند (وگرنه هیچ سفارشی رد نمی‌شود — همان باگی که «کل معاملات صفر» می‌داد).
+     */
+    fun adaptToCommission(): String {
+        val cmsn = effectiveCmsn()
+        if (cmsn <= 0.0) return "اول کارمزد/اسپرد واقعی را وارد کنید (۰ ⇒ تطبیق معنا ندارد)"
+        val minSl = suggestedMinSlUnits()
+        val before = "min=${Fa.n(cfg.minSlUnits, 2)} N=${Fa.n(cfg.maxSlUnits, 2)} ضریب=${Fa.n(cfg.minSlCostMult, 2)}"
+        cfg.minSlUnits = minSl
+        // سقف N باید از حداقل بزرگ‌تر باشد وگرنه هیچ سفارشی باقی نمی‌ماند
+        if (cfg.maxSlUnits <= cfg.minSlUnits) cfg.maxSlUnits = Math.round((cfg.minSlUnits + 3.0) * 10.0) / 10.0
+        // ضریب فیلتر کارمزد (§۵-۳) معادل همان حداقل است: mult = minSl / cmsn
+        cfg.minSlCostMult = Math.round(minSl / cmsn * 10.0) / 10.0
+        Log.i(Log.CAT_CFG, "تطبیق با کارمزد", "cmsn=${Fa.n(cmsn, 2)} $before → min=${Fa.n(cfg.minSlUnits, 2)} N=${Fa.n(cfg.maxSlUnits, 2)}")
+        rebuildAsync()
+        return "کارمزد ${Fa.n(cmsn, 2)} ⇒ حداقل فاصلهٔ حد ضرر ${Fa.n(cfg.minSlUnits, 2)}، سقف N=${Fa.n(cfg.maxSlUnits, 2)}، " +
+            "ضریب فیلتر ${Fa.n(cfg.minSlCostMult, 2)} (هزینه ≤ ۲۵٪ R)"
+    }
+
+    /** اعمال یک پیش‌تنظیم تطبیق؛ متن نتیجه برای نمایش برمی‌گردد. */
+    fun applyAdaptPreset(p: AdaptPreset): String {
+        cfg.strategy = p.strategy
+        cfg.mmMode = p.mm
+        cfg.trigger2Fade = p.fade
+        cfg.trigger2TargetR = p.targetR
+        cfg.tpUnits = p.tpUnits
+        cfg.minSlCostMult = p.costMult
+        cfg.minSlUnits = p.minSl
+        cfg.maxSlUnits = p.maxSl
+        cfg.slBufTicks = p.slBufTicks
+        cfg.entryBufTicks = p.entryBufTicks
+        cfg.cmsnAuto = false
+        cfg.cmsnManual = p.cmsn
+        Log.i(Log.CAT_CFG, "پیش‌تنظیم تطبیق اعمال شد",
+            "${p.id} strategy=${p.strategy} mm=${MoneyMode.label(p.mm)} fade=${p.fade} k=${p.targetR} minSl=${p.minSl} N=${p.maxSl}")
+        ensureBrokerSpread()
+        rebuildAsync()
+        return "${p.label}\n${p.note}"
     }
 
     /** اعمال ضریب پیشنهادی و بازسازی. خروجی: متن نتیجه برای toast. */
@@ -1632,6 +1733,7 @@ class AppState {
         to.slipTicks = c.slipTicks
         to.strategy = c.strategy; to.tpUnits = c.tpUnits
         to.maxSlUnits = c.maxSlUnits
+        to.minSlUnits = c.minSlUnits
         to.trigger2Fade = c.trigger2Fade; to.trigger2TargetR = c.trigger2TargetR; to.minSlCostMult = c.minSlCostMult
         to.useRiskPct = c.useRiskPct; to.riskPct = c.riskPct; to.equityPct = c.equityPct
         to.maxLeverage = c.maxLeverage; to.roundQty = c.roundQty
@@ -2156,6 +2258,16 @@ class AppState {
         notifyUi()
         io.execute {
             val msg = try {
+                // نصب تازه (هیچ فایل وضعیتی روی دستگاه نیست): تنظیمات کد، تنظیمات کاربر نیستند،
+                // پس همان تنظیم آزموده‌شده با داده ([Tuned]) می‌نشیند تا اپ از همان اول با کارمزد
+                // ۰٫۷ سفارش بدهد. اگر فایلی باشد، مهاجرت specRev در Store همان کار را فقط برای
+                // مقدارهای دست‌نخوردهٔ سند ۷ انجام می‌دهد و تنظیم دستی کاربر دست‌نخورده می‌ماند.
+                if (!Storage.autoFile(ctx).exists() && !Storage.internalFile(ctx).exists()) {
+                    Tuned.apply(cfg)
+                    Log.i(Log.CAT_CFG, "نصب تازه → تنظیم آزموده‌شده با داده اعمال شد",
+                        "هدف=${Fa.n(cfg.trigger2TargetR, 1)}R بافرحدضرر=${Fa.n(cfg.slBufTicks, 0)}تیک " +
+                            "سقف‌N=${Fa.n(cfg.maxSlUnits, 1)} کارمزد=${Fa.n(cfg.cmsnManual, 2)}")
+                }
                 if (sessionMode == SessionMode.INTERNAL) {
                     // کاربر آخرین بار در نشست بک‌تست بوده است.
                     if (hasBacktestData(ctx)) {
@@ -2231,7 +2343,7 @@ class AppState {
 
     companion object {
         /** نسخهٔ نمایشی — تنها منبع حقیقت برای هدر لاگ. با `versionName` در build.gradle یکی نگه دارید. */
-        const val APP_VERSION = "1.4.40"
+        const val APP_VERSION = "1.4.42"
 
         val instance = AppState()
 
