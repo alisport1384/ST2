@@ -79,6 +79,8 @@ class MainActivity : Activity() {
     private var lastRefreshAt = 0L
     private var refreshQueued = false
     private var tabSignature = ""
+    /** آخرین علتِ «صفر سفارش» که به کاربر نشان داده شد — تا بنر در هر تیک تکرار نشود. */
+    private var lastZeroRunShown: String? = null
     private val uiListener: () -> Unit = { refreshCurrent() }
 
     private val REQ_SAVE = 101
@@ -274,6 +276,17 @@ class MainActivity : Activity() {
                 // TextView نمی‌رود — صفحه‌آرایی متنِ یک مگابایت نخ رابط را قفل می‌کند.
                 s.lastFeedError?.takeIf { it.isNotEmpty() }
                     ?.let { append("  |  ⚠ " + Fa.short(it, 90)) }
+                // «چرا صفر است؟» — قبلاً نتیجهٔ صفر کاملاً بی‌صدا بود و کاربر فکر می‌کرد اپ خراب شده.
+                s.zeroRunReason?.takeIf { it.isNotEmpty() }
+                    ?.let { append("  |  ⚠ صفر سفارش: " + Fa.short(it, 120)) }
+            }
+            // بنر یک‌بار برای هر علت تازه (نه در هر تیک رابط)
+            val zr = s.zeroRunReason
+            if (zr != lastZeroRunShown) {
+                lastZeroRunShown = zr
+                if (zr != null && zr.isNotEmpty()) {
+                    showBanner("هیچ سفارشی ساخته نشد — $zr", Palette.gold, "warn")
+                }
             }
             when (tab) {
                 0 -> refreshChartTab()
@@ -1201,6 +1214,34 @@ class MainActivity : Activity() {
         v.addView(numRow("لغزش خروج با حد ضرر (تیک)", s.cfg.slipTicks) { s.cfg.slipTicks = it; s.rebuildAsync() })
         // §18-31 سند: سفارش با فاصلهٔ حد ضرر بیشتر از N ثبت نمی‌شود (SL>N)؛ پیش‌فرض سند ۳
         v.addView(numRow("حداکثر فاصلهٔ حد ضرر N (واحد)", s.cfg.maxSlUnits) { s.cfg.maxSlUnits = it; s.rebuildAsync() })
+        // ── فیلتر کارمزد (§۵-۳) ──────────────────────────────────────────────────
+        // باگ گزارش‌شده: با روشن‌کردن مود §۲۰، اسپرد بروکر (مثلاً ۰٫۶۶) در تنظیمات ذخیره می‌شود و
+        // آستانهٔ ۶× هزینه به ۳٫۹۶ می‌رسد؛ چون فاصلهٔ حد ضرر این استراتژی حدود ۱٫۴ تا ۲ دلار است،
+        // **همهٔ** سفارش‌ها رد می‌شوند و عدد معاملات صفر می‌ماند. حالا هم هشدار داده می‌شود و هم
+        // یک دکمهٔ «تطبیق با داده» ضریب را از میانهٔ واقعی فاصلهٔ حد ضرر می‌سازد.
+        val costNow = s.engine.slCostPerUnit()
+        if (s.cfg.minSlCostMult > 0.0 && costNow > 0.0) {
+            val thr = s.cfg.minSlCostMult * costNow
+            val med = s.engine.slDistMedian()
+            v.addView(Ui.tv(this,
+                "فیلتر کارمزد: آستانهٔ ${Fa.n(thr, 2)} = ${Fa.n(s.cfg.minSlCostMult, 2)}× هزینهٔ ${Fa.n(costNow, 2)}" +
+                    (if (med.isNaN()) "" else " · میانهٔ فاصلهٔ حد ضرر در آخرین اجرا: ${Fa.n(med, 2)}"),
+                11f, if (!med.isNaN() && med < thr) Palette.gold else Palette.dim))
+            if (!med.isNaN() && med < thr) {
+                v.addView(Ui.tv(this,
+                    "⚠ با این ضریب، همهٔ سفارش‌ها رد می‌شوند (همین باعث صفر شدن معاملات می‌شود)." +
+                        " یا اسپرد را دستی/واقعی وارد کنید، یا ضریب را کم کنید.",
+                    10.5f, Palette.gold))
+            }
+            val sug = s.suggestedCostMult()
+            if (!sug.isNaN()) {
+                v.addView(Ui.btn(this, "تطبیق ضریب فیلتر با داده (پیشنهاد: ${Fa.n(sug, 2)})",
+                    Palette.panel2, Palette.accent, 11f).apply {
+                    setOnClickListener { toast(s.applySuggestedCostMult()); showTab(4) }
+                })
+                v.addView(Ui.spacer(this, 3f))
+            }
+        }
         if (s.cfg.strategy == Strategy.NO_TREND) {
             // استراتژی ۲: حد سود فقط «واحد» است (بدون فیبو و بدون TP1/TP2)؛ پیش‌فرض ۱۰
             v.addView(numRow("حد سود (واحد) — استراتژی ۲", s.cfg.tpUnits) { s.cfg.tpUnits = it; s.rebuildAsync() })
@@ -1413,11 +1454,17 @@ class MainActivity : Activity() {
             mm.spreadIsBroker() -> "${Fa.n(mm.spread(), 3)} (بروکر · ${Fa.jalali(s.cfg.cmsnAutoAt)})"
             else -> "هنوز از بروکر دریافت نشده ⇒ ${Fa.n(mm.spread(), 3)} (بدون کمیسیون اگر ۰)"
         }
+        v.addView(Ui.tv(this,
+            "§۹۲۶ سند: کارمزد واقعی بروکر خود را وارد کنید (برای طلا حدود ۰٫۲۰). " +
+                "«خودکار» اسپرد خرده‌فروشی Swissquote را می‌گیرد که در مهر ۱۴۰۵ حدود ۰٫۶۶ بود " +
+                "و با فیلتر ۶×، همهٔ سفارش‌ها را رد می‌کند.", 10.5f, Palette.dim))
         v.addView(autoNumRow("cmsn (اسپرد تحمیلی، واحد قیمت)", s.cfg.cmsnAuto, spreadHint, s.cfg.cmsnManual,
             onAuto = { on ->
                 if (!on && mm.spreadIsBroker()) s.cfg.cmsnManual = mm.spread()
                 s.cfg.cmsnAuto = on; s.rebuildAsync()
-                if (on) s.fetchBrokerSpread { m -> toast(m) }
+                // ⚠ اسپردِ خودکار فقط وقتی گرفته می‌شود که کاربر خودش خواسته باشد؛ و بعد از
+                // گرفتن، اگر با ضریب فیلتر همهٔ سفارش‌ها را رد کند، همان‌جا هشدار داده می‌شود.
+                if (on) s.fetchBrokerSpread { m -> toast(m); showTab(4) }
                 showTab(4)
             },
             onManual = { s.cfg.cmsnManual = it; s.rebuildAsync() }))

@@ -135,11 +135,26 @@ class Settings {
      * اسپرد بروکر یک‌بار از فید گرفته و **داخل تنظیمات ذخیره** می‌شود (نه یک متغیر پنهان زمان اجرا)؛ پس همهٔ
      * معاملات (تاریخچه و زنده) با یک عدد حساب می‌شوند و هر بازسازی دقیقاً همان نتیجه را می‌دهد.
      */
-    var cmsnAuto: Boolean = true
+    /**
+     * پیش‌فرض **false** (۱٫۴٫۴۰): §۵-۱ سند می‌گوید مود پیش‌فرض اپ «بدون کارمزد» است و
+     * §۹۲۶ سند هم صریح می‌گوید کارمزد واقعی را کاربر **دستی** وارد کند (برای طلا ~۰٫۲).
+     * پیش‌تر این کلید true بود و اپ بلافاصله اسپرد خرده‌فروشی Swissquote را می‌گرفت
+     * (در مهر ۱۴۰۵ روی XAU/USD حدود **۰٫۶۶** = بیش از ۳ برابر مقدار مرجع سند). با ضریب
+     * فیلتر ۶ آستانهٔ فاصلهٔ حد ضرر ۳٫۹۶ می‌شد، در حالی که فاصلهٔ واقعی این استراتژی
+     * حدود ۱٫۴ تا ۲ دلار است ⇒ **همهٔ** سفارش‌ها رد می‌شدند و با روشن‌کردن مود §۲۰
+     * «کل معاملات صفر» می‌شد (باگ گزارش‌شدهٔ کاربر).
+     */
+    var cmsnAuto: Boolean = false
     var cmsnManual: Double = 0.0
     /** آخرین اسپرد دریافت‌شده از بروکر (۰ = هنوز دریافت نشده ⇒ cmsnManual) و زمان دریافت (میلی‌ثانیه). */
     var cmsnAutoValue: Double = 0.0
     var cmsnAutoAt: Long = 0L
+    /**
+     * اگر [Store] هنگام بارگذاری فایل قدیمی، «اسپرد خودکارِ بزرگ» را به «دستی ۰٫۲۰» تبدیل
+     * کرده باشد، مقدار قبلی این‌جا می‌آید (۰ = مهاجرتی رخ نداده). فقط برای **اطلاع‌دادن** به
+     * کاربر است و ذخیره نمی‌شود.
+     */
+    var cmsnMigratedFromAuto: Double = 0.0
     /**
      * §۲۰ بند ۵ (crt): «در شرایط حساس اگر کپیتال از یک مقدار مشخص کمتر شد ورودی‌های حجم را crt
      * محاسبه می‌کند — پیش‌فرض ۱۰ درصد کل capital» و «crt در مود ManageAllLost فقط فعال است».
@@ -184,6 +199,12 @@ class Settings {
 class Counters {
     var setup = 0; var touch = 0; var mid = 0; var lv = 0; var hv = 0; var entry = 0; var done = 0
     var zoneCount = 0; var zoneRejected = 0
+    /** چند سفارش با «فیلتر کارمزد» (§۵-۳) رد شد — برای هشدار قابل‌فهم در رابط کاربری. */
+    var slCostBlocked = 0
+    /** چند سفارش با سقف N رد شد (SL>N، §۱۸-۳۱). */
+    var slNBlocked = 0
+    /** چند مسلح‌شدن به‌خاطر پنجرهٔ زمانی (۰۱:۳۰–۲۰:۰۰ UTC) رد شد (§۱۸-۲۶). */
+    var windowBlocked = 0
 }
 
 class Engine(val cfg: Settings) {
@@ -201,6 +222,33 @@ class Engine(val cfg: Settings) {
     val markers = ArrayList<Marker>()         // برچسب‌های استراتژی روی چارت
     val events = ArrayList<String>()          // گزارش رویدادها
     val cnt = Counters()
+
+    /**
+     * نمونهٔ فاصله‌های حد ضرر ارزیابی‌شده (سقف ۴٬۰۰۰ عدد) تا رابط کاربری بتواند بگوید
+     * «فیلتر کارمزد با میانهٔ X در برابر آستانهٔ Y همه را رد کرد». فقط آمار است، هیچ اثری بر تصمیم ندارد.
+     */
+    private val slDistSamples = ArrayList<Double>(1024)
+    private val SL_SAMPLE_CAP = 4000
+
+    /** میانهٔ فاصلهٔ حد ضرر سفارش‌های ارزیابی‌شده در این اجرا (NaN = هیچ نمونه‌ای نیست). */
+    fun slDistMedian(): Double {
+        if (slDistSamples.isEmpty()) return Double.NaN
+        val a = slDistSamples.sorted()
+        return if (a.size % 2 == 1) a[a.size / 2] else (a[a.size / 2 - 1] + a[a.size / 2]) / 2.0
+    }
+
+    /** هزینهٔ مؤثر هر واحد که فیلتر کارمزد با آن حساب می‌کند (۰ = مود §۲۰ خاموش ⇒ بدون کارمزد). */
+    fun slCostPerUnit(): Double {
+        val mm = broker?.mm ?: return 0.0
+        return if (mm.active) mm.spread() else 0.0
+    }
+
+    /** آستانهٔ فعلی فیلتر کارمزد (ضریب × هزینهٔ هر واحد)؛ ۰ = فیلتر عملاً خاموش. */
+    fun slCostThreshold(): Double {
+        if (cfg.minSlCostMult <= 0.0) return 0.0
+        val c = slCostPerUnit()
+        return if (c > 0.0) cfg.minSlCostMult * c else 0.0
+    }
 
     var trend = 0
     var HH = Double.NaN; var HL = Double.NaN; var LL = Double.NaN; var LH = Double.NaN
@@ -321,6 +369,12 @@ class Engine(val cfg: Settings) {
         lastResult = "-"; stageFa = "-"
         prevT1Vol = Double.NaN; zoneSeq = 0; setupSeq = 0
         processed = 0; curBi = -1; curT = 0; curVol = 0.0; prevChartVol = Double.NaN
+        // شمارنده‌ها هم باید با هر «اجرای از صفر» پاک شوند؛ وگرنه آمار بازسازیِ قبلی روی
+        // آمار جدید جمع می‌شود و گزارش/هشدار «فیلتر کارمزد» عدد اشتباه نشان می‌دهد.
+        cnt.setup = 0; cnt.touch = 0; cnt.mid = 0; cnt.lv = 0; cnt.hv = 0
+        cnt.entry = 0; cnt.done = 0; cnt.zoneRejected = 0
+        cnt.slCostBlocked = 0; cnt.slNBlocked = 0; cnt.windowBlocked = 0
+        slDistSamples.clear()
         t2History.clear(); t1History.clear()
         zoneRefH = Double.NaN; zoneRefL = Double.NaN
         livePreview.clear(); liveCandle = null
@@ -2176,6 +2230,7 @@ class Engine(val cfg: Settings) {
         // طبق برنامه مسلح می‌شود.
         if (!MarketHours.isOrderWindow(cd.t)) {
             clearHvMark(s)
+            cnt.windowBlocked++
             lg("ENGINE", "مسلح‌شدن ستاپ #${s.id} انجام نشد — خارج از پنجرهٔ سفارش‌گیری (۰۱:۳۰ تا ۲۰:۰۰ UTC)؛ ستاپ فعال می‌ماند و اسکن ولوم زیاد ادامه دارد (§18-26 سند)",
                 "bar=$curBi")
             return
@@ -2219,18 +2274,29 @@ class Engine(val cfg: Settings) {
         // سفارش باطل است (علت: SL>N). HV مطابق ستاپ می‌ماند و ستاپ تا پر/منقضی/باطل‌شدن HV
         // ادامه دارد، ولی روی این HV سفارشی ثبت نمی‌شود و در بک‌تست هم حسابی ندارد.
         val slDist = abs(eRef - s.sl)
-        // سند ۶ (§۵-۳): فاصلهٔ حد ضرر باید دست‌کم «ضریب × هزینهٔ رفت‌وبرگشت» باشد؛ در غیر این
-        // صورت کارمزد کل سود انتظاری را می‌خورد و سفارش ثبت نمی‌شود.
-        val costPerUnit = broker?.mm?.spread() ?: 0.0
+        if (slDistSamples.size < SL_SAMPLE_CAP) slDistSamples.add(slDist)
+        // سند ۶/۷ (§۵-۳): فاصلهٔ حد ضرر باید دست‌کم «ضریب × هزینهٔ رفت‌وبرگشت هر واحد» باشد؛
+        // در غیر این صورت کارمزد کل سود انتظاری را می‌خورد و سفارش ثبت نمی‌شود.
+        //
+        // ⚠ هزینه فقط وقتی هست که مود §۲۰ روشن باشد: طبق §۵-۱ سند، مود پیش‌فرض اپ «بدون
+        // کارمزد» است و کمیسیون هم همان‌جا ۰ حساب می‌شود ([MoneyManager.commissionFor]).
+        // پیش‌تر این‌جا مستقیم `mm.spread()` خوانده می‌شد، پس یک اسپردِ ذخیره‌شده از یک بار
+        // روشن‌بودن مود §۲۰، بعد از خاموش‌کردن مود هم فیلتر را فعال نگه می‌داشت و همهٔ
+        // سفارش‌ها بی‌صدا رد می‌شدند — «همه‌چیز صفر شد و برنگشت».
+        val mm = broker?.mm
+        val moneyModeOn = mm != null && mm.active
+        val costPerUnit = if (moneyModeOn) mm!!.spread() else 0.0
         if (cfg.minSlCostMult > 0.0 && costPerUnit > 0.0 && slDist < cfg.minSlCostMult * costPerUnit) {
+            cnt.slCostBlocked++
             if (s.slBlockedHvBi != s.hvBi) {
                 s.slBlockedHvBi = s.hvBi
-                lg("ENGINE", "سفارش ستاپ #${s.id} ثبت نمی‌شود — فاصلهٔ حد ضرر (${f2(slDist)}) کمتر از ${f2(cfg.minSlCostMult)}×هزینه (${f2(costPerUnit)}) است (§۵-۳ سند ۶)",
+                lg("ENGINE", "سفارش ستاپ #${s.id} ثبت نمی‌شود — فاصلهٔ حد ضرر (${f2(slDist)}) کمتر از ${f2(cfg.minSlCostMult)}×هزینه (${f2(cfg.minSlCostMult * costPerUnit)}) است (§۵-۳ سند ۷؛ هزینهٔ هر واحد ${f2(costPerUnit)})",
                     "entry=${f2(eRef)} sl=${f2(s.sl)} bar=$curBi")
             }
             return
         }
         if (slDist > cfg.maxSlUnits) {
+            cnt.slNBlocked++
             if (s.slBlockedHvBi != s.hvBi) {
                 s.slBlockedHvBi = s.hvBi
                 lg("ENGINE", "سفارش ستاپ #${s.id} ثبت نمی‌شود — فاصلهٔ حد ضرر از سطح سفارش (${f2(slDist)}) بیشتر از N=${f2(cfg.maxSlUnits)} است (SL>N، §18-31 سند)؛ HV و ستاپ ادامه دارند",

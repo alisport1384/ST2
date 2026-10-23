@@ -82,6 +82,12 @@ class AppState {
     var lastLivePrice: Double = Double.NaN
     var lastFeedAt: Long = 0L
     var lastFeedError: String? = null
+    /**
+     * تشخیص «چرا نتیجه صفر شد» — فقط وقتی پر می‌شود که آخرین بازسازی **هیچ سفارشی** نساخته
+     * باشد ولی موتور ستاپ/HV داشته است. رشتهٔ کوتاه فارسی برای نمایش در بنر/تب معاملات.
+     * (توسط [diagnoseEmptyRun] بعد از هر rebuild پر می‌شود.)
+     */
+    @Volatile var zeroRunReason: String? = null
     var lastPriceSource: String = "—"
     var autosaveEveryMs: Long = 120000L
 
@@ -297,7 +303,9 @@ class AppState {
     /** راه‌اندازی لاگر و هشدارها + وصل کردن آن‌ها به موتور و کارگزار */
     fun initApp(ctx: Context) {
         appCtx = ctx.applicationContext
-        Log.init(appCtx!!, "1.4.21")
+        // ⚠ نسخهٔ لاگ باید با versionName واقعی یکی باشد؛ این رشته دستی و جامانده بود
+        // («1.4.21») و تشخیص نسخهٔ کاربر از روی لاگ را بی‌اعتبار می‌کرد.
+        Log.init(appCtx!!, APP_VERSION)
         Alerts.init(appCtx!!)
         val p = appCtx!!.getSharedPreferences("goldpin", Context.MODE_PRIVATE)
         // نشست ذخیره‌شدهٔ کاربر (زنده/بک‌تست داخلی) — تا بعد از بستن و باز کردن اپ،
@@ -525,6 +533,21 @@ class AppState {
         }
         synchronized(stateLock) {
         val execCandles = if (modeCandles.isNotEmpty()) modeCandles else candles
+        // ── گارد «سری نامعتبر» ──────────────────────────────────────────────────
+        // اگر سری مود از تایم‌فریم مود **درشت‌تر** باشد (مثلاً بعد از تغییر مود، سری H1
+        // مانده و مود M1 شده)، اجرای موتور روی آن نه‌فقط بی‌معنا بلکه مخرب است: کارگزار
+        // reset می‌شود و نتیجهٔ «صفر ستاپ/صفر سفارش» منتشر می‌شود و همان روی صفحه می‌ماند.
+        // در این حالت هیچ‌چیز بازنویسی نمی‌شود؛ نتیجهٔ معتبر قبلی سر جایش می‌ماند و
+        // پیام «منتظر تاریخچهٔ مود جدید» نشان داده می‌شود (دانلود، خودش بازسازی می‌کند).
+        if (execCandles.isNotEmpty() && !seriesFitsMode(execCandles)) {
+            val st = com.alisport.goldpin.core.SeriesPick.stepOf(execCandles)
+            Log.w(Log.CAT_ENGINE, "بازسازی متوقف شد — سری مود با تایم‌فریم مود نمی‌خواند",
+                "سری=${execCandles.size} کندل با فاصلهٔ ${st}s · tf2=${com.alisport.goldpin.core.Tf.label(cfg.tf2)} " +
+                    "· نتیجهٔ قبلی دست‌نخورده ماند")
+            lastFeedError = "دادهٔ ${com.alisport.goldpin.core.Tf.label(cfg.tf2)} برای این مود در حافظه نیست — منتظر تاریخچه"
+            notifyUi()
+            return
+        }
         val t0 = System.currentTimeMillis()
         // §4-5 سند: ناحیه‌های ابطال‌نشده باید ثبت/نگهداری شوند و بعد از بازسازی موتور هم
         // دوباره فراخوانی شوند. باکس‌هایی که پیش از پنجرهٔ دادهٔ تازه ساخته شده‌اند از خودِ
@@ -552,6 +575,15 @@ class AppState {
         try {
             if (execCandles.isNotEmpty()) {
                 val structureHistory = availableStructureHistory(cfg.tfS)
+                // هشدار «عمق ساختار»: اگر تاریخچهٔ تایم‌فریم ساختار فقط چند کندل باشد (مثلاً
+                // تغییر «ساختار» به W1 روی دادهٔ یک‌ماهه)، نتیجه کم‌عمق و بی‌ستاپ می‌شود.
+                // این پیام فقط راهنماست؛ نتیجهٔ محاسبه‌شده دست نمی‌خورد.
+                if (structureHistory.size in 1..7) {
+                    lastFeedError = "تاریخچهٔ ${com.alisport.goldpin.core.Tf.label(cfg.tfS)} کم است " +
+                        "(${Fa.d(structureHistory.size.toString())} کندل) — برای نتیجهٔ کامل، ↻ (بارگذاری مجدد) را بزنید"
+                    Log.w(Log.CAT_ENGINE, "تاریخچهٔ ساختار کوتاه است",
+                        "tfS=${com.alisport.goldpin.core.Tf.label(cfg.tfS)} کندل=${structureHistory.size}")
+                }
                 val seeded = engine.seedStructureHistory(structureHistory, execCandles.first().t)
                 if (seeded > 0) {
                     Log.i(Log.CAT_ENGINE, "توالی‌های تاریخی ساختار پیش‌بارگذاری شد",
@@ -579,30 +611,96 @@ class AppState {
             "مدت=${System.currentTimeMillis() - t0}ms پردازش‌شده=${engine.processed} ستاپ=${engine.cnt.setup} برخورد=${engine.cnt.touch} " +
                 "میانی=${engine.cnt.mid} ولوم‌کم=${engine.cnt.lv} ولوم‌زیاد=${engine.cnt.hv} ورود=${engine.cnt.entry} پایان=${engine.cnt.done} " +
                 "باکس=${engine.zones.size} (بازگردانده‌شده=${Fa.d(carried.toString())}) سفارش=${broker.orders.size} معامله=${broker.trades.size} موجودی=${Fa.n(broker.balance, 2)}")
+        diagnoseEmptyRun()
         publishSnapshot()
         notifyUi()
         }
     }
 
-    private fun aggregateBestAvailable(targetTfSec: Int): List<Candle> {
-        if (targetTfSec == cfg.tf2 && modeCandles.isNotEmpty()) return modeCandles
-        val fineStep = medianStepSec(fineCandles)
-        val modeStep = medianStepSec(modeCandles)
-        val curStep = medianStepSec(candles)
-        val src = when {
-            !modeFromFeed && fineCandles.isNotEmpty() && fineStep in 1L..targetTfSec.toLong() -> fineCandles
-            modeCandles.isNotEmpty() && modeStep in 1L..targetTfSec.toLong() -> modeCandles
-            fineCandles.isNotEmpty() && fineStep in 1L..targetTfSec.toLong() -> fineCandles
-            candles.isNotEmpty() && curStep in 1L..targetTfSec.toLong() -> candles
-            modeCandles.isNotEmpty() -> modeCandles
-            fineCandles.isNotEmpty() -> fineCandles
-            else -> candles
+    /**
+     * چرا آخرین بازسازی «صفر سفارش» داد؟ (باگ گزارش‌شده: «مود را عوض می‌کنم همهٔ معاملات صفر می‌شود»)
+     *
+     * سه علت واقعی که در لاگ کاربر دیده شد، هر سه با یک عدد قابل تشخیص‌اند:
+     *  ۱) فیلتر کارمزد (§۵-۳): فاصلهٔ حد ضرر از «ضریب × هزینه» کمتر است. اگر میانهٔ فاصله‌ها از
+     *     آستانه کمتر باشد، **هیچ** سفارشی ثبت نمی‌شود — بی‌صدا و برای همیشه.
+     *  ۲) پنجرهٔ سفارش‌گیری (۰۱:۳۰–۲۰:۰۰ UTC): تأییدهای HV همه بیرون پنجره رد شده‌اند.
+     *  ۳) سری دادهٔ ناقص/نامعتبر (که در ۱٫۴٫۳۹ با گاردهای سری پوشش داده شد).
+     * تشخیص فقط **گزارش** است؛ هیچ تصمیمی را عوض نمی‌کند.
+     */
+    private fun diagnoseEmptyRun() {
+        val orders = broker.orders.size
+        val st = engine.cnt
+        val median = engine.slDistMedian()
+        val thr = engine.slCostThreshold()
+        val parts = ArrayList<String>()
+        if (orders == 0) {
+            if (cfg.minSlCostMult > 0.0 && thr > 0.0 && st.slCostBlocked > 0 &&
+                !median.isNaN() && median < thr) {
+                parts.add(
+                    "فیلتر کارمزد: میانهٔ فاصلهٔ حد ضرر ${Fa.n(median, 2)} از آستانه ${Fa.n(thr, 2)} " +
+                    "(=${Fa.n(cfg.minSlCostMult, 0)}× هزینهٔ ${Fa.n(engine.slCostPerUnit(), 2)}) کمتر است ⇒ هیچ سفارشی ثبت نشد"
+                )
+            }
+            if (st.windowBlocked > 0) {
+                parts.add("${Fa.d(st.windowBlocked.toString())} مسلح‌شدن بیرون پنجرهٔ سفارش‌گیری (۰۱:۳۰–۲۰:۰۰ UTC) رد شد")
+            }
+            if (st.slNBlocked > 0) {
+                parts.add("${Fa.d(st.slNBlocked.toString())} سفارش با سقف حد ضرر N=${Fa.n(cfg.maxSlUnits, 2)} رد شد")
+            }
+            if (engine.processed == 0) parts.add("هیچ کندلی به موتور نرسید")
         }
-        if (src.isEmpty()) return emptyList()
-        val srcStep = medianStepSec(src)
-        val agg = if (sameTimeframe(srcStep, targetTfSec.toLong())) src else Feed.aggregate(src, targetTfSec)
+        val reason = if (parts.isEmpty()) null else parts.joinToString(" · ")
+        zeroRunReason = reason
+        if (reason != null) {
+            Log.w(Log.CAT_ENGINE, "نتیجهٔ بازسازی صفر سفارش دارد", reason)
+        }
+    }
+
+    private fun aggregateBestAvailable(targetTfSec: Int): List<Candle> {
+        if (targetTfSec <= 0) return emptyList()
+        // ترتیب اولویت منابع: دادهٔ ریز محلی (CSV/نمونه) → سری مود → دادهٔ ریز → سری چارت.
+        // ⚠ هیچ‌کدام «اجباری» نیست: اگر هیچ منبعی از تایم‌فریم هدف ریزتر نبود، خروجی خالی است.
+        // (قبلاً همین‌جا آخرین گزینه‌ها هر سری‌ای — حتی درشت‌تر — را برمی‌گرداندند و همان
+        //  باعث می‌شد بعد از تغییر مود، دادهٔ مود قبلی به‌عنوان دادهٔ مود جدید به موتور برود.)
+        val sources = if (!modeFromFeed) listOf(fineCandles, modeCandles, candles)
+                      else listOf(modeCandles, fineCandles, candles)
+        val src = com.alisport.goldpin.core.SeriesPick.firstUsable(targetTfSec, sources) ?: return emptyList()
+        val srcStep = com.alisport.goldpin.core.SeriesPick.stepOf(src)
+        val agg = if (com.alisport.goldpin.core.SeriesPick.sameTf(srcStep, targetTfSec.toLong())) src
+                  else Feed.aggregate(src, targetTfSec)
         return if (useSyntheticVolume) Feed.synthesizeVolumeIfMissing(agg) else agg
     }
+
+    /**
+     * ضریب پیشنهادی برای «فیلتر کارمزد» از دادهٔ همین اجرا.
+     *
+     * اگر فیلتر همهٔ سفارش‌ها را رد کرده باشد (میانهٔ فاصلهٔ حد ضرر < آستانه)، این تابع ضریبی
+     * می‌دهد که آستانه‌اش ۸۰٪ میانهٔ فاصلهٔ واقعی باشد ⇒ بخش عمدهٔ سفارش‌ها دوباره مجاز می‌شوند
+     * بدون اینکه فیلتر بی‌اثر شود. NaN = داده‌ای برای پیشنهاد نیست.
+     */
+    fun suggestedCostMult(): Double {
+        val median = engine.slDistMedian()
+        val cost = engine.slCostPerUnit()
+        if (median.isNaN() || median <= 0.0 || cost <= 0.0) return Double.NaN
+        val k = median * 0.8 / cost
+        // حداقل ۱ (کمتر از یک یعنی «فیلتر عملاً خاموش»)؛ با یک رقم اعشار.
+        return Math.round(maxOf(1.0, k) * 10.0) / 10.0
+    }
+
+    /** اعمال ضریب پیشنهادی و بازسازی. خروجی: متن نتیجه برای toast. */
+    fun applySuggestedCostMult(): String {
+        val k = suggestedCostMult()
+        if (k.isNaN()) return "برای پیشنهاد ضریب، اول یک بازسازی با مود §۲۰ انجام دهید"
+        val before = cfg.minSlCostMult
+        cfg.minSlCostMult = k
+        Log.i(Log.CAT_CFG, "ضریب فیلتر کارمزد از داده تنظیم شد", "قبلی=${Fa.n(before, 2)} جدید=${Fa.n(k, 2)}")
+        rebuildAsync()
+        return "ضریب فیلتر کارمزد: ${Fa.n(before, 2)} → ${Fa.n(k, 2)} (آستانه ${Fa.n(engine.slCostPerUnit() * k, 2)})"
+    }
+
+    /** آیا سری [list] می‌تواند مبنای تایم‌فریم مود فعلی (cfg.tf2) باشد؟ */
+    private fun seriesFitsMode(list: List<Candle>): Boolean =
+        list.isNotEmpty() && com.alisport.goldpin.core.SeriesPick.canBuild(cfg.tf2, list)
 
     /**
      * گردآوری قدیمی‌ترین تاریخچهٔ قابل‌استفاده برای تایم‌فریم ساختار از همهٔ منابع
@@ -736,13 +834,32 @@ class AppState {
         io.execute {
             try {
                 val cached = tfFeedCache[cfg.tf2]
-                if (modeFromFeed && cached != null && cached.isNotEmpty()) {
-                    setCandles(cached, rebuildNow = false)
-                } else if (tfChanged || !sameTimeframe(medianStepSec(modeCandles), cfg.tf2.toLong())) {
-                    val local = aggregateBestAvailable(cfg.tf2)
-                    if (local.isNotEmpty()) setCandles(local, rebuildNow = false)
+                val source = when {
+                    cached != null && seriesFitsMode(cached) -> cached
+                    tfChanged || !seriesFitsMode(modeCandles) -> aggregateBestAvailable(cfg.tf2)
+                    else -> modeCandles                       // سری فعلی، خودش همین تایم‌فریم است
                 }
-                rebuild()
+                val haveSeries = seriesFitsMode(source)
+                if (haveSeries) setCandles(source, rebuildNow = false)
+                // ⚠ بازسازی موتور فقط وقتی انجام می‌شود که در همین مود دانلودی در راه نباشد.
+                // دلیل باگ «تغییر مود ⇒ سفارش‌ها صفر» همین بود: setMode اول روی دادهٔ محلی
+                // (تجمیع کوتاه ۷ روزه یا حتی سری نامعتبر) موتور را از صفر اجرا می‌کرد، کارگزار
+                // reset می‌شد و نتیجهٔ «صفر ستاپ/صفر سفارش» منتشر می‌شد؛ اگر دانلود هم (به‌خاطر
+                // شرط modeFromFeed) اجرا نمی‌شد، همان صفر تا ابد روی صفحه می‌ماند.
+                // حالا نتیجهٔ معتبر قبلی دست‌نخورده می‌ماند تا دانلود تاریخچهٔ مود تمام شود و
+                // خودش یک‌بار، کامل و روی دادهٔ درست بازسازی کند.
+                if (m.custom) {
+                    if (haveSeries) rebuild()
+                    else {
+                        lastFeedError = "سری ${com.alisport.goldpin.core.Tf.label(cfg.tf2)} در حافظه نیست"
+                        Log.w(Log.CAT_CFG, "مود سفارشی بدون سری معتبر — بازسازی انجام نشد", "")
+                    }
+                } else {
+                    Log.i(Log.CAT_CFG, "مود عوض شد — بازسازی به پایان دانلود تاریخچه موکول شد",
+                        "مود=${m.idx} tf2=${com.alisport.goldpin.core.Tf.label(cfg.tf2)} " +
+                            "سری‌محلی=${if (haveSeries) "${source.size} کندل" else "نامعتبر/خالی"}")
+                    lastFeedError = "تاریخچهٔ ${com.alisport.goldpin.core.Tf.label(cfg.tf2)} در حال دانلود است…"
+                }
             } catch (e: Throwable) {
                 Log.e(Log.CAT_ENGINE, "تغییر مود ناموفق بود", e)
                 lastFeedError = "خطای تغییر مود: ${e.message}"
@@ -754,8 +871,15 @@ class AppState {
         }
         // با تغییر مود، تاریخچهٔ تایم‌فریم ساختار هم باید از منبع مناسب آن مود گرفته شود؛
         // سری نمایش چارت به‌تنهایی موتور را بازسازی نمی‌کند.
-        if (!m.custom && modeFromFeed) {
-            downloadHistory()
+        // ⚠ شرط قبلی `modeFromFeed` بود: بعد از هر بار بازیابی فایل نشست (که این پرچم false است)
+        // تغییر مود هرگز دانلود نمی‌کرد ⇒ موتور روی دادهٔ ناقص/نامعتبر می‌ماند و «صفر سفارش» دائمی می‌شد.
+        if (!m.custom) {
+            downloadHistory(forceRebuild = true) { msg ->
+                if (msg.startsWith("خطای دانلود")) {
+                    Log.w(Log.CAT_CFG, "دانلود تاریخچهٔ مود ناموفق بود؛ بازسازی با دادهٔ موجود", msg)
+                    rebuildAsync()
+                }
+            }
         }
     }
 
@@ -771,13 +895,34 @@ class AppState {
             notifyUi()
             return
         }
+        // اگر تاریخچهٔ این تایم‌فریم در کش نیست، دانلودی در راه است؛ بازسازی به پایان آن موکول
+        // می‌شود (همان قاعدهٔ setMode: هرگز نتیجهٔ خالی/کوتاه منتشر نشود).
+        val willDownload = tfFeedCache[newTf2] == null
         io.execute {
-            val cached = tfFeedCache[newTf2]
-            val local = if (modeFromFeed && cached != null && cached.isNotEmpty()) cached else aggregateBestAvailable(newTf2)
-            if (local.isNotEmpty()) setCandles(local, rebuildNow = true) else rebuild()
+            try {
+                val cached = tfFeedCache[newTf2]
+                val local = when {
+                    cached != null && seriesFitsMode(cached) -> cached
+                    else -> aggregateBestAvailable(newTf2)
+                }
+                if (seriesFitsMode(local)) {
+                    setCandles(local, rebuildNow = !willDownload)
+                } else {
+                    Log.i(Log.CAT_CFG, "تایم‌فریم مود سفارشی عوض شد ولی سری معتبر نیست — بازسازی موکول به دانلود",
+                        "tf2=${com.alisport.goldpin.core.Tf.label(newTf2)} سری‌فعلی=${modeCandles.size} کندل")
+                    lastFeedError = "تاریخچهٔ ${com.alisport.goldpin.core.Tf.label(newTf2)} در حال دانلود است…"
+                    notifyUi()
+                }
+            } catch (e: Throwable) {
+                Log.e(Log.CAT_ENGINE, "تغییر تایم‌فریم مود سفارشی ناموفق بود", e)
+                lastFeedError = "خطای تغییر تایم‌فریم: ${e.message}"
+                notifyUi()
+            }
         }
-        if (modeFromFeed && tfFeedCache[newTf2] == null) {
-            downloadHistory()
+        if (willDownload) {
+            downloadHistory(forceRebuild = true) { msg ->
+                if (msg.startsWith("خطای دانلود")) rebuildAsync()
+            }
         }
     }
 
@@ -1057,21 +1202,12 @@ class AppState {
     }
 
     /** فاصلهٔ میانی کندل‌ها بر حسب ثانیه (برای تشخیص تایم‌فریم واقعی یک سری) */
-    private fun medianStepSec(list: List<Candle>): Long {
-        if (list.size < 2) return 0L
-        val steps = ArrayList<Long>(list.size - 1)
-        for (i in 1 until list.size) {
-            val d = (list[i].t - list[i - 1].t) / 1000L
-            if (d > 0) steps.add(d)
-        }
-        if (steps.isEmpty()) return 0L
-        steps.sort()
-        return steps[steps.size / 2]
-    }
+    private fun medianStepSec(list: List<Candle>): Long =
+        com.alisport.goldpin.core.SeriesPick.stepOf(list)
 
     /** دو فاصلهٔ زمانی «یک تایم‌فریم» حساب می‌شوند؟ (تحمل ۱٫۵ برابر برای لرزش داده) */
     private fun sameTimeframe(a: Long, b: Long): Boolean =
-        a > 0 && b > 0 && minOf(a, b) * 3 >= maxOf(a, b) * 2
+        com.alisport.goldpin.core.SeriesPick.sameTf(a, b)
 
     /**
      * حداکثر کندل بسته‌ای که یک تیک لایو «طبیعی» ممکن است جدید ببیند. بیشتر از این
@@ -2026,6 +2162,17 @@ class AppState {
             main.post {
                 busy = false
                 busyText = ""
+                // اطلاع مهاجرت اسپرد خودکار (فقط یک‌بار، همان لحظهٔ بازکردن فایل قدیمی)
+                if (cfg.cmsnMigratedFromAuto > 0.0) {
+                    Alerts.bannerSink?.invoke(
+                        "اسپرد خودکار بروکر (${Fa.n(cfg.cmsnMigratedFromAuto, 2)}) با فیلتر کارمزد، همهٔ سفارش‌ها را رد می‌کرد؛ " +
+                            "به کارمزد دستی ${Fa.n(cfg.cmsnManual, 2)} تغییر کرد (تنظیمات ⑥). عدد واقعی بروکر خود را وارد کنید.",
+                        0, "warn"
+                    )
+                    Log.w(Log.CAT_CFG, "مهاجرت اسپرد خودکار → دستی",
+                        "قبلی=${Fa.n(cfg.cmsnMigratedFromAuto, 2)} جدید=${Fa.n(cfg.cmsnManual, 2)}")
+                    cfg.cmsnMigratedFromAuto = 0.0
+                }
                 onDone(msg)
                 ensureBrokerSpread()      // §۲۰: اگر cmsn «خودکار» است و هنوز اسپردی ذخیره نشده، یک‌بار بگیر
             }
@@ -2043,11 +2190,22 @@ class AppState {
                 modeFromFeed = false
                 tfFeedCache.clear()
                 if (baseTfGuess <= 90 && raw.isNotEmpty()) fineCandles = ArrayList(raw)
+                // اگر تایم‌فریم فایل از تایم‌فریم مود درشت‌تر باشد، «ساختن» مود از آن ممکن نیست
+                // (تجمیع معکوس فقط برچسب زمان را عوض می‌کند و دادهٔ جعلی می‌سازد). پس مود
+                // با تایم‌فریم واقعی فایل هم‌تراز می‌شود و همان به کاربر گفته می‌شود.
+                var tfNote = ""
+                if (baseTfGuess > 0 && baseTfGuess > cfg.tf2) {
+                    Log.w(Log.CAT_FEED, "تایم‌فریم فایل از مود درشت‌تر است — مود هم‌تراز فایل شد",
+                        "فایل=${com.alisport.goldpin.core.Tf.label(baseTfGuess)} مود=${com.alisport.goldpin.core.Tf.label(cfg.tf2)}")
+                    cfg.tf2 = baseTfGuess
+                    chartTfSec = baseTfGuess
+                    tfNote = " · تایم‌فریم مود با فایل هم‌تراز شد (${com.alisport.goldpin.core.Tf.label(baseTfGuess)})"
+                }
                 var modeList = if (baseTfGuess != cfg.tf2) Feed.aggregate(raw, cfg.tf2) else raw
                 if (useSyntheticVolume) modeList = Feed.synthesizeVolumeIfMissing(modeList)
                 setCandles(modeList, rebuildNow = true)
                 main.post {
-                    onDone("وارد شد: ${com.alisport.goldpin.util.Fa.d(candles.size.toString())} کندل")
+                    onDone("وارد شد: ${com.alisport.goldpin.util.Fa.d(candles.size.toString())} کندل$tfNote")
                 }
             } catch (e: Exception) {
                 Log.e(Log.CAT_FEED, "خطای ورود فایل CSV", e)
@@ -2057,6 +2215,9 @@ class AppState {
     }
 
     companion object {
+        /** نسخهٔ نمایشی — تنها منبع حقیقت برای هدر لاگ. با `versionName` در build.gradle یکی نگه دارید. */
+        const val APP_VERSION = "1.4.40"
+
         val instance = AppState()
 
         /** از MainActivity فراخوانی می‌شود: لاگر + هشدارها را آماده و وصل می‌کند */

@@ -35,6 +35,71 @@ class SpecRevTest {
     }
 
     @Test
+    fun `spec rev 7 upgrades untouched trading-mode defaults and keeps custom ones`() {
+        // فایل نسخهٔ ۶ با پیش‌فرض‌های قدیمی (معکوس خاموش / هدف ۰ / فیلتر ۰) ⇒ پیش‌فرض‌های سند ۷
+        val old = Settings().apply { trigger2Fade = false; trigger2TargetR = 0.0; minSlCostMult = 0.0 }
+        val oldJson = Store.save(old, Engine(old), PaperBroker(old), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":6")
+        val migrated = Store.load(oldJson).cfg
+        assertTrue(migrated.trigger2Fade, "سند ۷: تریگر ۲ معکوس پیش‌فرض روشن است")
+        assertEquals(4.0, migrated.trigger2TargetR, "سند ۷: هدف پیش‌فرض ۴R")
+        assertEquals(6.0, migrated.minSlCostMult, "سند ۷: فیلتر کارمزد ۶")
+
+        // اگر کاربر حتی یکی از این سه را دست‌کاری کرده باشد، هیچ‌کدام عوض نمی‌شود
+        val custom = Settings().apply { trigger2Fade = false; trigger2TargetR = 3.0; minSlCostMult = 0.0 }
+        val customJson = Store.save(custom, Engine(custom), PaperBroker(custom), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":6")
+        val kept = Store.load(customJson).cfg
+        assertFalse(kept.trigger2Fade, "انتخاب کاربر نباید عوض شود")
+        assertEquals(3.0, kept.trigger2TargetR, 1e-9)
+        assertEquals(0.0, kept.minSlCostMult, 1e-9)
+
+        // پروندهٔ تازه (specRev جاری) دست‌نخورده می‌ماند
+        val fresh = Store.save(Settings(), Engine(Settings()), PaperBroker(Settings()), emptyList())
+        assertTrue(Store.load(fresh).cfg.trigger2Fade)
+    }
+
+    @Test
+    fun `spec rev 8 demotes a stored retail broker spread that would block every order`() {
+        // سناریوی لاگ واقعی کاربر (SM-J810F، مهر ۱۴۰۵): مود Mixed/ManageAllLost روشن ⇒ اپ اسپرد
+        // Swissquote را ۰٫۶۶ گرفت و ذخیره کرد ⇒ با فیلتر ۶× آستانهٔ ۳٫۹۶ ساخته شد و **۲۱۷ سفارش
+        // از ۲۱۷** رد شد (میانهٔ فاصلهٔ حد ضرر ۱٫۹۸). نتیجه: «کل معاملات صفر».
+        val old = Settings().apply {
+            cmsnAuto = true; cmsnAutoValue = 0.66; cmsnManual = 0.0; minSlCostMult = 6.0
+        }
+        val json = Store.save(old, Engine(old), PaperBroker(old), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":7")
+        val migrated = Store.load(json).cfg
+        assertFalse(migrated.cmsnAuto, "اسپرد خودکارِ بزرگ نباید مبنای فیلتر بماند")
+        assertEquals(0.20, migrated.cmsnManual, 1e-9, "مبنا: عدد مرجع سند برای طلا")
+        assertEquals(0.66, migrated.cmsnMigratedFromAuto, 1e-9, "مقدار قبلی برای اطلاع‌دادن نگه داشته می‌شود")
+        // با ضریب ۶ و هزینهٔ ۰٫۲۰ آستانه ۱٫۲۰ می‌شود ⇒ بخش زیادی از سفارش‌ها مجاز می‌مانند.
+        assertEquals(1.20, 6.0 * migrated.cmsnManual, 1e-9)
+
+        // عدد دستیِ کاربر هرگز با مهاجرت عوض نمی‌شود
+        val manual = Settings().apply {
+            cmsnAuto = true; cmsnAutoValue = 0.66; cmsnManual = 0.35; minSlCostMult = 6.0
+        }
+        val json2 = Store.save(manual, Engine(manual), PaperBroker(manual), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":7")
+        val m2 = Store.load(json2).cfg
+        assertFalse(m2.cmsnAuto)
+        assertEquals(0.35, m2.cmsnManual, 1e-9, "مقدار دستی کاربر باید حفظ شود")
+
+        // اسپرد کوچک/معقول خودکار دست‌نخورده می‌ماند (زیر آستانهٔ ۰٫۵)
+        val small = Settings().apply { cmsnAuto = true; cmsnAutoValue = 0.18; minSlCostMult = 6.0 }
+        val json3 = Store.save(small, Engine(small), PaperBroker(small), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":7")
+        val m3 = Store.load(json3).cfg
+        assertTrue(m3.cmsnAuto, "اسپرد معقول خودکار نباید خاموش شود")
+        assertEquals(0.18, m3.cmsnAutoValue, 1e-9)
+
+        // فایل تازه (پیش‌فرض ۱٫۴٫۴۰): خودکار خاموش است ⇒ فیلتر فقط با عدد دستی کار می‌کند
+        val fresh = Settings()
+        assertFalse(fresh.cmsnAuto, "پیش‌فرض تازه: بدون اسپرد خودکار (§۵: اپ بدون کارمزد)")
+    }
+
+    @Test
     fun `doc 18-32 fib anchor uses the trend-extreme pin rather than cleared HH or LL label`() {
         val e = Engine(Settings())
         e.trend = 1

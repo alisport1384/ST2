@@ -29,13 +29,14 @@ class DocFadeTest {
         return out
     }
 
-    private fun run(fade: Boolean, targetR: Double, costMult: Double = 0.0, cmsn: Double = 0.0): Triple<Engine, PaperBroker, Setup?> {
+    private fun run(fade: Boolean, targetR: Double, costMult: Double = 0.0, cmsn: Double = 0.0,
+                    mm: Int = MoneyMode.NONE): Triple<Engine, PaperBroker, Setup?> {
         val cfg = Settings().apply {
             vpRows = 24; vpSmooth = 0; distMode = VolumeProfile.DIST_UNIFORM
             tfMode = 1; tfS = Tf.H1; tfM = Tf.M15; tf1 = Tf.M5; tf2 = Tf.M1
             mintick = 0.01; slBufTicks = 2.0; entryBufTicks = 1.0; minTPunits = 10.0
             maxSlUnits = 3.0; maxLeverage = 500.0; riskPct = 1.0; initialEquity = 100_000.0
-            contractSize = 1.0; strategy = Strategy.DOC; mmMode = MoneyMode.NONE
+            contractSize = 1.0; strategy = Strategy.DOC; mmMode = mm
             hvScanFirstTouch = true
             trigger2Fade = fade
             trigger2TargetR = targetR
@@ -81,11 +82,26 @@ class DocFadeTest {
     fun `doc six cost filter rejects stop distances smaller than the fee multiple`() {
         // کارمزد/اسپرد ۰٫۲ دلار به‌ازای هر واحد و ضریب ۶ ⇒ حد ضرر باید دست‌کم ۱٫۲ دلار باشد.
         // فاصلهٔ این سناریو ۰٫۵۳ دلار است ⇒ سفارش نباید ثبت شود.
-        val (_, b0, _) = run(fade = true, targetR = 3.0, costMult = 0.0, cmsn = 0.2)
+        //
+        // ⚠ کارمزد فقط در مودهای §۲۰ وجود دارد (§۵-۱: «مود پیش‌فرض اپ بدون کارمزد است»).
+        // پیش‌تر این تست با `mmMode = NONE` اجرا می‌شد و درنتیجه هزینهٔ ۰٫۲ دلاریِ تنظیمات را
+        // «کارمزد واقعی» می‌گرفت — همان فرضی که باگ «مود §۲۰ روشن ⇒ همهٔ سفارش‌ها صفر» را ساخت:
+        // اسپرد ذخیره‌شدهٔ بروکر (۰٫۶۶) بعد از خاموش‌کردن مود هم فیلتر را فعال نگه می‌داشت.
+        val mmAllLost = MoneyMode.MANAGE_ALL_LOST
+        val (_, b0, _) = run(fade = true, targetR = 3.0, costMult = 0.0, cmsn = 0.2, mm = mmAllLost)
         assertEquals(1, b0.orders.size, "بدون فیلتر کارمزد، سفارش ثبت می‌شود")
-        val (_, b1, _) = run(fade = true, targetR = 3.0, costMult = 6.0, cmsn = 0.2)
+        val (_, b1, _) = run(fade = true, targetR = 3.0, costMult = 6.0, cmsn = 0.2, mm = mmAllLost)
         assertEquals(0, b1.orders.size, "با ضریب ۶ و هزینهٔ ۰٫۲ دلار، سفارش ۰٫۵۳ دلاری ثبت نمی‌شود")
-        val (_, b2, _) = run(fade = true, targetR = 3.0, costMult = 2.0, cmsn = 0.2)
+        val (_, b2, _) = run(fade = true, targetR = 3.0, costMult = 2.0, cmsn = 0.2, mm = mmAllLost)
         assertEquals(1, b2.orders.size, "با ضریب ۲ (آستانهٔ ۰٫۴ دلار) سفارش مجاز است")
+    }
+
+    @Test
+    fun `doc five mode has no commission so a stored spread cannot silence the filter`() {
+        // همان اسپرد ۰٫۲ در تنظیمات هست (مثلاً از یک بار روشن‌بودن مود §۲۰)، ولی مود خاموش است:
+        // §۵-۱ می‌گوید در این مود کارمزدی کسر نمی‌شود، پس فیلتر §۵-۳ هم نباید چیزی را رد کند.
+        val (_, b, _) = run(fade = true, targetR = 3.0, costMult = 6.0, cmsn = 0.2, mm = MoneyMode.NONE)
+        assertEquals(1, b.orders.size,
+            "در مود §۵ (بدون کارمزد) اسپردِ ذخیره‌شده نباید سفارش را رد کند")
     }
 }
