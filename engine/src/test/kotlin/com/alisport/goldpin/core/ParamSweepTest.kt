@@ -8,7 +8,7 @@ import kotlin.test.Test
 import org.junit.jupiter.api.Assumptions.assumeTrue
 
 /**
- * جاروب پارامتر روی **دادهٔ واقعی یک‌سالهٔ باندل‌شده** (۳۵۱٬۸۹۴ کندل M1 طلا).
+ * جاروب پارامتر روی **دادهٔ واقعی یک‌سالهٔ موجود در ریپو** (۳۵۱٬۸۹۴ کندل M1 طلا).
  *
  * در اجرای عادی `:engine:test` کاری نمی‌کند؛ فقط با متغیر محیطی `SWEEP_PHASE` اجرا می‌شود:
  *
@@ -24,13 +24,13 @@ class ParamSweepTest {
 
     private companion object {
         fun assetFile(): File? = listOf(
-            "app/src/main/assets/goldpin_xauusd_m1_1y.csv.gz",
-            "../app/src/main/assets/goldpin_xauusd_m1_1y.csv.gz",
-            "/home/user/ST2/app/src/main/assets/goldpin_xauusd_m1_1y.csv.gz"
+            "datasets/goldpin_xauusd_m1_1y.csv.gz",
+            "../datasets/goldpin_xauusd_m1_1y.csv.gz",
+            "/home/user/ST2/datasets/goldpin_xauusd_m1_1y.csv.gz"
         ).map(::File).firstOrNull { it.exists() }
 
         fun loadCandles(): List<Candle> {
-            val f = assetFile() ?: error("دارایی دادهٔ یک‌ساله پیدا نشد")
+            val f = assetFile() ?: error("فایل دادهٔ یک‌ساله پیدا نشد")
             val out = ArrayList<Candle>(360_000)
             GZIPInputStream(f.inputStream().buffered(1 shl 16)).bufferedReader().useLines { lines ->
                 var bi = 0

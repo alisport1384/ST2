@@ -9,18 +9,18 @@ import kotlin.test.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 
 /**
- * دادهٔ یک‌سالهٔ XAUUSD ‏M1 که **داخل خود APK باندل شده** است
- * (`app/src/main/assets/goldpin_xauusd_m1_1y.csv.gz`).
+ * دادهٔ یک‌سالهٔ XAUUSD ‏M1 که در پوشهٔ datasets ریپو نگهداری می‌شود
+ * (`datasets/goldpin_xauusd_m1_1y.csv.gz`).
  *
- * این آزمون «قرارداد فایل» را قفل می‌کند: اگر روزی فایل دارایی عوض/ناقص/جابه‌جا شود،
- * بک‌تست داخلی روی گوشی بی‌صدا خراب می‌شود؛ پس همان‌جا که داده بسته‌بندی می‌شود،
+ * این آزمون «قرارداد فایل» را قفل می‌کند: اگر روزی فایل دیتاست عوض/ناقص/جابه‌جا شود،
+ * بک‌تست داخلی روی گوشی بی‌صدا خراب می‌شود؛ پس همان‌جا که داده در ریپو نگهداری می‌شود،
  * هویتش هم بررسی می‌شود:
  *  • هش و اندازهٔ بایتی (همان مقداری که `Feed.BACKTEST_DATA_SHA256` در اپ دارد)
  *  • تعداد کندل = ۳۵۱٬۸۹۴ (همان `Feed.BACKTEST_DATA_BARS`)
  *  • بازهٔ زمانی دقیقاً یک سال، زمان‌ها صعودی، هیچ کندل بی‌حجم
  *  • موتور واقعاً می‌تواند همین داده را بخورد (یک پاس کوتاه روی ابتدای سال)
  */
-class BundledOneYearDataTest {
+class RepositoryOneYearDataTest {
 
     private companion object {
         /** مقدار مورد انتظار — همان ثابت‌های `Feed` در ماژول اپ. */
@@ -32,10 +32,10 @@ class BundledOneYearDataTest {
         /** ۲۰۲۶-۰۸-۲۰T23:59:00Z */
         const val EXPECT_LAST_MS = 1_787_270_340_000L
 
-        fun assetFile(): File? = listOf(
-            "app/src/main/assets/goldpin_xauusd_m1_1y.csv.gz",
-            "../app/src/main/assets/goldpin_xauusd_m1_1y.csv.gz",
-            "/home/user/ST2/app/src/main/assets/goldpin_xauusd_m1_1y.csv.gz"
+        fun datasetFile(): File? = listOf(
+            "datasets/goldpin_xauusd_m1_1y.csv.gz",
+            "../datasets/goldpin_xauusd_m1_1y.csv.gz",
+            "/home/user/ST2/datasets/goldpin_xauusd_m1_1y.csv.gz"
         ).map(::File).firstOrNull { it.exists() }
     }
 
@@ -60,10 +60,10 @@ class BundledOneYearDataTest {
     }
 
     @Test
-    fun `bundled one-year asset is byte-identical to the published dataset`() {
-        val f = assetFile()
-        assumeTrue(f != null, "دارایی دادهٔ یک‌ساله در دسترس نیست")
-        assertEquals(EXPECT_BYTES, f!!.length(), "اندازهٔ فایل دارایی عوض شده است")
+    fun `repository one-year dataset is byte-identical to the published dataset`() {
+        val f = datasetFile()
+        assumeTrue(f != null, "فایل دادهٔ یک‌ساله در دسترس نیست")
+        assertEquals(EXPECT_BYTES, f!!.length(), "اندازهٔ فایل دیتاست عوض شده است")
 
         val md = MessageDigest.getInstance("SHA-256")
         f.inputStream().buffered(1 shl 16).use { ins ->
@@ -80,9 +80,9 @@ class BundledOneYearDataTest {
     }
 
     @Test
-    fun `bundled one-year asset holds a full tradable year of volume-bearing M1 bars`() {
-        val f = assetFile()
-        assumeTrue(f != null, "دارایی دادهٔ یک‌ساله در دسترس نیست")
+    fun `repository one-year dataset holds a full tradable year of volume-bearing M1 bars`() {
+        val f = datasetFile()
+        assumeTrue(f != null, "فایل دادهٔ یک‌ساله در دسترس نیست")
         val rows = readAll(f!!)
 
         assertEquals(EXPECT_BARS, rows.size, "تعداد کندل دارایی با مقدار مورد انتظار اپ فرق دارد")
@@ -98,14 +98,14 @@ class BundledOneYearDataTest {
             if (r.v <= 0.0) zeroVol++
             if (!(r.h >= maxOf(r.o, r.c) && r.l <= minOf(r.o, r.c) && r.h > 0 && r.l > 0)) badOhlc++
         }
-        assertEquals(0, zeroVol, "کندل بی‌حجم در دادهٔ باندل‌شده پیدا شد")
-        assertEquals(0, badOhlc, "کندل با OHLC نامعتبر در دادهٔ باندل‌شده پیدا شد")
+        assertEquals(0, zeroVol, "کندل بی‌حجم در دادهٔ موجود در دیتاست پیدا شد")
+        assertEquals(0, badOhlc, "کندل با OHLC نامعتبر در دادهٔ موجود در دیتاست پیدا شد")
     }
 
     @Test
-    fun `engine consumes the bundled one-year data without breaking`() {
-        val f = assetFile()
-        assumeTrue(f != null, "دارایی دادهٔ یک‌ساله در دسترس نیست")
+    fun `engine consumes the repository one-year data without breaking`() {
+        val f = datasetFile()
+        assumeTrue(f != null, "فایل دادهٔ یک‌ساله در دسترس نیست")
         val rows = readAll(f!!)
         // پاس کوتاه روی ابتدای سال: ثابت می‌کند همین فایل (نه فقط نمونهٔ کوچک) خوراک موتور است.
         val slice = rows.subList(0, 30_000)
@@ -129,7 +129,7 @@ class BundledOneYearDataTest {
         }
         eng.feed(candles, lastIsClosed = true)
 
-        assertEquals(candles.size, eng.processed, "موتور باید همهٔ کندل‌های دادهٔ باندل‌شده را پردازش کند")
+        assertEquals(candles.size, eng.processed, "موتور باید همهٔ کندل‌های دادهٔ دیتاست را پردازش کند")
         assertTrue(eng.zones.isNotEmpty(), "روی ۳۰ هزار کندل ابتدای سال باید باکس ساختار ساخته شود")
         assertTrue(candles.all { it.v > 0.0 }, "حجم واقعی باید تا موتور برسد")
     }

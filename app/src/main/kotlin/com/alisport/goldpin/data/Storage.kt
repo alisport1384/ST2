@@ -19,24 +19,10 @@ import java.util.zip.GZIPOutputStream
 object Storage {
 
     const val FILE_NAME = "goldpin_state.json.gz"
-    /** نشست بک‌تست داخلی — جدا از فایل زنده تا هیچ‌وقت با فید شبکه قاطی نشود (طرح B). */
+    /** فایل نتیجهٔ بک‌تست یک‌ساله (نام قدیمی حفظ شده تا ذخیره‌های قبلی بازیابی شوند). */
     const val INTERNAL_FILE_NAME = "goldpin_backtest.json.gz"
-    /** فایل دادهٔ یک‌سالهٔ M1 در حافظهٔ اپ (از دارایی داخل APK استخراج می‌شود). */
+    /** نام فایل دادهٔ یک‌سالهٔ دانلودشده؛ بازه‌های بلندتر از الگوی همان نام ساخته می‌شوند. */
     const val DATA_FILE_NAME = "goldpin_xauusd_m1_1y.csv.gz"
-
-    /**
-     * دارایی **باندل‌شدهٔ** دادهٔ یک‌ساله — همان فایل، داخل خود APK.
-     *
-     * پیش‌تر این داده فقط با دانلود از GitHub Release به‌دست می‌آمد؛ حالا کل یک سال
-     * (۳۵۱٬۸۹۴ کندل M1 با حجم) همراه اپ نصب می‌شود و دانلود اختیاری است.
-     *
-     * ⚠ دو نام، چون بسته‌بندی اندروید (AGP) دارایی‌های `.gz` را **باز** می‌کند و پسوندشان را
-     * حذف می‌کند: در مخزن `goldpin_xauusd_m1_1y.csv.gz` است و داخل APK
-     * `assets/goldpin_xauusd_m1_1y.csv` (محتوای CSV باز، ۲۱٬۷۶۵٬۳۶۶ بایت). در APK واقعی
-     * v1.4.41 با `unzip -l` دیده و تأیید شد. دقیقاً همان کاری که `Feed.openSampleAsset`
-     * برای نمونهٔ کوچک می‌کند؛ هر دو نام امتحان می‌شوند.
-     */
-    val BUNDLED_DATA_ASSETS = listOf("goldpin_xauusd_m1_1y.csv.gz", "goldpin_xauusd_m1_1y.csv")
 
     fun dir(ctx: Context): File {
         val ext = ctx.getExternalFilesDir(null)
@@ -45,76 +31,20 @@ object Storage {
 
     fun autoFile(ctx: Context): File = File(dir(ctx), FILE_NAME)
 
-    fun internalFile(ctx: Context): File = File(dir(ctx), INTERNAL_FILE_NAME)
+    fun internalFile(ctx: Context, years: Int = 1): File {
+        require(years in 1..3) { "بازهٔ داده باید ۱ تا ۳ سال باشد" }
+        val name = if (years == 1) INTERNAL_FILE_NAME else "goldpin_backtest_${years}y.json.gz"
+        return File(dir(ctx), name)
+    }
 
-    fun dataFile(ctx: Context): File = File(dir(ctx), DATA_FILE_NAME)
+    fun dataFile(ctx: Context, years: Int = 1): File {
+        require(years in 1..3) { "بازهٔ داده باید ۱ تا ۳ سال باشد" }
+        val name = if (years == 1) DATA_FILE_NAME else "goldpin_xauusd_m1_${years}y.csv.gz"
+        return File(dir(ctx), name)
+    }
 
     /** فایل موقت دانلود داده؛ فقط بعد از تأیید هش به نام نهایی تغییر نام می‌دهد. */
-    fun dataPartFile(ctx: Context): File = File(dir(ctx), DATA_FILE_NAME + ".part")
-
-    // ── دادهٔ یک‌سالهٔ باندل‌شدهٔ داخل APK ──────────────────────────────────────
-    // همهٔ مسیرهای بک‌تست همان فایل `dataFile(ctx)` را می‌خوانند؛ پس کافی است دارایی
-    // یک‌بار (و فقط وقتی نیست یا ناقص است) کنار همان نام استخراج شود. با این کار نه
-    // موتور، نه کارگزار و نه فایل نشست تغییری می‌بینند.
-    //
-    // نکتهٔ محتوا: پارسر اپ (`Feed.parseCsvStream`) gzip را از روی امضای بایت می‌شناسد،
-    // پس فرقی نمی‌کند فایل روی گوشی gzip باشد (نسخهٔ دانلودی از سرور) یا CSV باز
-    // (نسخهٔ استخراج‌شده از APK) — هر دو درست خوانده می‌شوند.
-
-    /** باز کردن دارایی دادهٔ یک‌ساله با هر نامی که بسته‌بندی برایش انتخاب کرده است. */
-    fun openBundledDataAsset(ctx: Context): InputStream {
-        var last: Exception? = null
-        for (n in BUNDLED_DATA_ASSETS) {
-            try {
-                return ctx.assets.open(n)
-            } catch (e: Exception) {
-                last = e
-            }
-        }
-        throw FeedException("دارایی دادهٔ یک‌ساله داخل APK پیدا نشد (${last?.message ?: "بدون جزئیات"})")
-    }
-
-    /** آیا دارایی یک‌ساله داخل این APK بسته‌بندی شده است؟ */
-    fun bundledDataAvailable(ctx: Context): Boolean = try {
-        openBundledDataAsset(ctx).use { it.read() >= 0 }
-        true
-    } catch (e: Exception) {
-        false
-    }
-
-    /**
-     * تضمین وجود فایل دادهٔ یک‌ساله: اگر نیست یا ناقص است، از داخل APK استخراج می‌شود.
-     * خروجی همیشه همان [dataFile] است ⇒ بقیهٔ کد دست‌نخورده می‌ماند.
-     *
-     * نوشتن اتمیک است (اول فایل موقت، بعد rename): اگر اپ وسط استخراج کشته شود، فایل
-     * ناقص هرگز جای فایل سالم را نمی‌گیرد و دفعهٔ بعد از نو استخراج می‌شود.
-     */
-    fun ensureBundledData(ctx: Context): File {
-        val dest = dataFile(ctx)
-        if (dest.exists() && dest.length() > 1_000_000) return dest
-        val t0 = System.currentTimeMillis()
-        val d = dir(ctx)
-        if (!d.exists()) d.mkdirs()
-        val tmp = File(d, DATA_FILE_NAME + ".asset")
-        try {
-            openBundledDataAsset(ctx).use { ins ->
-                java.io.BufferedOutputStream(tmp.outputStream(), 1 shl 16).use { out -> ins.copyTo(out) }
-            }
-            if (tmp.length() <= 1_000_000) {
-                throw FeedException("استخراج دادهٔ باندل‌شده ناتمام ماند (بایت=${tmp.length()})")
-            }
-            if (dest.exists()) dest.delete()
-            if (!tmp.renameTo(dest)) {
-                tmp.copyTo(dest, overwrite = true)
-                tmp.delete()
-            }
-        } finally {
-            if (tmp.exists()) tmp.delete()
-        }
-        Log.i(Log.CAT_STORE, "دادهٔ یک‌ساله از داخل APK استخراج شد",
-            "مسیر=${dest.absolutePath} بایت=${dest.length()} مدت=${System.currentTimeMillis() - t0}ms")
-        return dest
-    }
+    fun dataPartFile(ctx: Context, years: Int = 1): File = File(dir(ctx), dataFile(ctx, years).name + ".part")
 
     /**
      * نوشتن اتمیک وضعیت: ابتدا در فایل موقت، سپس جای‌گزینی با فایل اصلی.

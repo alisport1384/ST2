@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Assumptions.assumeTrue
  *
  * اپ روی نصب تازه [Tuned.apply] را صدا می‌زند (و مهاجرت `specRev=9` همان کار را برای فایل‌های
  * دست‌نخوردهٔ سند ۷ انجام می‌دهد). این آزمون دقیقاً همان دو خط را اجرا می‌کند و نتیجه را روی
- * **دادهٔ واقعی یک‌سالهٔ باندل‌شدهٔ خود APK** می‌سنجد؛ یعنی اگر روزی کسی [Tuned] یا پیش‌فرض‌های
+ * **دادهٔ واقعی یک‌سالهٔ موجود در ریپؤ خود APK** می‌سنجد؛ یعنی اگر روزی کسی [Tuned] یا پیش‌فرض‌های
  * [Settings] را عوض کند و انتظار مثبت از بین برود، اینجا قرمز می‌شود — نه در دست کاربر.
  *
  * عددهای مرجع از جاروب پارامتر (`sweep/sweep_phase7.csv`) آمده‌اند:
@@ -22,13 +22,13 @@ class TunedShippedDefaultsTest {
 
     private companion object {
         fun assetFile(): File? = listOf(
-            "app/src/main/assets/goldpin_xauusd_m1_1y.csv.gz",
-            "../app/src/main/assets/goldpin_xauusd_m1_1y.csv.gz",
-            "/home/user/ST2/app/src/main/assets/goldpin_xauusd_m1_1y.csv.gz"
+            "datasets/goldpin_xauusd_m1_1y.csv.gz",
+            "../datasets/goldpin_xauusd_m1_1y.csv.gz",
+            "/home/user/ST2/datasets/goldpin_xauusd_m1_1y.csv.gz"
         ).map(::File).firstOrNull { it.exists() }
 
         fun loadCandles(): List<Candle> {
-            val f = assetFile() ?: error("دارایی دادهٔ یک‌ساله پیدا نشد")
+            val f = assetFile() ?: error("فایل دادهٔ یک‌ساله پیدا نشد")
             val out = ArrayList<Candle>(360_000)
             GZIPInputStream(f.inputStream().buffered(1 shl 16)).bufferedReader().useLines { lines ->
                 var bi = 0
@@ -57,9 +57,9 @@ class TunedShippedDefaultsTest {
     }
 
     @Test
-    fun `shipped Tuned defaults stay profitable on the bundled real year`() {
+    fun `shipped Tuned defaults stay profitable on the repository real year`() {
         val f = assetFile()
-        assumeTrue(f != null, "دارایی دادهٔ یک‌ساله در دسترس نیست")
+        assumeTrue(f != null, "فایل دادهٔ یک‌ساله در دسترس نیست")
         val candles = loadCandles()
         assertTrue(candles.size > 300_000, "دادهٔ یک‌ساله باید کامل بارگذاری شود: ${candles.size}")
 
@@ -112,7 +112,7 @@ class TunedShippedDefaultsTest {
         // با کارمزد ۰٫۷ ⇒ آستانهٔ فیلتر ۴٫۲ از سقف N=۳ بزرگ‌تر است و هیچ سفارشی ثبت نمی‌شود.
         // اگر این آزمون روزی سبزِ «با معامله» شود، یعنی فیلتر کارمزد عوض شده و باید دوباره سنجیده شود.
         val f = assetFile()
-        assumeTrue(f != null, "دارایی دادهٔ یک‌ساله در دسترس نیست")
+        assumeTrue(f != null, "فایل دادهٔ یک‌ساله در دسترس نیست")
         val candles = loadCandles()
 
         val mode = TF_MODES.first { it.idx == 1 }

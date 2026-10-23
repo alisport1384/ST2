@@ -110,7 +110,7 @@ def main(argv):
 
     zero_vol = sum(1 for r in rows if r[5] <= 0)
     body = io.BytesIO()
-    with gzip.GzipFile(fileobj=body, mode="wb", compresslevel=9) as gz:
+    with gzip.GzipFile(fileobj=body, mode="wb", compresslevel=9, mtime=0) as gz:
         w = io.TextIOWrapper(gz, encoding="utf-8", newline="")
         w.write("timestamp,open,high,low,close,volume\n")
         for ms, o, h, l, c, v in rows:

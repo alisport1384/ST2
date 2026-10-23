@@ -11,8 +11,8 @@ android {
         applicationId = "com.alisport.goldpin"
         minSdk = 24
         targetSdk = 34
-        versionCode = 55
-        versionName = "1.4.42"
+        versionCode = 57
+        versionName = "1.4.44"
         resourceConfigurations += listOf("fa", "en")
     }
 
@@ -43,10 +43,8 @@ android {
         resources.excludes += setOf("META-INF/*.kotlin_module", "META-INF/versions/**")
     }
 
-    // نکتهٔ بسته‌بندی: دادهٔ یک‌سالهٔ بک‌تست به‌صورت دارایی (`app/src/main/assets`) داخل APK
-    // باندل شده است. AGP دارایی‌های `.gz` را خودش باز می‌کند و پسوند را برمی‌دارد، پس داخل
-    // APK نامش `assets/goldpin_xauusd_m1_1y.csv` است و `Storage.BUNDLED_DATA_ASSETS` هر دو
-    // نام را امتحان می‌کند.
+    // دیتاست‌های بک‌تست در پوشهٔ datasets مخزن نگهداری و جداگانه دانلود می‌شوند؛
+    // هرگز به APK اضافه نمی‌شوند تا حجم نصب‌شونده سبک بماند.
 
     lint { abortOnError = false }
 

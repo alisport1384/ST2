@@ -1,8 +1,7 @@
 package com.alisport.goldpin.data
 
-import android.content.Context
-import java.security.MessageDigest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -11,96 +10,41 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
-/**
- * دادهٔ یک‌سالهٔ بک‌تست حالا **داخل خود APK** بسته‌بندی شده است.
- *
- * این آزمون همان مسیری را اجرا می‌کند که اپ روی گوشی می‌رود:
- * دارایی داخل APK → استخراج در حافظهٔ اپ → همان `dataFile(ctx)` که موتور می‌خواند →
- * پارسر CSV. یعنی «بک‌تست داخلی بدون دانلود» واقعاً کار می‌کند.
- *
- * آزمون عمداً به نام/قالب دارایی وابسته نیست: بسته‌بندی اندروید دارایی `.gz` را باز می‌کند
- * و پسوندش را برمی‌دارد، پس مقایسه با **محتوای همان دارایی** انجام می‌شود نه با یک عدد ثابت
- * (هش و اندازهٔ خود دیتاست را `BundledOneYearDataTest` در ماژول موتور قفل می‌کند).
- */
+/** Verifies the one-year test dataset is no longer shipped inside the APK. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
 class StorageBundledDataTest {
 
-    private companion object {
-        /** ۲۰۲۵-۰۸-۲۱T00:00:00Z */
-        const val FIRST_MS = 1_755_734_400_000L
-
-        /** ۲۰۲۶-۰۸-۲۰T23:59:00Z */
-        const val LAST_MS = 1_787_270_340_000L
-        const val BARS = 351_894
-    }
-
-    private fun ctx(): Context = RuntimeEnvironment.getApplication()
-
-    private fun sha256Stream(ins: java.io.InputStream): String {
-        val md = MessageDigest.getInstance("SHA-256")
-        ins.buffered(1 shl 16).use { s ->
-            val buf = ByteArray(1 shl 16)
-            while (true) {
-                val n = s.read(buf)
-                if (n <= 0) break
-                md.update(buf, 0, n)
-            }
-        }
-        val sb = StringBuilder()
-        for (b in md.digest()) sb.append(String.format("%02x", b))
-        return sb.toString()
+    @Test
+    fun oneYearDataIsNotBundledInApk() {
+        val names = RuntimeEnvironment.getApplication().assets.list("").orEmpty().toSet()
+        assertFalse("Compressed one-year dataset must stay outside the APK",
+            names.contains("goldpin_xauusd_m1_1y.csv.gz"))
+        assertFalse("Expanded one-year dataset must stay outside the APK",
+            names.contains("goldpin_xauusd_m1_1y.csv"))
     }
 
     @Test
-    fun oneYearDataIsBundledInApkAndExtractedToTheSessionDataFile() {
-        val c = ctx()
-        assertTrue("دارایی یک‌ساله باید داخل APK باشد", Storage.bundledDataAvailable(c))
-
-        val assetSha = Storage.openBundledDataAsset(c).use { sha256Stream(it) }
-        val f = Storage.ensureBundledData(c)
-
-        assertTrue("فایل داده باید ساخته شود", f.exists())
-        assertEquals("باید همان فایل دادهٔ نشست داخلی باشد", Storage.dataFile(c).absolutePath, f.absolutePath)
-        assertTrue("فایل داده باید بیش از یک مگابایت باشد", f.length() > 1_000_000)
-        assertEquals("محتوای استخراج‌شده باید بایت‌به‌بایت دارایی باشد", assetSha, Feed.sha256(f))
+    fun eachRangeHasIndependentDataAndResultFiles() {
+        val ctx = RuntimeEnvironment.getApplication()
+        assertEquals("goldpin_xauusd_m1_1y.csv.gz", Storage.dataFile(ctx, 1).name)
+        assertEquals("goldpin_xauusd_m1_2y.csv.gz", Storage.dataFile(ctx, 2).name)
+        assertEquals("goldpin_xauusd_m1_3y.csv.gz", Storage.dataFile(ctx, 3).name)
+        assertNotEquals(Storage.dataFile(ctx, 1), Storage.dataFile(ctx, 2))
+        assertNotEquals(Storage.dataPartFile(ctx, 2), Storage.dataPartFile(ctx, 3))
+        // Keep the historical one-year result filename so existing saved runs remain readable.
+        assertEquals("goldpin_backtest.json.gz", Storage.internalFile(ctx, 1).name)
+        assertEquals("goldpin_backtest_2y.json.gz", Storage.internalFile(ctx, 2).name)
+        assertEquals("goldpin_backtest_3y.json.gz", Storage.internalFile(ctx, 3).name)
+        assertNotEquals(Storage.internalFile(ctx, 1), Storage.internalFile(ctx, 2))
     }
 
     @Test
-    fun extractionRunsOnceAndIsNeverRepeated() {
-        val c = ctx()
-        val first = Storage.ensureBundledData(c)
-        val stamp = first.lastModified()
-        val second = Storage.ensureBundledData(c)
-        assertEquals(first.absolutePath, second.absolutePath)
-        assertEquals("فایل سالم نباید دوباره نوشته شود", stamp, second.lastModified())
-    }
-
-    @Test
-    fun truncatedOrMissingFileIsRestoredFromTheApk() {
-        val c = ctx()
-        val f = Storage.ensureBundledData(c)
-        // سناریوی واقعی: فایل نیمه‌نوشته یا دست‌کاری‌شده روی حافظهٔ اپ
-        f.writeBytes(ByteArray(4096))
-        val broken = f.length()
-
-        val again = Storage.ensureBundledData(c)
-        assertNotEquals("فایل ناقص نباید همان‌طور بماند", broken, again.length())
-        val assetSha = Storage.openBundledDataAsset(c).use { sha256Stream(it) }
-        assertEquals(assetSha, Feed.sha256(again))
-
-        val leftovers = f.parentFile?.listFiles { file -> file.name.endsWith(".asset") }
-        assertEquals("فایل موقت .asset باید پاک شود", 0, leftovers?.size ?: 0)
-    }
-
-    @Test
-    fun extractedDataParsesToTheFullYearOfVolumeBearingCandles() {
-        val f = Storage.ensureBundledData(ctx())
-        val candles = f.inputStream().use { Feed.parseCsvStream(it) }
-
-        assertEquals(BARS, candles.size)
-        assertEquals(FIRST_MS, candles.first().t)
-        assertEquals(LAST_MS, candles.last().t)
-        assertTrue("همهٔ کندل‌ها باید حجم واقعی داشته باشند", candles.all { it.v > 0.0 })
+    fun datasetCatalogIncludesVerifiedOneTwoAndThreeYearRanges() {
+        assertEquals(listOf(1, 2, 3), Feed.BACKTEST_DATASETS.map { it.years })
+        assertEquals(listOf(351_894, 701_067, 1_040_730), Feed.BACKTEST_DATASETS.map { it.bars })
+        assertTrue(Feed.BACKTEST_DATASETS.all { it.sha256.length == 64 && it.url.startsWith("https://") })
+        assertEquals(Feed.BACKTEST_DATA_FALLBACK_URL, Feed.backtestDataset(1).fallbackUrl)
+        assertEquals(null, Feed.backtestDataset(2).fallbackUrl)
     }
 }
