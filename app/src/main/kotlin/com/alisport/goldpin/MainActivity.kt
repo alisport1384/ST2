@@ -1355,13 +1355,14 @@ class MainActivity : Activity() {
             }
         })
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(Ui.btn(this, if (s.hasBacktestData(this)) "دانلود مجدد داده" else "دانلود دادهٔ یک‌ساله",
-            Palette.panel2, Palette.txt, 11f).apply {
+        row.addView(Ui.btn(this, "دانلود از سرور (اختیاری)", Palette.panel2, Palette.txt, 11f).apply {
             setOnClickListener {
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("دانلود دادهٔ بک‌تست")
-                    .setMessage("یک فایل ≈۵ مگابایتی (۳۵۱٬۸۹۴ کندل M1 با حجم، ۲۰۲۵-۰۸-۲۱ تا ۲۰۲۶-۰۸-۲۰) " +
-                        "از GitHub دانلود و در حافظهٔ اپ ذخیره می‌شود. داخل APK نیست.")
+                    .setMessage("کل دادهٔ یک‌ساله (۳۵۱٬۸۹۴ کندل M1 با حجم، ۲۰۲۵-۰۸-۲۱ تا ۲۰۲۶-۰۸-۲۰) " +
+                        "داخل خود اپ بسته‌بندی شده و دانلود لازم نیست.\n" +
+                        "این دکمه فقط برای بازگردانی بعد از «حذف داده» یا گرفتن نسخهٔ تازه‌تر از سرور است " +
+                        "(≈۵ مگابایت).")
                     .setPositiveButton("دانلود") { _, _ ->
                         toast("دانلود آغاز شد…")
                         s.downloadBacktestData(applicationContext) { msg ->
@@ -1375,7 +1376,8 @@ class MainActivity : Activity() {
             row.addView(Ui.btn(this, "حذف داده", Palette.panel2, Palette.down, 11f).apply {
                 setOnClickListener {
                     AlertDialog.Builder(this@MainActivity).setTitle("حذف دادهٔ بک‌تست؟")
-                        .setMessage("فایل دادهٔ یک‌ساله پاک می‌شود (نتیجهٔ بک‌تست در فایل نشست می‌ماند).")
+                        .setMessage("فایل دادهٔ یک‌ساله از حافظهٔ اپ پاک می‌شود (۵ مگابایت آزاد؛ نتیجهٔ بک‌تست در فایل نشست می‌ماند). " +
+                            "چون داده داخل خود اپ است، دفعهٔ بعد خودکار بازگردانی می‌شود.")
                         .setPositiveButton("بله") { _, _ -> toast(s.deleteBacktestData(applicationContext)); showTab(4) }
                         .setNegativeButton("نه", null).show()
                 }

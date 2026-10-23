@@ -21,8 +21,15 @@ object Storage {
     const val FILE_NAME = "goldpin_state.json.gz"
     /** نشست بک‌تست داخلی — جدا از فایل زنده تا هیچ‌وقت با فید شبکه قاطی نشود (طرح B). */
     const val INTERNAL_FILE_NAME = "goldpin_backtest.json.gz"
-    /** فایل دادهٔ یک‌سالهٔ M1 (از GitHub Release دانلود می‌شود؛ داخل APK نیست). */
+    /** فایل دادهٔ یک‌سالهٔ M1 در حافظهٔ اپ (از دارایی داخل APK استخراج می‌شود). */
     const val DATA_FILE_NAME = "goldpin_xauusd_m1_1y.csv.gz"
+    /**
+     * دارایی **باندل‌شدهٔ** دادهٔ یک‌ساله — همان فایل، داخل خود APK.
+     *
+     * پیش‌تر این داده فقط با دانلود از GitHub Release به‌دست می‌آمد؛ حالا کل یک سال
+     * (۳۵۱٬۸۹۴ کندل M1 با حجم) همراه اپ نصب می‌شود و دانلود اختیاری است.
+     */
+    const val BUNDLED_DATA_ASSET = "goldpin_xauusd_m1_1y.csv.gz"
 
     fun dir(ctx: Context): File {
         val ext = ctx.getExternalFilesDir(null)
@@ -37,6 +44,66 @@ object Storage {
 
     /** فایل موقت دانلود داده؛ فقط بعد از تأیید هش به نام نهایی تغییر نام می‌دهد. */
     fun dataPartFile(ctx: Context): File = File(dir(ctx), DATA_FILE_NAME + ".part")
+
+    // ── دادهٔ یک‌سالهٔ باندل‌شدهٔ داخل APK ──────────────────────────────────────
+    // همهٔ مسیرهای بک‌تست همان فایل `dataFile(ctx)` را می‌خوانند؛ پس کافی است دارایی
+    // یک‌بار (و فقط وقتی نیست یا ناقص است) کنار همان نام استخراج شود. با این کار نه
+    // موتور، نه کارگزار و نه فایل نشست تغییری می‌بینند.
+
+    /** آیا دارایی یک‌ساله داخل این APK بسته‌بندی شده است؟ */
+    fun bundledDataAvailable(ctx: Context): Boolean = try {
+        ctx.assets.open(BUNDLED_DATA_ASSET).use { it.read() >= 0 }
+        true
+    } catch (e: Exception) {
+        false
+    }
+
+    /**
+     * اندازهٔ دقیق دارایی باندل‌شده (برای تشخیص فایل استخراج‌شدهٔ ناقص).
+     *
+     * `openFd` فقط وقتی کار می‌کند که دارایی در APK فشرده نشده باشد (`noCompress += "gz"`
+     * در build.gradle). اگر نشد، ‏`-1` برمی‌گردد و بررسی اندازه ساده‌تر می‌شود.
+     */
+    fun bundledDataAssetBytes(ctx: Context): Long = try {
+        ctx.assets.openFd(BUNDLED_DATA_ASSET).use { it.length }
+    } catch (e: Exception) {
+        -1L
+    }
+
+    /**
+     * تضمین وجود فایل دادهٔ یک‌ساله: اگر نیست یا اندازه‌اش با دارایی نمی‌خواند، از داخل
+     * APK استخراج می‌شود. خروجی همیشه همان [dataFile] است ⇒ بقیهٔ کد دست‌نخورده می‌ماند.
+     *
+     * نوشتن اتمیک است (اول فایل موقت، بعد rename) تا قطع شدن اپ وسط کار، فایل سالم را
+     * خراب نکند.
+     */
+    fun ensureBundledData(ctx: Context): File {
+        val dest = dataFile(ctx)
+        val want = bundledDataAssetBytes(ctx)
+        if (dest.exists() && dest.length() > 1_000_000 && (want < 0L || dest.length() == want)) return dest
+        val t0 = System.currentTimeMillis()
+        val d = dir(ctx)
+        if (!d.exists()) d.mkdirs()
+        val tmp = File(d, DATA_FILE_NAME + ".asset")
+        try {
+            ctx.assets.open(BUNDLED_DATA_ASSET).use { ins ->
+                java.io.BufferedOutputStream(tmp.outputStream(), 1 shl 16).use { out -> ins.copyTo(out) }
+            }
+            if (want > 0L && tmp.length() != want) {
+                throw FeedException("استخراج دادهٔ باندل‌شده ناتمام ماند (بایت=${tmp.length()} انتظار=${want})")
+            }
+            if (dest.exists()) dest.delete()
+            if (!tmp.renameTo(dest)) {
+                tmp.copyTo(dest, overwrite = true)
+                tmp.delete()
+            }
+        } finally {
+            if (tmp.exists()) tmp.delete()
+        }
+        Log.i(Log.CAT_STORE, "دادهٔ یک‌ساله از داخل APK استخراج شد",
+            "مسیر=${dest.absolutePath} بایت=${dest.length()} مدت=${System.currentTimeMillis() - t0}ms")
+        return dest
+    }
 
     /**
      * نوشتن اتمیک وضعیت: ابتدا در فایل موقت، سپس جای‌گزینی با فایل اصلی.

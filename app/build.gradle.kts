@@ -11,8 +11,8 @@ android {
         applicationId = "com.alisport.goldpin"
         minSdk = 24
         targetSdk = 34
-        versionCode = 53
-        versionName = "1.4.40"
+        versionCode = 54
+        versionName = "1.4.41"
         resourceConfigurations += listOf("fa", "en")
     }
 
@@ -41,6 +41,12 @@ android {
 
     packaging {
         resources.excludes += setOf("META-INF/*.kotlin_module", "META-INF/versions/**")
+    }
+
+    // دادهٔ یک‌سالهٔ بک‌تست (gzip) داخل APK باندل شده است. فشرده‌سازی دوبارهٔ یک فایل gzip
+    // تقریباً هیچ سودی ندارد، ولی استخراجش را کند و `openFd` را غیرممکن می‌کند؛ پس خاموش است.
+    androidResources {
+        noCompress += "gz"
     }
 
     lint { abortOnError = false }

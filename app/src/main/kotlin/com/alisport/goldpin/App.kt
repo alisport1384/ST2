@@ -23,7 +23,7 @@ import java.util.concurrent.Executors
  *
  * دو نشست **کاملاً جدا** هستند و هیچ‌وقت داده‌شان قاطی نمی‌شود:
  *  • [LIVE]     — دادهٔ فید شبکه، فایل `goldpin_state.json.gz`، سرویس زنده روشن.
- *  • [INTERNAL] — دادهٔ یک‌سالهٔ M1 داخلی (از GitHub Release)، فایل `goldpin_backtest.json.gz`،
+ *  • [INTERNAL] — دادهٔ یک‌سالهٔ M1 داخلی (باندل‌شده داخل خود APK)، فایل `goldpin_backtest.json.gz`،
  *                 فید و سرویس زنده **خاموش**.
  *
  * دلیل جداسازی: «مرج کردن» دو فید در یک سری، سه مشکل واقعی می‌ساخت —
@@ -1735,20 +1735,37 @@ class AppState {
     private fun sessionFile(ctx: Context): File =
         if (sessionMode == SessionMode.INTERNAL) Storage.internalFile(ctx) else Storage.autoFile(ctx)
 
+    /**
+     * آیا دادهٔ یک‌ساله در دسترس است؟
+     *
+     * هم فایل استخراج‌شده در حافظهٔ اپ و هم دارایی باندل‌شدهٔ داخل APK قبول است؛ چون
+     * [Storage.ensureBundledData] هر وقت لازم باشد دارایی را به همان فایل تبدیل می‌کند.
+     */
     fun hasBacktestData(ctx: Context): Boolean {
         val f = Storage.dataFile(ctx)
-        return f.exists() && f.length() > 1_000_000
+        return (f.exists() && f.length() > 1_000_000) || Storage.bundledDataAvailable(ctx)
     }
 
     /** متن وضعیت دادهٔ بک‌تست برای نمایش در تنظیمات. */
     fun backtestDataText(ctx: Context): String {
         val f = Storage.dataFile(ctx)
-        if (!f.exists()) return "دادهٔ یک‌ساله دانلود نشده است"
-        val mb = f.length() / 1048576.0
-        return "دادهٔ یک‌ساله موجود است · ${Fa.n(mb, 2)} مگابایت · ${Fa.d(Feed.BACKTEST_DATA_BARS.toString())} کندل M1"
+        val bars = Fa.d(Feed.BACKTEST_DATA_BARS.toString())
+        if (f.exists() && f.length() > 1_000_000) {
+            val mb = f.length() / 1048576.0
+            return "دادهٔ یک‌ساله داخل اپ است · ${Fa.n(mb, 2)} مگابایت · $bars کندل M1"
+        }
+        return if (Storage.bundledDataAvailable(ctx))
+            "دادهٔ یک‌ساله داخل خود اپ بسته‌بندی شده · $bars کندل M1 · بدون نیاز به دانلود " +
+                "(با اولین استفاده خودکار آماده می‌شود)"
+        else "دادهٔ یک‌ساله موجود نیست"
     }
 
-    /** دانلود یک‌بارهٔ دادهٔ یک‌ساله از GitHub Release با بررسی هش. */
+    /**
+     * دانلود دادهٔ یک‌ساله از GitHub Release با بررسی هش.
+     *
+     * از وقتی داده داخل APK باندل شد، این مسیر **اختیاری** است: فقط برای بازگردانی بعد از
+     * «حذف داده» یا گرفتن دیتاست تازه‌تر از سرور به کار می‌آید.
+     */
     fun downloadBacktestData(ctx: Context, onDone: (String) -> Unit = {}) {
         io.execute {
             busy = true
@@ -1795,7 +1812,8 @@ class AppState {
             if (f.exists() && f.delete()) n++
         }
         notifyUi()
-        return if (n > 0) "دادهٔ بک‌تست پاک شد" else "فایلی برای پاک کردن نبود"
+        return if (n > 0) "دادهٔ بک‌تست پاک شد — دفعهٔ بعد خودکار از داخل اپ بازگردانی می‌شود"
+               else "فایلی برای پاک کردن نبود"
     }
 
     /**
@@ -1988,14 +2006,13 @@ class AppState {
      * بارگذاری کامل نشست داخلی (روی نخ IO). اگر فایل نشست نباشد، بک‌تست اجرا می‌شود.
      */
     private fun loadInternalBlocking(ctx: Context): String {
-        val data = Storage.dataFile(ctx)
-        if (!data.exists()) return "دادهٔ یک‌ساله دانلود نشده است — اول «دانلود دادهٔ بک‌تست» را بزنید"
         busy = true
         busyText = "خواندن دادهٔ یک‌ساله…"
         backtestProgress = 0f
         notifyUi()
         val raw = try {
-            data.inputStream().use { Feed.parseCsvStream(it) }
+            // داده داخل APK باندل شده؛ اگر هنوز استخراج نشده باشد، همین‌جا آماده می‌شود.
+            Storage.ensureBundledData(ctx).inputStream().use { Feed.parseCsvStream(it) }
         } catch (e: Exception) {
             backtestProgress = -1f
             busy = false; busyText = ""
@@ -2023,9 +2040,7 @@ class AppState {
             notifyUi()
             var msg = ""
             try {
-                val data = Storage.dataFile(ctx)
-                if (!data.exists()) throw FeedException("دادهٔ یک‌ساله دانلود نشده است")
-                val raw = data.inputStream().use { Feed.parseCsvStream(it) }
+                val raw = Storage.ensureBundledData(ctx).inputStream().use { Feed.parseCsvStream(it) }
                 msg = runInternalBlocking(ctx, raw)
             } catch (e: Exception) {
                 Log.e(Log.CAT_ENGINE, "اجرای بک‌تست ناموفق", e)
