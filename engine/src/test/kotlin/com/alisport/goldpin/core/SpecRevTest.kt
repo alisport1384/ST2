@@ -76,9 +76,10 @@ class SpecRevTest {
         val m = Store.load(json).cfg
         assertFalse(m.trigger2Fade, "تنظیم آزموده‌شده: هم‌جهت با ساختار")
         assertEquals(7.0, m.trigger2TargetR, 1e-9)
-        assertEquals(200.0, m.slBufTicks, 1e-9, "بافر حد ضرر باید از نویز بیرون بیاید")
+        // مقصد نهایی زنجیره نسخهٔ ۲ تنظیم است (rev ۱۰)؛ rev ۹ به‌تنهایی نسخهٔ ۱ بود.
+        assertEquals(900.0, m.slBufTicks, 1e-9, "بافر حد ضرر باید از نویز بیرون بیاید")
         assertEquals(-2.0, m.entryBufTicks, 1e-9)
-        assertEquals(10.0, m.maxSlUnits, 1e-9, "سقف N باید از فاصلهٔ جدید حد ضرر بزرگ‌تر باشد")
+        assertEquals(40.0, m.maxSlUnits, 1e-9, "سقف N باید از فاصلهٔ جدید حد ضرر بزرگ‌تر باشد")
         assertEquals(0.0, m.minSlCostMult, 1e-9, "فیلتر کارمزد خاموش: خودش مانع صفر‌سفارشی بود")
         assertEquals(0.7, m.cmsnManual, 1e-9, "هیچ مبنای کارمزدی در فایل نبود ⇒ مرجع آزموده‌شده")
         assertFalse(m.cmsnAuto)
@@ -89,7 +90,7 @@ class SpecRevTest {
             .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":6")
         val m6 = Store.load(j6).cfg
         assertEquals(7.0, m6.trigger2TargetR, 1e-9)
-        assertEquals(200.0, m6.slBufTicks, 1e-9)
+        assertEquals(900.0, m6.slBufTicks, 1e-9)
 
         // عدد دستی کاربر بر مرجع ۰٫۷ اولویت دارد (هندسه تنظیم می‌شود، کارمزد دست نمی‌خورد).
         val withCmsn = Settings().apply { cmsnManual = 0.35 }
@@ -97,7 +98,7 @@ class SpecRevTest {
             .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":7")
         val mc = Store.load(jc).cfg
         assertEquals(0.35, mc.cmsnManual, 1e-9, "کارمزد واقعی کاربر نباید با حدس عوض شود")
-        assertEquals(200.0, mc.slBufTicks, 1e-9)
+        assertEquals(900.0, mc.slBufTicks, 1e-9)
 
         // اسپرد خودکارِ معقولِ بروکر هم دست‌نخورده می‌ماند.
         val auto = Settings().apply { cmsnAuto = true; cmsnAutoValue = 0.18 }
@@ -123,6 +124,48 @@ class SpecRevTest {
         val mf = Store.load(fresh).cfg
         assertTrue(mf.trigger2Fade)
         assertEquals(2.0, mf.slBufTicks, 1e-9)
+    }
+
+    @Test
+    fun `spec rev 10 retunes untouched v1 tuned files to the ten-year optimum`() {
+        // فایل نسخهٔ ۱٫۴٫۴۲ تا ۱٫۴٫۴۵ با خروجی دست‌نخوردهٔ نسخهٔ ۱ تنظیم (بافر ۲۰۰ · N=۱۰)
+        // ⇒ نسخهٔ ۲ (بافر ۹۰۰ · N=۴۰). دلیل: نسخهٔ ۱ روی دادهٔ ده‌ساله ‎−۲۰٬۵۸۷$‎ داد.
+        val v1 = Settings().apply {
+            trigger2Fade = false; trigger2TargetR = 7.0; minSlCostMult = 0.0
+            slBufTicks = 200.0; entryBufTicks = -2.0; maxSlUnits = 10.0; minSlUnits = 0.0
+            cmsnAuto = false; cmsnManual = 0.7
+        }
+        val json = Store.save(v1, Engine(v1), PaperBroker(v1), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":9")
+        val m = Store.load(json).cfg
+        assertEquals(900.0, m.slBufTicks, 1e-9, "بافر نسخهٔ ۲")
+        assertEquals(40.0, m.maxSlUnits, 1e-9, "سقف N نسخهٔ ۲")
+        assertEquals(7.0, m.trigger2TargetR, 1e-9)
+        assertFalse(m.trigger2Fade)
+        assertEquals(0.7, m.cmsnManual, 1e-9)
+
+        // کارمزد دستی کاربر (مثلاً ۰٫۳۵ واقعیِ بروکرش) با مهاجرت عوض نمی‌شود.
+        val own = Settings().apply {
+            trigger2Fade = false; trigger2TargetR = 7.0; minSlCostMult = 0.0
+            slBufTicks = 200.0; entryBufTicks = -2.0; maxSlUnits = 10.0; minSlUnits = 0.0
+            cmsnAuto = false; cmsnManual = 0.35
+        }
+        val jo = Store.save(own, Engine(own), PaperBroker(own), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":9")
+        val mo = Store.load(jo).cfg
+        assertEquals(900.0, mo.slBufTicks, 1e-9)
+        assertEquals(0.35, mo.cmsnManual, 1e-9, "کارمزد واقعی کاربر نباید با حدس عوض شود")
+
+        // یک انحراف دستی (بافر ۸۵۰) یعنی کاربر خودش تنظیم کرده ⇒ هیچ مهاجرتی.
+        val custom = Settings().apply {
+            trigger2Fade = false; trigger2TargetR = 7.0; minSlCostMult = 0.0
+            slBufTicks = 850.0; entryBufTicks = -2.0; maxSlUnits = 10.0; minSlUnits = 0.0
+        }
+        val jx = Store.save(custom, Engine(custom), PaperBroker(custom), emptyList())
+            .replace("\"specRev\":${Store.SPEC_REV}", "\"specRev\":9")
+        val mx = Store.load(jx).cfg
+        assertEquals(850.0, mx.slBufTicks, 1e-9, "انتخاب کاربر باید بماند")
+        assertEquals(10.0, mx.maxSlUnits, 1e-9)
     }
 
     @Test

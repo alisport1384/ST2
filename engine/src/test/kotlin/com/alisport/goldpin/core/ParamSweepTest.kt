@@ -23,21 +23,48 @@ import org.junit.jupiter.api.Assumptions.assumeTrue
 class ParamSweepTest {
 
     private companion object {
-        fun assetFile(): File? = listOf(
-            "datasets/goldpin_xauusd_m1_1y.csv.gz",
-            "../datasets/goldpin_xauusd_m1_1y.csv.gz",
-            "/home/user/ST2/datasets/goldpin_xauusd_m1_1y.csv.gz"
+        /**
+         * دیتاست با `SWEEP_DATA` انتخاب می‌شود (`1y` پیش‌فرض؛ `2y` / `3y` / `10y`).
+         * همه از `datasets/` ریپو خوانده می‌شوند — همان فایل‌هایی که اپ دانلود می‌کند.
+         */
+        fun dataTag(): String = System.getenv("SWEEP_DATA")?.takeIf { it.isNotBlank() } ?: "1y"
+
+        fun dataFile(tag: String = dataTag()): File? = listOf(
+            "datasets/goldpin_xauusd_m1_$tag.csv.gz",
+            "../datasets/goldpin_xauusd_m1_$tag.csv.gz",
+            "/home/user/ST2new/datasets/goldpin_xauusd_m1_$tag.csv.gz"
         ).map(::File).firstOrNull { it.exists() }
 
-        fun loadCandles(): List<Candle> {
-            val f = assetFile() ?: error("فایل دادهٔ یک‌ساله پیدا نشد")
-            val out = ArrayList<Candle>(360_000)
+        /**
+         * برش زمانی با `SWEEP_FROM_YEAR` / `SWEEP_TO_YEAR` (UTC، `to` غیرشامل).
+         *
+         * چرا لازم است: یک تنظیم که روی یک سال بهینه شد روی ده سال **ضرر** داد (جاروب فاز ۱۰).
+         * برای اینکه «بهینه» واقعاً بهینه باشد و نه برازش بیش‌برازش، جست‌وجو روی پنجرهٔ آموزش
+         * انجام می‌شود و نتیجه روی پنجرهٔ نگه‌داشته‌شده آزموده می‌شود.
+         */
+        fun fromYear(): Int = System.getenv("SWEEP_FROM_YEAR")?.toIntOrNull() ?: Int.MIN_VALUE
+        fun toYear(): Int = System.getenv("SWEEP_TO_YEAR")?.toIntOrNull() ?: Int.MAX_VALUE
+
+        private fun yearOf(tMs: Long): Int =
+            java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+                .apply { timeInMillis = tMs }.get(java.util.Calendar.YEAR)
+
+        fun loadCandles(tag: String = dataTag()): List<Candle> {
+            val f = dataFile(tag) ?: error("فایل دادهٔ $tag پیدا نشد")
+            val cap = when (tag) { "10y" -> 3_500_000; "3y" -> 1_100_000; "2y" -> 750_000; else -> 360_000 }
+            val from = fromYear(); val to = toYear()
+            val slicing = from != Int.MIN_VALUE || to != Int.MAX_VALUE
+            val out = ArrayList<Candle>(if (slicing) cap / 4 else cap)
             GZIPInputStream(f.inputStream().buffered(1 shl 16)).bufferedReader().useLines { lines ->
                 var bi = 0
                 for (ln in lines) {
                     val p = ln.split(',')
                     if (p.size < 6) continue
                     val t = p[0].trim().toLongOrNull() ?: continue
+                    if (slicing) {
+                        val y = yearOf(t)
+                        if (y < from || y >= to) continue
+                    }
                     out.add(Candle(bi++, t, p[1].toDouble(), p[2].toDouble(), p[3].toDouble(), p[4].toDouble(), p[5].toDouble()))
                 }
             }
@@ -62,12 +89,13 @@ class ParamSweepTest {
         val slBufTicks: Double = 2.0,
         val entryBufTicks: Double = 1.0,
         val maxSetups: Int = 1,
+        val tfIdx: Int = 1,
         val minLotManual: Double = 10.0,
         val mixedGrowthPct: Double = 20.0
     )
 
     private fun settings(c: Cfg): Settings {
-        val mode = TF_MODES.first { it.idx == 1 }
+        val mode = TF_MODES.first { it.idx == c.tfIdx }
         return Settings().apply {
             tfS = mode.s; tfM = mode.m; tf1 = mode.t1; tf2 = mode.t2
             strategy = c.strategy
@@ -202,26 +230,42 @@ class ParamSweepTest {
     }
 
     @Test
-    fun `sweep parameters on the real one-year data`() {
+    fun `sweep parameters on the real bundled data`() {
         val phase = System.getenv("SWEEP_PHASE") ?: ""
         assumeTrue(phase.isNotEmpty(), "فقط با SWEEP_PHASE اجرا می‌شود")
         val outDir = System.getenv("SWEEP_OUT") ?: "/tmp/sweep"
-        val candles = loadCandles()
-        println("SWEEP بارگذاری شد: ${candles.size} کندل")
+        val tag = dataTag()
+        val t0 = System.currentTimeMillis()
+        val candles = loadCandles(tag)
+        println("SWEEP بارگذاری شد: ${candles.size} کندل از دیتاست $tag در ${(System.currentTimeMillis() - t0) / 1000.0} ثانیه")
+        if (candles.isNotEmpty()) {
+            val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+            println("SWEEP_WINDOW ${fmt.format(java.util.Date(candles.first().t))} → ${fmt.format(java.util.Date(candles.last().t))}")
+        }
 
         val combos = ArrayList<Cfg>()
         fun add(
             strategy: Int, mm: Int, fade: Boolean, k: Double, costMult: Double, minSl: Double, nMax: Double,
-            tpUnits: Double = 10.0, cmsn: Double = 0.7, slBuf: Double = 2.0, entryBuf: Double = 1.0
+            tpUnits: Double = 10.0, cmsn: Double = 0.7, slBuf: Double = 2.0, entryBuf: Double = 1.0,
+            maxSetups: Int = 1, minTP: Double = 10.0, tfIdx: Int = 1
         ) {
-            val mmTag = if (mm == MoneyMode.NONE) "off" else "mix"
+            val mmTag = when (mm) {
+                MoneyMode.NONE -> "off"
+                MoneyMode.MIXED -> "mix"
+                else -> "mal"
+            }
             val dirTag = if (fade) "fade" else "doc5"
             val tgt = if (strategy == Strategy.NO_TREND) "tp${tpUnits.toInt()}" else "k${k.toInt()}"
             combos.add(
                 Cfg(
-                    "s$strategy-$mmTag-$dirTag-$tgt-min$minSl-N${nMax.toInt()}-c$costMult-b${slBuf.toInt()}",
+                    "s$strategy-$mmTag-$dirTag-$tgt-min$minSl-N${nMax.toInt()}-c$costMult-b${slBuf.toInt()}" +
+                        (if (maxSetups != 1) "-ms$maxSetups" else "") +
+                        (if (minTP != 10.0) "-mtp${minTP.toInt()}" else "") +
+                        (if (tfIdx != 1) "-tf$tfIdx" else ""),
                     strategy, mm, fade, cmsn, k, costMult, nMax, minSl, tpUnits,
-                    slBufTicks = slBuf, entryBufTicks = entryBuf
+                    slBufTicks = slBuf, entryBufTicks = entryBuf,
+                    maxSetups = maxSetups, minTPunits = minTP, tfIdx = tfIdx
                 )
             )
         }
@@ -330,12 +374,140 @@ class ParamSweepTest {
                 add(Strategy.DOC, MoneyMode.MIXED, true, 4.0, 6.0, 0.0, 3.0, 10.0, 0.7, 2.0, 1.0)
             }
 
+            // ══ فاز ۱۰ — دادهٔ ده‌ساله (۳٬۴۰۲٬۱۲۶ کندل) ══════════════════════
+            // سؤال اصلی: آیا تنظیمی که روی یک سال بهینه شد روی ده سال هم برتر است؟
+            // این فاز فقط «نقطه‌های لنگر» را می‌سنجد تا مقیاسِ زمان و حافظه دست بیاید:
+            //  ۱ پیش‌فرض سند ۷ (شاهد) · ۲-۳ بهینهٔ یک‌ساله · ۴ بهترین معکوس ·
+            //  ۵ بهترین استراتژی ۲ · ۶ بهینهٔ یک‌ساله در مود خاموش
+            "10" -> {
+                // ۱ پیش‌فرض سند ۷ با کارمزد ۰٫۷ — شاهد (روی یک‌ساله صفر سفارش می‌داد)
+                add(Strategy.DOC, MoneyMode.MIXED, true, 4.0, 6.0, 0.0, 3.0, 10.0, 0.7, 2.0, 1.0)
+                // ۲ ★ بهینهٔ یک‌ساله (همان چیزی که الان در اپ است)
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 10.0, 10.0, 0.7, 200.0, -2.0)
+                // ۳ بهینهٔ کم‌افت یک‌ساله
+                add(Strategy.DOC, MoneyMode.MIXED, false, 6.0, 0.0, 0.0, 10.0, 10.0, 0.7, 175.0, -2.0)
+                // ۴ بهترین «تریگر ۲ معکوس» یک‌ساله
+                add(Strategy.DOC, MoneyMode.MIXED, true, 8.0, 0.0, 0.0, 10.0, 10.0, 0.7, 175.0, -2.0)
+                // ۵ بهترین استراتژی ۲ یک‌ساله
+                add(Strategy.NO_TREND, MoneyMode.MIXED, false, 0.0, 0.0, 0.0, 10.0, 35.0, 0.7, 250.0, 1.0)
+                // ۶ بهینهٔ یک‌ساله در مود خاموش (§۵)
+                add(Strategy.DOC, MoneyMode.NONE, false, 7.0, 0.0, 0.0, 10.0, 10.0, 0.7, 200.0, -2.0)
+            }
+
+            // ══ فاز ۱۱ — شبکهٔ درشت روی پنجرهٔ آموزش (دادهٔ ۱۰ساله، ۲۰۱۶–۲۰۲۲) ══
+            // منطق: تنظیمی که روی ۱ سال بهینه شد روی ۱۰ سال در **همهٔ سال‌ها** ضرر داد؛
+            // پس جست‌وجو از اول روی آموزش انجام و روی ۲۰۲۳–۲۰۲۶ (نگه‌داشته‌شده) آزموده می‌شود.
+            // استراتژی ۱ · مود ترکیبی · کارمزد ۰٫۷ · بافر سفارش ‎−۲‎ · سقف N=۱۰ · بدون فیلتر
+            "11" -> {
+                for (k in listOf(3.0, 5.0, 7.0))
+                    for (b in listOf(50.0, 150.0, 300.0))
+                        add(Strategy.DOC, MoneyMode.MIXED, false, k, 0.0, 0.0, 10.0, 10.0, 0.7, b, -2.0)
+            }
+
+            // ══ فاز ۱۲ — پالایش روی آموزش: بافر بزرگ‌تر + فیلترها + معکوس + استراتژی ۲ ══
+            // شبکهٔ فاز ۱۱ در همهٔ خانه‌ها منفی بود (بهترین k5/b300 ≈ ‎−۰٫۲۰R‎). میانگین فاصلهٔ
+            // حد ضرر فقط ≈۳٫۶ واحد است و کارمزد هر معامله ≈۷ دلار؛ یعنی روی معامله‌های باریک
+            // کارمزد از خود ریسک بزرگ‌تر می‌شود. این فاز دقیقاً همان‌ها را هدف می‌گیرد:
+            // حداقل فاصلهٔ حد ضرر (minSl) و فیلتر کارمزد سند §۵-۳ (costMult).
+            "12" -> {
+                // ۱-۲ بافر باز هم بزرگ‌تر
+                add(Strategy.DOC, MoneyMode.MIXED, false, 5.0, 0.0, 0.0, 10.0, 10.0, 0.7, 450.0, -2.0)
+                add(Strategy.DOC, MoneyMode.MIXED, false, 5.0, 0.0, 0.0, 10.0, 10.0, 0.7, 600.0, -2.0)
+                // ۳-۴ حداقل فاصلهٔ حد ضرر روی بهترین هندسهٔ فاز ۱۱
+                add(Strategy.DOC, MoneyMode.MIXED, false, 5.0, 0.0, 2.5, 10.0, 10.0, 0.7, 300.0, -2.0)
+                add(Strategy.DOC, MoneyMode.MIXED, false, 5.0, 0.0, 4.0, 10.0, 10.0, 0.7, 300.0, -2.0)
+                // ۵ ترکیب سند §۵-۳ (همان که روی یک‌ساله برنده را بهتر کرد)
+                add(Strategy.DOC, MoneyMode.MIXED, false, 5.0, 4.0, 2.8, 10.0, 10.0, 0.7, 300.0, -2.0)
+                // ۶ فیلتر کارمزد تنها
+                add(Strategy.DOC, MoneyMode.MIXED, false, 5.0, 2.0, 0.0, 10.0, 10.0, 0.7, 300.0, -2.0)
+                // ۷ تریگر ۲ معکوس روی همین هندسه
+                add(Strategy.DOC, MoneyMode.MIXED, true, 5.0, 0.0, 0.0, 10.0, 10.0, 0.7, 300.0, -2.0)
+                // ۸ استراتژی ۲ با بافر پهن
+                add(Strategy.NO_TREND, MoneyMode.MIXED, false, 0.0, 0.0, 0.0, 10.0, 35.0, 0.7, 300.0, -2.0)
+            }
+
+            // ══ فاز ۱۳ — سقف N و بافر بزرگ‌تر (آموزش) ═══════════════════════════
+            // در فاز ۱۲ با بافر ۶۰۰، سقف N=۱۰ تعداد ۵٬۴۵۱ سفارش را رد کرد (۳ برابرِ گرفته‌شده‌ها)؛
+            // یعنی سقف سند دارد دقیقاً ستاپ‌های پهن را حذف می‌کند. این فاز آن گلوگاه را باز می‌کند.
+            "13" -> {
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 20.0, 10.0, 0.7, 600.0, -2.0)
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 40.0, 10.0, 0.7, 600.0, -2.0)
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 40.0, 10.0, 0.7, 900.0, -2.0)
+                add(Strategy.DOC, MoneyMode.MIXED, true, 7.0, 0.0, 0.0, 20.0, 10.0, 0.7, 600.0, -2.0)
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 4.0, 20.0, 10.0, 0.7, 600.0, -2.0)
+                add(Strategy.NO_TREND, MoneyMode.MIXED, false, 0.0, 0.0, 0.0, 40.0, 50.0, 0.7, 600.0, -2.0)
+            }
+
+            // ══ فاز ۱۴ — اهرم‌های دست‌نخورده روی آموزش ═══════════════════════════
+            // بافر به‌تنهایی علامت را عوض نکرد (بهترین ‎−۰٫۰۷۴R‎)؛ این فاز k بزرگ‌تر، حداقل
+            // فاصلهٔ حد سود، سقف ستاپ هم‌زمان، مود ManageAllLost و مودهای تایم‌فریم بالاتر
+            // (باکس‌های درشت‌تر ⇒ R دلاری بزرگ‌تر ⇒ سهم کارمزد کمتر) را می‌آزماید.
+            "14" -> {
+                add(Strategy.DOC, MoneyMode.MIXED, false, 10.0, 0.0, 0.0, 20.0, 10.0, 0.7, 600.0, -2.0)
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 20.0, 10.0, 0.7, 600.0, -2.0, minTP = 20.0)
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 20.0, 10.0, 0.7, 600.0, -2.0, maxSetups = 3)
+                add(Strategy.DOC, MoneyMode.MANAGE_ALL_LOST, false, 7.0, 0.0, 0.0, 20.0, 10.0, 0.7, 600.0, -2.0)
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 20.0, 10.0, 0.7, 600.0, -2.0, tfIdx = 4)
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 20.0, 10.0, 0.7, 600.0, -2.0, tfIdx = 3)
+            }
+
+            // ══ فاز ۱۶ — اعتبارسنجی روی پنجرهٔ نگه‌داشته‌شده (۲۰۲۳–۲۰۲۶) ═════════
+            // هیچ‌کدام از این ترکیب‌ها روی این پنجره تنظیم نشده‌اند؛ این‌جا فقط خوانده می‌شوند.
+            "16" -> {
+                // ۱ تنظیم فعلی اپ (بهینهٔ یک‌ساله) — مرجع
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 10.0, 10.0, 0.7, 200.0, -2.0)
+                // ۲ قهرمان آموزش
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 40.0, 10.0, 0.7, 900.0, -2.0)
+                // ۳ نقطهٔ میانی بافر
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 20.0, 10.0, 0.7, 600.0, -2.0)
+                // ۴ نزدیک‌ترین به سربه‌سر روی آموزش (تایم‌فریم روزانه)
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 20.0, 10.0, 0.7, 600.0, -2.0, tfIdx = 3)
+                // ۵ تریگر ۲ معکوس روی هندسهٔ پهن
+                add(Strategy.DOC, MoneyMode.MIXED, true, 7.0, 0.0, 0.0, 20.0, 10.0, 0.7, 600.0, -2.0)
+                // ۶ بهترین استراتژی ۲ آموزش
+                add(Strategy.NO_TREND, MoneyMode.MIXED, false, 0.0, 0.0, 0.0, 40.0, 50.0, 0.7, 600.0, -2.0)
+                // ۷ قهرمان آموزش در مود خاموش (§۵ — برای netCost مقایسه شود)
+                add(Strategy.DOC, MoneyMode.NONE, false, 7.0, 0.0, 0.0, 40.0, 10.0, 0.7, 900.0, -2.0)
+            }
+
+            // ══ فاز ۱۷ — ادامهٔ منحنی بافر: ۱۲۰۰ و ۱۵۰۰ تیک ═══════════════════════
+            // روی آموزش بافر ۹۰۰ بهترین بود و روی نگه‌داشته‌شده تنها خانهٔ مثبت؛ منحنی هنوز
+            // صعودی بود، پس دو پلهٔ دیگر هم خوانده می‌شود (روی هر دو پنجره اجرا می‌شود).
+            "17" -> {
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 60.0, 10.0, 0.7, 1200.0, -2.0)
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 60.0, 10.0, 0.7, 1500.0, -2.0)
+            }
+
+            // ══ فاز ۱۸ — فینال روی کل ده سال (بدون برش) ═══════════════════════════
+            // اعداد این فاز همان‌هایی است که در برچسب پیش‌تنظیم‌های اپ و README می‌آید.
+            "18" -> {
+                // ۱ ★ برنده: استراتژی ۱ · Mixed · بافر ۹۰۰
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 40.0, 10.0, 0.7, 900.0, -2.0)
+                // ۲ همان در مود خاموش (§۵)
+                add(Strategy.DOC, MoneyMode.NONE, false, 7.0, 0.0, 0.0, 40.0, 10.0, 0.7, 900.0, -2.0)
+                // ۳ تریگر ۲ معکوس روی هندسهٔ پهن
+                add(Strategy.DOC, MoneyMode.MIXED, true, 7.0, 0.0, 0.0, 20.0, 10.0, 0.7, 600.0, -2.0)
+                // ۴ بهترین استراتژی ۲
+                add(Strategy.NO_TREND, MoneyMode.MIXED, false, 0.0, 0.0, 0.0, 40.0, 50.0, 0.7, 600.0, -2.0)
+                // ۵ کم‌افت‌ترین خانواده (تایم‌فریم روزانه)
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 20.0, 10.0, 0.7, 600.0, -2.0, tfIdx = 3)
+            }
+
+            // ══ فاز ۱۹ — برنده روی دادهٔ یک‌ساله (برای انتظارات آزمون واحد سریع) ═══
+            "19" -> {
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 40.0, 10.0, 0.7, 900.0, -2.0)
+                add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 40.0, 10.0, 0.7, 900.0, -2.0, tfIdx = 3)
+            }
+
             else -> error("فاز ناشناخته: $phase")
         }
 
         println("SWEEP_PHASE=$phase ترکیب‌ها=${combos.size}")
         val dir = File(outDir).also { it.mkdirs() }
-        val csv = File(dir, "sweep_phase$phase.csv")
+        val win = if (fromYear() == Int.MIN_VALUE && toYear() == Int.MAX_VALUE) "" else
+            "_${if (fromYear() == Int.MIN_VALUE) "start" else fromYear()}-${if (toYear() == Int.MAX_VALUE) "end" else toYear()}"
+        val suffix = (if (tag == "1y") "" else "_$tag") + win
+        val csv = File(dir, "sweep_phase$phase$suffix.csv")
         val results = ArrayList<Result>(combos.size)
         csv.bufferedWriter().use { w ->
             w.write(CSV_HEADER); w.newLine()
@@ -349,6 +521,6 @@ class ParamSweepTest {
                 )
             }
         }
-        report(results, outDir, phase)
+        report(results, outDir, "$phase$suffix")
     }
 }

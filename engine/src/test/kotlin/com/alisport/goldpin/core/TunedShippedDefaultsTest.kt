@@ -15,8 +15,12 @@ import org.junit.jupiter.api.Assumptions.assumeTrue
  * **دادهٔ واقعی یک‌سالهٔ موجود در ریپؤ خود APK** می‌سنجد؛ یعنی اگر روزی کسی [Tuned] یا پیش‌فرض‌های
  * [Settings] را عوض کند و انتظار مثبت از بین برود، اینجا قرمز می‌شود — نه در دست کاربر.
  *
- * عددهای مرجع از جاروب پارامتر (`sweep/sweep_phase7.csv`) آمده‌اند:
- *   ۴۳۸ معامله · نرخ برد ۱۹٫۹٪ · انتظار ‎+۰٫۱۰R‎ · سود ‎+۳٬۴۳۸$‎ · ضریب سود ۱٫۱۹ · افت ۱٬۹۶۵$
+ * [Tuned] نسخهٔ ۲ روی دادهٔ ده‌ساله تنظیم شده است (جاروب `sweep/sweep_phase1*.csv`)؛ این
+ * آزمون همان تنظیم را روی سال آخر داده (همین فایل یک‌ساله) می‌سنجد تا مسیر ارسالی اپ
+ * سریع و در هر اجرا قفل بماند. عددهای مرجع از `sweep/sweep_phase19.csv`:
+ *   ۳۵۸ معامله · نرخ برد ۳۰٫۵٪ · انتظار ‎+۰٫۰۸۹R‎ · سود ‎+۴٬۸۷۸$‎ · ضریب سود ۱٫۱۶ · افت ۳٬۱۳۶$
+ * (کل ده سال با همین تنظیم: ۲٬۶۸۵ معامله · ‎−۰٫۰۱۳R‎ · ‎−۱٬۲۶۴$‎ · ضریب سود ۰٫۹۹۰؛
+ * پنجرهٔ نگه‌داشته‌شدهٔ ۲۰۲۳–۲۰۲۶: ‎+۰٫۰۲۲R‎ · ‎+۴٬۳۲۷$‎ — `sweep_phase18_10y.csv`.)
  */
 class TunedShippedDefaultsTest {
 
@@ -67,9 +71,9 @@ class TunedShippedDefaultsTest {
         // پیش‌شرط: تنظیم ارسالی همان چیزی باشد که جاروب سنجیده است.
         assertEquals(false, cfg.trigger2Fade)
         assertEquals(7.0, cfg.trigger2TargetR, 1e-9)
-        assertEquals(200.0, cfg.slBufTicks, 1e-9)
+        assertEquals(900.0, cfg.slBufTicks, 1e-9)
         assertEquals(-2.0, cfg.entryBufTicks, 1e-9)
-        assertEquals(10.0, cfg.maxSlUnits, 1e-9)
+        assertEquals(40.0, cfg.maxSlUnits, 1e-9)
         assertEquals(0.7, cfg.cmsnManual, 1e-9)
 
         val eng = Engine(cfg)
@@ -95,8 +99,8 @@ class TunedShippedDefaultsTest {
         assertTrue(s.avgR > 0.0, "انتظار باید مثبت باشد: avgR=${s.avgR}")
         assertTrue(s.net > 0.0, "سود خالص باید مثبت باشد: net=${s.net}")
         assertTrue(s.profitFactor > 1.10, "ضریب سود باید بالای ۱٫۱۰ باشد: pf=${s.profitFactor}")
-        // ۳) نرخ برد در همان بازهٔ اندازه‌گیری‌شده (۱۹–۲۲٪) بماند؛ تغییر بزرگ یعنی رگرسیون.
-        assertTrue(winRate in 15.0..26.0, "نرخ برد بیرون از بازهٔ مرجع است: $winRate")
+        // ۳) نرخ برد در همان بازهٔ اندازه‌گیری‌شده (۳۰٫۵٪) بماند؛ تغییر بزرگ یعنی رگرسیون.
+        assertTrue(winRate in 24.0..38.0, "نرخ برد بیرون از بازهٔ مرجع است: $winRate")
         // ۴) افت سرمایه در حد همان اندازه‌گیری (نه انفجاری).
         assertTrue(s.maxDD < 5_000.0, "افت سرمایه بیشتر از حد مرجع است: ${s.maxDD}")
 

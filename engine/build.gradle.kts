@@ -23,4 +23,7 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
     testLogging { events("passed", "failed", "skipped") }
+    // جاروب پارامتر روی دیتاست ده‌ساله (۳٫۴ میلیون کندل) به هیپ بزرگ‌تری نیاز دارد؛
+    // چون دستگاه کم‌حافظه است، اندازهٔ هیپ از بیرون تزریق می‌شود نه ثابت.
+    maxHeapSize = System.getenv("SWEEP_HEAP") ?: "512m"
 }
