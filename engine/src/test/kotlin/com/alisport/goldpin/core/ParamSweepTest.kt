@@ -51,7 +51,7 @@ class ParamSweepTest {
 
         fun loadCandles(tag: String = dataTag()): List<Candle> {
             val f = dataFile(tag) ?: error("فایل دادهٔ $tag پیدا نشد")
-            val cap = when (tag) { "10y" -> 3_500_000; "3y" -> 1_100_000; "2y" -> 750_000; else -> 360_000 }
+            val cap = when (tag) { "20y" -> 6_700_000; "10y" -> 3_500_000; "3y" -> 1_100_000; "2y" -> 750_000; else -> 360_000 }
             val from = fromYear(); val to = toYear()
             val slicing = from != Int.MIN_VALUE || to != Int.MAX_VALUE
             val out = ArrayList<Candle>(if (slicing) cap / 4 else cap)
@@ -497,6 +497,14 @@ class ParamSweepTest {
             "19" -> {
                 add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 40.0, 10.0, 0.7, 900.0, -2.0)
                 add(Strategy.DOC, MoneyMode.MIXED, false, 7.0, 0.0, 0.0, 40.0, 10.0, 0.7, 900.0, -2.0, tfIdx = 3)
+            }
+
+            // ══ فاز ۲۰ — راستی‌آزمایی برش ۲۰ساله: تنظیم ارسالی فعلی روی کل ۲۰ سال ══
+            // هدف، تنظیم تازه نیست؛ فقط ثابت می‌کند دیتاست ۲۰ساله از بارگذاری تا خروجی
+            // موتور کامل اجرا می‌شود و رفتار تنظیم فعلی روی دو دهه دیده می‌شود.
+            "20" -> {
+                add(Strategy.DOC, MoneyMode.MIXED, false, Tuned.TARGET_R, 0.0, 0.0,
+                    Tuned.MAX_SL_UNITS, 10.0, 0.7, Tuned.SL_BUF_TICKS, Tuned.ENTRY_BUF_TICKS)
             }
 
             else -> error("فاز ناشناخته: $phase")
