@@ -1,6 +1,6 @@
 # GoldPin
 
-اپ اندروید و موتور بک‌تست استراتژی GoldPin. نسخهٔ این انتشار: **1.4.51 (versionCode 64)**.
+اپ اندروید و موتور بک‌تست استراتژی GoldPin. نسخهٔ این انتشار: **1.4.51 (versionCode 64)** — دانلود: [`GoldPin-1.4.51-64.apk`](https://github.com/alisport1384/ST2/releases/download/v1.4.51/GoldPin-1.4.51-64.apk) · گزارش: [`docs/GOZARESH-MODIRIYAT-v1.4.51.md`](docs/GOZARESH-MODIRIYAT-v1.4.51.md).
 
 ## دادهٔ بک‌تست طلا (XAUUSD، M1)
 
