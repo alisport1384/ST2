@@ -159,6 +159,9 @@ class PaperBroker(private val cfg: Settings) {
     var alertSink: ((String, String, String) -> Unit)? = null
 
     private fun lg(cat: String, msg: String, data: String? = null) { logSink?.invoke(cat, msg, data) }
+
+    /** وضعیت موتور ترکیبی (۱٫۴٫۵۲) — رژیم بازار، استرس حساب و ضریب‌های تصمیم. */
+    val cx = CompositeState()
     private fun fmt(v: Double): String = if (v.isNaN()) "-" else String.format("%.2f", v)
     private fun alarm(kind: String, title: String, body: String) { alertSink?.invoke(kind, title, body) }
 
@@ -191,6 +194,35 @@ class PaperBroker(private val cfg: Settings) {
     }
 
     /** حجم بر اساس ریسک یا درصد سرمایه — با درنظرگرفتن مارجین مصرف‌شده. */
+    /**
+     * حجم در حالت موتور ترکیبی (۱٫۴٫۵۲).
+     *
+     * چرا جدا از [qtyFor]: `qtyFor` همیشه از `equity` استفاده می‌کند ⟹ مرکب کامل. روی ۲۰ سال
+     * همین مرکب با ریسک ۱٪ نتیجهٔ ‎−۲٫۹٪‎ با افت ۴۶٪ داد، در حالی که اندازهٔ ثابت ‎+۲٫۵٪‎ با
+     * افت ۱۰٪. پس پیش‌فرض «مرکب سقف‌دار» است: سرمایه تا [Settings.cxCompoundCap]× پایه در
+     * حجم اثر می‌کند و بعد از آن حجم از سود قفل می‌شود (دنبالهٔ زیان بُریده می‌شود).
+     */
+    fun qtyForCx(px: Double, sl: Double): Double {
+        if (cfg.cxMode <= 1) return qtyFor(px, sl)
+        if (px <= 0.0) return 0.0
+        val risk = abs(px - sl)
+        if (risk <= 0.0) return 0.0
+        val base = cfg.initialEquity
+        val effEquity = when (cfg.cxSizeMode) {
+            0 -> base                                                       // اندازهٔ ثابت
+            1 -> min(equity, base * cfg.cxCompoundCap.coerceAtLeast(0.1))   // مرکب سقف‌دار
+            else -> equity                                                  // مرکب کامل
+        }
+        val f = cx.sizeFactor(cfg)
+        var q = if (cfg.useRiskPct) effEquity * cfg.riskPct / 100.0 / risk
+        else effEquity * cfg.equityPct / 100.0 / px
+        q *= f
+        q = min(q, marginCapQty(px, cfg.maxLeverage))
+        if (cfg.roundQty) q = floor(q)
+        cx.note(cfg, f)
+        return max(q, 0.0)
+    }
+
     fun qtyFor(px: Double, sl: Double): Double {
         if (px <= 0) return 0.0
         val risk = abs(px - sl)
@@ -226,6 +258,29 @@ class PaperBroker(private val cfg: Settings) {
             lastError = "نگهبان منحنی سرمایه: افت ${fmt(guardDdPct)}٪ از اوج — ورود تازه متوقف است (CurveGuard)"
             return false
         }
+        // ── موتور ترکیبی (۱٫۴٫۵۲): گیت‌های سخت لایهٔ ۵ ─────────────────────────────
+        // ⚠ عمداً **پیش از** شمارش ظرفیت و ساخت سفارش اجرا می‌شود تا محاسبهٔ حجم و
+        // هندسه هیچ‌گاه روی معامله‌ای که مجاز نیست انجام نشود.
+        if (cfg.cxMode > 0) {
+            val a = engine?.structureAtr(cfg.slAtrPeriod) ?: Double.NaN
+            if (a.isFinite() && a > 0.0 && bar.c > 0.0) cx.onBar(bar.t, bar.h, bar.l, bar.c, a / bar.c * 100.0)
+            cx.onAccount(equity, maxEquity, trades.filter { !it.open }.map { rNow(it, it.exitPx ?: it.entry) }, cfg)
+            if (!cx.regimeAllows(cfg)) {
+                cx.rejectedRegimeX()
+                lastError = "موتور ترکیبی: نوسان ${fmt(cx.atrP)}٪ کمتر از گیت رژیم ${fmt(cx.requiredAtrPct(cfg))}٪ است — ورود ثبت نمی‌شود"
+                lg("ORDER", "سفارش ثبت نشد — گیت رژیم",
+                    "ATR%=${fmt(cx.atrP)} لازم=${fmt(cx.requiredAtrPct(cfg))} رژیم=${cx.regime} bar=${bar.bi}")
+                return false
+            }
+            val boxH = abs(s.hvH - s.hvL)
+            if (!cx.boxAllows(cfg, boxH, a)) {
+                cx.rejectedBoxX()
+                lastError = "موتور ترکیبی: ارتفاع باکس (${fmt(boxH)}) کمتر از ${fmt(cfg.cxBoxMinUnits)}×ATR است — ورود ثبت نمی‌شود"
+                lg("ORDER", "سفارش ثبت نشد — گیت ساختار",
+                    "boxH=${fmt(boxH)} ATR=${fmt(a)} لازم=${fmt(cfg.cxBoxMinUnits * a)} bar=${bar.bi}")
+                return false
+            }
+        }
         val activeCount = activeCount()
         if (cfg.strategy == Strategy.NO_TREND) {
             // استراتژی ۲: خرید و فروش هم‌زمان مجازند؛ از هر جهت فقط یک سفارش (معلق یا باز).
@@ -255,12 +310,22 @@ class PaperBroker(private val cfg: Settings) {
         var mmNote = ""
         var mmCm = false
         val qty: Double
-        if (mm.active) {
+        // تصمیم مالک (۴ آبان ۱۴۰۵): با روشن‌بودن موتور ترکیبی، مود ManageAllLost **قفل** است.
+        // دلیل عددی: اجرای پیوستهٔ ۲۰سالهٔ همین مود حساب را نابود کرد (‎−۱۰۱٬۹۰۱$‎، افت ۱۰۴٬۵۱۹$).
+        val mmActive = mm.active && !(cfg.cxMode > 0 && cfg.mmMode == MoneyMode.MANAGE_ALL_LOST)
+        if (mmActive) {
             // §۲۰ سند: Lot = Lost/div + MinLot (ManageAllLost) یا ManageNothing/ManageCM (Mixed).
             // سقف اهرم (تنها متغیر اهرم، [Settings.maxLeverage]) آخرین حدّ است: «حجم نهایی نباید از سرمایه × اهرم ÷ قیمت بیشتر شود».
             val m = mm.lotFor(balance, entryPx, s.tpx)
             val cap = marginCapQty(entryPx, cfg.maxLeverage)
             var q = min(m.raw, cap) * guardScale
+            // موتور ترکیبی (۱٫۴٫۵۲): ضریب اندازهٔ لایهٔ ۶ باید روی **هر** مسیر حجم‌گذاری
+            // (مدیر پول هم شامل) اثر بگذارد؛ وگرنه با mm=1/2 لایهٔ حجم بی‌اثر می‌شد.
+            if (cfg.cxMode > 1) {
+                val cf = cx.sizeFactor(cfg)
+                cx.note(cfg, cf)
+                q *= cf
+            }
             q = mm.floorToStep(q)
             if (cfg.roundQty) q = floor(q)
             qty = max(q, 0.0)
@@ -268,7 +333,8 @@ class PaperBroker(private val cfg: Settings) {
             mmNote = m.note + (if (m.raw > cap) " · سقف اهرم ${MoneyManager.n2(cfg.maxLeverage)}× اعمال شد" else "") +
                 " → حجم ${MoneyManager.n2(qty)}"
         } else {
-            qty = qtyFor(entryPx, s.sl) * guardScale
+            qty = qtyForCx(entryPx, s.sl) * guardScale
+            if (cfg.cxMode > 0) lg("ORDER", "کارت تصمیم ترکیبی — سفارش ثبت شد", cx.lastNote)
         }
         if (qty <= 0) {
             lastError = "حجم صفر بود (مارجین کافی نیست یا حدضرر صفر)"
@@ -341,6 +407,12 @@ class PaperBroker(private val cfg: Settings) {
         if (MarketHours.isClosed(cd.t)) return
         // نمونهٔ ATR% برای دروازهٔ نوسان (هر ساعت یک نمونه) — پیش از هر تصمیم این کندل
         if (cfg.mgmtMode != 0) sampleAtrPct(cd)
+        // موتور ترکیبی: وضعیت بازار هر کندل (فقط کندل بسته؛ بدون نگاه به آینده)
+        if (cfg.cxMode > 0) {
+            val a = engine?.structureAtr(cfg.slAtrPeriod) ?: Double.NaN
+            val atrPct = if (a.isFinite() && a > 0.0 && cd.c > 0.0) a / cd.c * 100.0 else Double.NaN
+            cx.onBar(cd.t, cd.h, cd.l, cd.c, atrPct)
+        }
         // §18-27 سند: رأس ۲۰:۰۰ UTC تمامی معاملات باز بسته و نتایج محاسبه و ثبت می‌شوند
         // (دلیل: پایان زمان) و سفارش‌های معلق هم لغو می‌شوند تا شبانه پر نشوند.
         // قیمت بستن = قیمت لحظهٔ ۲۰:۰۰ = بازشدن اولین کندلِ ساعت ۲۰:۰۰ به بعد؛ این خروج
@@ -539,7 +611,11 @@ class PaperBroker(private val cfg: Settings) {
                 val r = rNow(t, st.prevClose)
                 if (r > st.peakR) st.peakR = r
                 if (cfg.mgmtTrailStartR > 0.0 && st.peakR >= cfg.mgmtTrailStartR) {
-                    val cand = st.peakR - cfg.mgmtTrailDistR
+                    // موتور ترکیبی (۱٫۴٫۵۲) — لایهٔ ۷: در رژیم پرنوسان (۲) فاصلهٔ تریل کمی
+                    // بازتر می‌شود تا نویزِ نوسان، سود باز را نبندد؛ ضریب سقف‌دار [cxTrailRegime2].
+                    var tdR = cfg.mgmtTrailDistR
+                    if (cfg.cxMode >= 2 && cx.regime == 2) tdR *= cfg.cxTrailRegime2.coerceIn(1.0, 2.0)
+                    val cand = st.peakR - tdR
                     if (st.trailR.isNaN() || cand > st.trailR) st.trailR = cand
                 }
             }

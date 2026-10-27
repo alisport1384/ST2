@@ -122,6 +122,16 @@ private class Conf {
     var trailStart = Tuned.MGMT_TRAIL_START_R
     var trailDist = Tuned.MGMT_TRAIL_DIST_R
     var mgmtGate = Tuned.MGMT_VOL_GATE_PCT
+    // موتور ترکیبی ۱٫۴٫۵۲ (پیش‌فرض = همان پیش‌فرض جدید اپ)
+    var cx = 3
+    var cxGate = 0.33
+    var cxGateCalm = 0.40
+    var cxBox = 0.10
+    var cxSize = 1
+    var cxCap = 1.5
+    var cxStress = 1.0
+    var cxWiden = 1.15
+    var cxTrail2 = 1.10
 
     fun parse(spec: String, tagOverride: String?) {
         for (kv in spec.split(',').map { it.trim() }.filter { it.isNotEmpty() }) {
@@ -165,6 +175,15 @@ private class Conf {
                 "trailStart" -> trailStart = v.toDouble()
                 "trailDist" -> trailDist = v.toDouble()
                 "mgmtGate" -> mgmtGate = v.toDouble()
+                "cx" -> cx = v.toInt()
+                "cxGate" -> cxGate = v.toDouble()
+                "cxGateCalm" -> cxGateCalm = v.toDouble()
+                "cxBox" -> cxBox = v.toDouble()
+                "cxSize" -> cxSize = v.toInt()
+                "cxCap" -> cxCap = v.toDouble()
+                "cxStress" -> cxStress = v.toDouble()
+                "cxWiden" -> cxWiden = v.toDouble()
+                "cxTrail2" -> cxTrail2 = v.toDouble()
                 "tag" -> tag = v
                 else -> {}
             }
@@ -209,6 +228,15 @@ private class Conf {
             mgmtTrailStartR = this@Conf.trailStart
             mgmtTrailDistR = this@Conf.trailDist
             mgmtVolGatePct = this@Conf.mgmtGate
+            cxMode = this@Conf.cx
+            cxRegimeGate = this@Conf.cxGate
+            cxRegimeGateCalm = this@Conf.cxGateCalm
+            cxBoxMinUnits = this@Conf.cxBox
+            cxSizeMode = this@Conf.cxSize
+            cxCompoundCap = this@Conf.cxCap
+            cxStressFloor = this@Conf.cxStress
+            cxSlWidenMax = this@Conf.cxWiden
+            cxTrailRegime2 = this@Conf.cxTrail2
             cmsnAuto = false
             cmsnManual = this@Conf.cmsn
             minLotAuto = false

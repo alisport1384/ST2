@@ -1332,6 +1332,90 @@ class MainActivity : Activity() {
                 (if (s.broker.mgmtFadeClassic > 0) "، ${Fa.d(s.broker.mgmtFadeClassic.toString())} معاملهٔ فید کلاسیک ماند" else "") + ".",
             10.5f, Palette.gold))
 
+        // ── موتور ترکیبی (۱٫۴٫۵۲) ─────────────────────────────────────────────────
+        // چرا: هر لایه جدا روی ۲۰ سال دادهٔ واقعی آزموده شد و فقط لایه‌هایی ماندند که
+        // سود را بالا بردند **بدون** اینکه افت را تیزتر کنند. عددها:
+        //   پایهٔ ۱٫۴٫۵۱  ‎+۱۰٬۵۸۳$‎ · ‎+۰٫۰۳۱۱R‎ · افت ۷٬۸۸۴$ (۷٫۷۹٪)
+        //   ترکیبی        ‎+۱۹٬۴۷۷$‎ · ‎+۰٫۱۳۹۷R‎ · افت ۳٬۵۳۴$ (۳٫۴۳٪)  ← پیش‌فرض
+        // لایهٔ «کم‌کردن حجم در استرس» آزموده و **حذف** شد (بازده/افت را بدتر می‌کرد).
+        // گزارش کامل: docs/GOZARESH-AZMAYESH-CX-20Y-v1.4.52.md
+        val cxNames = arrayOf(
+            "خاموش — رفتار دقیق ۱٫۴٫۵۱",
+            "لایهٔ ۱: گیت رژیم نوسان + گیت ارتفاع باکس",
+            "لایهٔ ۲: گیت‌ها + حجم هوشمند (مرکب سقف‌دار)",
+            "لایهٔ ۳: + پهن‌کردن حد ضرر و تریل رژیم ★ (پیش‌فرض)")
+        v.addView(Ui.btn(this, "موتور ترکیبی : " + cxNames[s.cfg.cxMode.coerceIn(0, 3)],
+            Palette.panel2, Palette.txt, 11.5f).apply {
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity).setTitle("موتور ترکیبی (۱٫۴٫۵۲)")
+                    .setItems(cxNames) { _, w ->
+                        s.cfg.cxMode = w
+                        Log.i(Log.CAT_CFG, "مود موتور ترکیبی", "cxMode=$w")
+                        s.rebuildAsync(); showTab(4)
+                    }.show()
+            }
+        })
+        v.addView(Ui.tv(this,
+            "ترتیب لایه‌ها عمدی است: هر لایه مستقل آزمون‌پذیر است، پس اگر یکی در رژیم شما " +
+                "ضرر زد می‌توانید فقط همان را خاموش کنید. با روشن‌بودن ترکیبی، مود «Manage All Lost» " +
+                "قفل می‌شود (روی ۲۰ سال حساب را نابود کرد).", 10.5f, Palette.dim))
+        if (s.cfg.cxMode > 0) {
+            v.addView(numRow("گیت رژیم: حداقل ATR٪ (۰ = خاموش)", s.cfg.cxRegimeGate) {
+                s.cfg.cxRegimeGate = it.coerceIn(0.0, 5.0); s.rebuildAsync()
+            })
+            v.addView(numRow("همان گیت در رژیم آرام (٪)", s.cfg.cxRegimeGateCalm) {
+                s.cfg.cxRegimeGateCalm = it.coerceIn(0.0, 5.0); s.rebuildAsync()
+            })
+            v.addView(numRow("گیت ساختار: ارتفاع باکس ÷ ATR (۰ = خاموش)", s.cfg.cxBoxMinUnits) {
+                s.cfg.cxBoxMinUnits = it.coerceIn(0.0, 1.0); s.rebuildAsync()
+            })
+        }
+        if (s.cfg.cxMode > 1) {
+            val sizeNames = arrayOf(
+                "اندازهٔ ثابت (سرمایهٔ پایه)",
+                "مرکب سقف‌دار ★ (پیش‌فرض، سقف ۱٫۵×)",
+                "مرکب کامل (رفتار قدیم — افت ۴۶٪ در ۲۰ سال)")
+            v.addView(Ui.btn(this, "حجم : " + sizeNames[s.cfg.cxSizeMode.coerceIn(0, 2)],
+                Palette.panel2, Palette.txt, 11.5f).apply {
+                setOnClickListener {
+                    AlertDialog.Builder(this@MainActivity).setTitle("اندازهٔ حجم در موتور ترکیبی")
+                        .setItems(sizeNames) { _, w -> s.cfg.cxSizeMode = w; s.rebuildAsync(); showTab(4) }
+                        .show()
+                }
+            })
+            if (s.cfg.cxSizeMode == 1) {
+                v.addView(numRow("سقف مرکب (ضریب سرمایهٔ پایه)", s.cfg.cxCompoundCap) {
+                    s.cfg.cxCompoundCap = it.coerceIn(1.0, 5.0); s.rebuildAsync()
+                })
+            }
+            v.addView(numRow("کف ضریب استرس (۱ = خاموش ★)", s.cfg.cxStressFloor) {
+                s.cfg.cxStressFloor = it.coerceIn(0.05, 1.0); s.rebuildAsync()
+            })
+        }
+        if (s.cfg.cxMode > 2) {
+            v.addView(numRow("سقف پهن‌کردن حد ضرر (۱ = خاموش)", s.cfg.cxSlWidenMax) {
+                s.cfg.cxSlWidenMax = it.coerceIn(1.0, 2.0); s.rebuildAsync()
+            })
+            v.addView(numRow("ضریب فاصلهٔ تریل در رژیم پرنوسان", s.cfg.cxTrailRegime2) {
+                s.cfg.cxTrailRegime2 = it.coerceIn(1.0, 2.0); s.rebuildAsync()
+            })
+        }
+        if (s.cfg.cxMode > 0) {
+            val cxs = s.broker.cx
+            val needNow = cxs.requiredAtrPct(s.cfg)
+            val regimeFa = when (cxs.regime) { 0 -> "آرام"; 2 -> "پرنوسان"; else -> "عادی" }
+            v.addView(Ui.tv(this,
+                "وضعیت ترکیبی اکنون: رژیم $regimeFa (صدک ${Fa.n(cxs.atrPctile * 100, 0)}٪ پنجرهٔ ۳۰۰ ساعته) · " +
+                    "ATR ${Fa.n(cxs.atrP, 3)}٪ و حد لازم ${Fa.n(needNow, 2)}٪ ⇒ " +
+                    (if (cxs.atrP <= 0.0) "داده کافی نیست (ورود بسته نیست)"
+                     else if (cxs.atrP >= needNow) "ورود مجاز است" else "ورود بسته است") +
+                    " · ضریب حجم فعلی ${Fa.n(cxs.fRegime * cxs.fStress * cxs.fShape, 2)}× " +
+                    "(رژیم ${Fa.n(cxs.fRegime, 2)} × استرس ${Fa.n(cxs.fStress, 2)} × شکل ${Fa.n(cxs.fShape, 2)})" +
+                    " · در آخرین اجرا ${Fa.d(cxs.rejectedRegime.toString())} ورود با گیت رژیم و " +
+                    "${Fa.d(cxs.rejectedBox.toString())} ورود با گیت ساختار رد شد.",
+                10.5f, Palette.gold))
+        }
+
         // ── مکانیزم ۲: نگهبان منحنی سرمایه (CurveGuard) ───────────────────────────
         v.addView(switchRow("نگهبان منحنی: کاهش ریسک در افت سرمایه", s.cfg.guardMode >= 1) {
             s.cfg.guardMode = if (it) 1 else 0; s.rebuildAsync()

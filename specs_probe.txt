@@ -1,0 +1,1 @@
+base-def|s=1,mm=2,k=7,b=1800,N=80,eb=-2,hFrom=1,hTo=20,atrPct=0,mgmt=0,cmsn=0.7,cx=0

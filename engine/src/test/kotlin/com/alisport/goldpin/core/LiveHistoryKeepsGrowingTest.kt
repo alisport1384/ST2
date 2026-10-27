@@ -22,6 +22,11 @@ class LiveHistoryKeepsGrowingTest {
             vpRows = 24; vpSmooth = 0; distMode = VolumeProfile.DIST_UNIFORM
             tfMode = 1; tfS = Tf.H1; tfM = Tf.M15; tf1 = Tf.M5; tf2 = Tf.M1
             maxSlUnits = 3.0
+            // موتور ترکیبی عمداً خاموش: این تست قرارداد «تاریخچه در لایو پاک نشود» را می‌سنجد،
+            // نه سیاست ورود. سری ساختگی این تست دامنهٔ ~۱٫۲ دلاری روی قیمت ۴٬۰۰۰ دارد
+            // (ATR% ≈ ۰٫۰۳) و گیت نوسان پیش‌فرض (۰٫۳۳٪) همهٔ ورودها را می‌بندد — که رفتار
+            // درستِ گیت است، ولی موضوع این تست نیست.
+            cxMode = 0
         }
         val e = Engine(cfg)
         val b = PaperBroker(cfg)

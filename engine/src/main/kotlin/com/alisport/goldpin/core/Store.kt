@@ -86,6 +86,10 @@ object Store {
         "mgmtMode" to c.mgmtMode, "mgmtHoldMinR" to c.mgmtHoldMinR, "mgmtHoldMaxDays" to c.mgmtHoldMaxDays,
         "mgmtTrailStartR" to c.mgmtTrailStartR, "mgmtTrailDistR" to c.mgmtTrailDistR,
         "mgmtVolGatePct" to c.mgmtVolGatePct,
+        // موتور ترکیبی (۱٫۴٫۵۲)
+        "cxMode" to c.cxMode, "cxRegimeGate" to c.cxRegimeGate, "cxRegimeGateCalm" to c.cxRegimeGateCalm,
+        "cxBoxMinUnits" to c.cxBoxMinUnits, "cxSizeMode" to c.cxSizeMode, "cxCompoundCap" to c.cxCompoundCap,
+        "cxStressFloor" to c.cxStressFloor, "cxSlWidenMax" to c.cxSlWidenMax, "cxTrailRegime2" to c.cxTrailRegime2,
         "useRiskPct" to c.useRiskPct, "riskPct" to c.riskPct, "equityPct" to c.equityPct,
         "maxLeverage" to c.maxLeverage, "levModel" to 2, "roundQty" to c.roundQty,
         "contractSize" to c.contractSize, "initialEquity" to c.initialEquity,
@@ -158,6 +162,16 @@ object Store {
         if (m.containsKey("mgmtTrailStartR")) c.mgmtTrailStartR = m["mgmtTrailStartR"].asD()
         if (m.containsKey("mgmtTrailDistR")) c.mgmtTrailDistR = m["mgmtTrailDistR"].asD()
         if (m.containsKey("mgmtVolGatePct")) c.mgmtVolGatePct = m["mgmtVolGatePct"].asD()
+        // موتور ترکیبی (۱٫۴٫۵۲) — اگر کلید نبود، پیش‌فرض جدید اپ می‌ماند
+        if (m.containsKey("cxMode")) c.cxMode = m["cxMode"].asI()
+        if (m.containsKey("cxRegimeGate")) c.cxRegimeGate = m["cxRegimeGate"].asD()
+        if (m.containsKey("cxRegimeGateCalm")) c.cxRegimeGateCalm = m["cxRegimeGateCalm"].asD()
+        if (m.containsKey("cxBoxMinUnits")) c.cxBoxMinUnits = m["cxBoxMinUnits"].asD()
+        if (m.containsKey("cxSizeMode")) c.cxSizeMode = m["cxSizeMode"].asI()
+        if (m.containsKey("cxCompoundCap")) c.cxCompoundCap = m["cxCompoundCap"].asD()
+        if (m.containsKey("cxStressFloor")) c.cxStressFloor = m["cxStressFloor"].asD()
+        if (m.containsKey("cxSlWidenMax")) c.cxSlWidenMax = m["cxSlWidenMax"].asD()
+        if (m.containsKey("cxTrailRegime2")) c.cxTrailRegime2 = m["cxTrailRegime2"].asD()
         if (m.containsKey("mmMode")) c.mmMode = m["mmMode"].asI()
         if (m.containsKey("minLotAuto")) c.minLotAuto = m["minLotAuto"].asB()
         if (m.containsKey("minLotManual")) c.minLotManual = m["minLotManual"].asD()

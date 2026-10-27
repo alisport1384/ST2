@@ -1,0 +1,6 @@
+B1-g35box10|s=1,mm=2,k=7,b=1800,N=80,eb=-2,cmsn=0.7,hFrom=5,hTo=15,atrPct=0.25,mgmt=1,cx=2,cxGate=0.35,cxBox=0.10,cxSize=1,cxCap=1.5
+B1-g35box10w|s=1,mm=2,k=7,b=1800,N=80,eb=-2,cmsn=0.7,hFrom=5,hTo=15,atrPct=0.25,mgmt=1,cx=3,cxGate=0.35,cxBox=0.10,cxSize=1,cxCap=1.5,cxWiden=1.15,cxTrail2=1.10
+B1-g33box10|s=1,mm=2,k=7,b=1800,N=80,eb=-2,cmsn=0.7,hFrom=5,hTo=15,atrPct=0.25,mgmt=1,cx=2,cxGate=0.33,cxBox=0.10,cxSize=1,cxCap=1.5
+B1-g35box10m0|s=1,mm=0,k=7,b=1800,N=80,eb=-2,cmsn=0.7,hFrom=5,hTo=15,atrPct=0.25,mgmt=1,cx=2,cxGate=0.35,cxBox=0.10,cxSize=1,cxCap=1.5
+B1-g35box10m0so|s=1,mm=0,k=7,b=1800,N=80,eb=-2,cmsn=0.7,hFrom=5,hTo=15,atrPct=0.25,mgmt=1,cx=2,cxGate=0.35,cxBox=0.10,cxSize=1,cxCap=1.5,cxStress=1.0
+A1-g35|s=1,mm=2,k=7,b=1800,N=80,eb=-2,cmsn=0.7,hFrom=1,hTo=20,atrPct=0,mgmt=1,cx=1,cxGate=0.35

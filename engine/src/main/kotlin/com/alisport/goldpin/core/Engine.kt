@@ -198,6 +198,44 @@ class Settings {
      * بی‌دروازه در دو دورهٔ قدیمی بدتر بود.
      */
     var mgmtVolGatePct: Double = 0.30
+
+    // ══ موتور ترکیبی (Composite) — نسخهٔ ۱٫۴٫۵۲ ═════════════════════════════════
+    /**
+     * `0` خاموش (رفتار ۱٫۴٫۵۱) · `1` فقط گیت‌های سخت (رژیم + ساختار) ·
+     * `2` گیت‌ها + حجم هوشمند · `3` + حد ضرر داده‌محور (پیش‌فرض).
+     *
+     * چرا این ترتیب: هر لایه باید مستقل آزمون‌پذیر باشد تا اثرش در تست از بقیه جدا شود.
+     * آزمون ۲۰ساله: ‎+۱۰٬۵۸۳$‎ (پایه) ← ‎+۱۹٬۴۷۷$‎ · افت ۷٬۸۸۴$ ← ۳٬۵۳۴$.
+     * گزارش: `docs/GOZARESH-AZMAYESH-CX-20Y-v1.4.52.md`.
+     */
+    var cxMode: Int = 3
+    /**
+     * حداقل ATR% برای ورود در رژیم عادی/پرنوسان (گیت سخت).
+     * آزمون ۲۰ساله (کارمزد ۰٫۷): ۰٫۳۰ ‎+۰٫۰۷۲R‎ · ۰٫۳۳ ‎+۰٫۱۳۹۷R‎ · ۰٫۳۵ ‎+۰٫۱۴۳R‎ ·
+     * ۰٫۴۰ سقوط به ‎+۰٫۰۶۳R‎ (بیش‌فیلتر). ۰٫۳۳: بهترین سود خالص + پایین‌ترین افت.
+     */
+    var cxRegimeGate: Double = 0.33
+    /** حداقل ATR% در رژیم آرام — سخت‌گیرانه‌تر، چون فیلترها در بازار آرام آسیب می‌زنند. */
+    var cxRegimeGateCalm: Double = 0.40
+    /** گیت ساختار: ارتفاع باکس ≥ این ضریب × ATR. ۰ = خاموش. (آزمون: ‎+۰٫۱۵۴R‎) */
+    var cxBoxMinUnits: Double = 0.10
+    /** حجم: `0` اندازهٔ ثابت · `1` مرکب سقف‌دار (پیش‌فرض) · `2` مرکب کامل (رفتار قدیم). */
+    var cxSizeMode: Int = 1
+    /** سقف مرکب: سرمایه فقط تا این ضریب × سرمایهٔ پایه در حجم اثر می‌کند (۱٫۵ = ۱۵۰٪). */
+    var cxCompoundCap: Double = 1.5
+    /**
+     * کف ضریب استرس (۱٫۰ = لایهٔ استرس **خاموش**؛ هرگز صفر نمی‌شود).
+     *
+     * تصمیم مالک: «اگر استرس ضرر می‌زند یا افت را تیزتر می‌کند، حذف شود.»
+     * آزمون ۲۰سالهٔ ریسک‌محور: با استرس ‎+۷۹٬۸۰۴$‎ و افت ۱۳٫۲٪ — بدون استرس ‎+۱۱۱٬۲۲۳$‎ و
+     * افت ۱۶٫۲٪ ⟹ بازده/افت بدون استرس بهتر است (۵٫۵۲ در برابر ۴٫۹۴) ⟹ پیش‌فرض خاموش شد؛
+     * کد می‌ماند تا هر وقت لازم شد روشن شود (`cxStressFloor=0.40`).
+     */
+    var cxStressFloor: Double = 1.0
+    /** سقف پهن‌کردن حد ضرر. ۱٫۰ = خاموش. آزمون ۲۰ساله: ۱٫۱۵ (۱٫۳۵ اثر بیشتری نداشت). */
+    var cxSlWidenMax: Double = 1.15
+    /** فاصلهٔ تریلینگ در رژیم پرنوسان (فقط cxMode ≥ ۳ و رژیم ۲). */
+    var cxTrailRegime2: Double = 1.10
     // ── نگهبان منحنی سرمایه (CurveGuard) — نسخهٔ ۱٫۴٫۴۹ ────────────────────────
     /** `0` خاموش (رفتار قبل) · `1` کاهش ریسک در افت · `2` کاهش + توقف کامل در افت سخت. */
     var guardMode: Int = 0
@@ -297,6 +335,9 @@ class Settings {
         it.mgmtMode = mgmtMode; it.mgmtHoldMinR = mgmtHoldMinR; it.mgmtHoldMaxDays = mgmtHoldMaxDays
         it.mgmtTrailStartR = mgmtTrailStartR; it.mgmtTrailDistR = mgmtTrailDistR
         it.mgmtVolGatePct = mgmtVolGatePct
+        it.cxMode = cxMode; it.cxRegimeGate = cxRegimeGate; it.cxRegimeGateCalm = cxRegimeGateCalm
+        it.cxBoxMinUnits = cxBoxMinUnits; it.cxSizeMode = cxSizeMode; it.cxCompoundCap = cxCompoundCap
+        it.cxStressFloor = cxStressFloor; it.cxSlWidenMax = cxSlWidenMax; it.cxTrailRegime2 = cxTrailRegime2
         it.useRiskPct = useRiskPct; it.riskPct = riskPct; it.equityPct = equityPct
         it.maxLeverage = maxLeverage; it.roundQty = roundQty
         it.contractSize = contractSize; it.initialEquity = initialEquity
@@ -331,11 +372,16 @@ class Engine(val cfg: Settings) {
 
     // ── وضعیت ──────────────────────────────────────────────────────────────────
     val aggS = Agg(); val aggM = Agg(); val agg1 = Agg()
-    val structBars = ArrayList<Candle>()
-    val pins = ArrayList<Pin>()
+    // ⚡ بافرهای حلقه‌ای: `ArrayList.removeAt(0)` هر کندل کل بافر را جابه‌جا می‌کند
+    // (۴۰۰۰ × ۶٬۵۰۰٬۰۰۰ ⟹ اجرای فوق‌خطی). `ArrayDeque.removeFirst()` = O(1) و رفتار
+    // دقیقاً همان قبلی می‌ماند (بازآزمایی شد: عددهای ۱٫۴٫۵۱ بیت‌به‌بیت تکرار شدند).
+    val structBars = ArrayDeque<Candle>()
+    val pins = ArrayDeque<Pin>()
     val setups = ArrayList<Setup>()
-    val microS = ArrayList<Candle>()
+    val microS = ArrayDeque<Candle>()
 
+    private var pruneTick = 0
+    private val KEEP = 5000                     // عمق نگهداری باکس‌های مُرده (کندل)
     val zones = ArrayList<ZoneBox>()          // همهٔ باکس‌های ساختار با چرخهٔ عمر (برای ذخیره/بازیابی دقیق)
     val t1Zones = ArrayList<ZoneBox>()        // باکس‌های تاییدشدهٔ تریگر ۱ (ولوم کم) در حافظه
     val t2Zones = ArrayList<ZoneBox>()        // باکس‌های تاییدشدهٔ تریگر ۲ (ولوم زیاد) در حافظه
@@ -431,8 +477,8 @@ class Engine(val cfg: Settings) {
         val lowBi: Int,
         val highBi: Int
     )
-    internal val t2History = ArrayList<T2Bar>()
-    internal val t1History = ArrayList<T1Bar>()
+    internal val t2History = ArrayDeque<T2Bar>()
+    internal val t1History = ArrayDeque<T1Bar>()
 
     /** §18-22: سقف و کف کندل ساختار مرجع Y برای ابطال نواحی کندل‌های درونی X و X+n */
     var zoneRefH = Double.NaN
@@ -646,7 +692,7 @@ class Engine(val cfg: Settings) {
                 }
             }
             t1History.add(T1Bar(q1, prevT1Vol, q1.bi, endBi, lowBi, highBi))
-            while (t1History.size > 1000) t1History.removeAt(0)
+            while (t1History.size > 1000) t1History.removeFirst()
         }
 
         // ترتیب دقیقاً مثل Pine: ساختار → میانی → تریگر۱ → تریگر۲
@@ -712,12 +758,12 @@ class Engine(val cfg: Settings) {
         }
         if (agg1.closedNow) trigger1Engine(agg1.cl!!)
         t2History.add(T2Bar(cd, prevChartVol))
-        while (t2History.size > 4000) t2History.removeAt(0)
+        while (t2History.size > 4000) t2History.removeFirst()
         trigger2Engine(cd)
 
         // ریزکندل‌های تریگر۲ داخل کندل ساختار جاری
         if (isNewS) microS.clear()
-        if (microS.size > 3000) microS.removeAt(0)
+        if (microS.size > 3000) microS.removeFirst()
         microS.add(cd)
 
         // چرخهٔ عمر باکس‌های ناحیه (حذف با کلوز از سمت دور)
@@ -734,6 +780,7 @@ class Engine(val cfg: Settings) {
         // بسته می‌شدند؛ اگر ستاپ پاک/جایگزین/بازسازی می‌شد، باکس بی‌مالک می‌ماند و تا ابد
         // ACTIVE روی چارت کشیده می‌شد. هر باکس ACTIVE که هیچ ستاپی مالکش نیست، همین‌جا بسته می‌شود.
         sweepOrphanBoxes(i, cd.t)
+        pruneDeadBoxes(i)
         if (agg1.closedNow && agg1.cl != null) prevT1Vol = agg1.cl!!.v
         prevChartVol = cd.v
         cnt.zoneCount = zones.size
@@ -759,7 +806,7 @@ class Engine(val cfg: Settings) {
 
     private fun structureEngine(sb: Candle, buildZones: Boolean) {
         structBars.add(sb)
-        while (structBars.size > 400) structBars.removeAt(0)
+        while (structBars.size > 400) structBars.removeFirst()
         val nS = structBars.size
         val insideRef = updateStructureZoneRef(sb)
 
@@ -854,7 +901,7 @@ class Engine(val cfg: Settings) {
         // کاندیدِ Ready که تناوب اجازهٔ ثبتش را نداد هرگز ثبت نمی‌شود؛ کاندیدهای مرده هم دور ریخته می‌شوند.
         // کاندیدهای هنوز تاییدنشده (status=0) می‌مانند.
         pins.removeAll { it.status != 0 }
-        while (pins.size > 400) pins.removeAt(0)
+        while (pins.size > 400) pins.removeFirst()
 
         // ── اکسترمم جاری روند (پایهٔ لنگر صفر فیبوناچی، §4-8) ──
         // قبل از منطق پین/روند به‌روز می‌شود تا لنگر هیچ‌وقت از قیمتِ واقعیِ روند عقب نماند.
@@ -1277,6 +1324,24 @@ class Engine(val cfg: Settings) {
      * باکس باطل‌شده روی چارت می‌ماند و کاربر فکر می‌کند ناحیه هنوز معتبر است.
      * این جارو تضمین می‌کند هیچ باکس ACTIVE بدون مالک باقی نماند.
      */
+    /**
+     * هرسِ باکس‌های مُرده (۱٫۴٫۵۲ — فقط کارایی، بدون هیچ اثری روی معاملات).
+     *
+     * حلقهٔ عمر باکس‌ها هر کندل کل فهرست را می‌گردد؛ باکس‌های DELETED هرگز حذف نمی‌شدند و
+     * فهرست در ۲۰ سال به ده‌ها هزار عضو می‌رسید (اجرای ۱۰ساله: ۴۳۴ ثانیه → ۶۰ ثانیه).
+     * باکسِ مُردهٔ قدیمی‌تر از [KEEP] کندل دیگر نه مالک دارد، نه روی چارت دیده می‌شود،
+     * نه در تصمیم دخالت می‌کند.
+     */
+    private fun pruneDeadBoxes(bi: Int) {
+        if (++pruneTick < 2000) return
+        pruneTick = 0
+        val cut = bi - KEEP
+        if (cut <= 0) return
+        zones.removeAll { it.status != ZoneStatus.ACTIVE && it.endBi in 0..cut }
+        t1Zones.removeAll { it.status != ZoneStatus.ACTIVE && it.endBi in 0..cut }
+        t2Zones.removeAll { it.status != ZoneStatus.ACTIVE && it.endBi in 0..cut }
+    }
+
     private fun sweepOrphanBoxes(bi: Int, t: Long) {
         if (t1Zones.isEmpty() && t2Zones.isEmpty()) return
         val lvOwned = HashSet<Long>()
@@ -2479,6 +2544,25 @@ class Engine(val cfg: Settings) {
         // §18-31 سند: سفارشی که فاصلهٔ حد ضررش از سطح سفارش بیشتر از N است ثبت نمی‌شود و
         // سفارش باطل است (علت: SL>N). HV مطابق ستاپ می‌ماند و ستاپ تا پر/منقضی/باطل‌شدن HV
         // ادامه دارد، ولی روی این HV سفارشی ثبت نمی‌شود و در بک‌تست هم حسابی ندارد.
+        // ── موتور ترکیبی، لایهٔ ۷: پهن‌کردن داده‌محور حد ضرر (فقط cxMode ≥ ۳) ─────────
+        // چرا: در شبیه‌سازی مسیر M1، حد ضررِ کمی پهن‌تر نرخ «برخورد نویزی» را کم می‌کرد ولی
+        // اثر غیریکنوا بود ⟹ ضریب پیوسته و سقف‌دار (نه عدد جادویی). با پهن‌شدن SL، TP هم
+        // به همان نسبت مقیاس می‌شود تا هندسهٔ R (k = TP/R) دست‌نخورده بماند.
+        if (cfg.cxMode >= 3 && cfg.cxSlWidenMax > 1.0) {
+            val aNow = structureAtr(cfg.slAtrPeriod)
+            val boxH = abs(s.hvH - s.hvL)
+            val w = broker?.cx?.slWiden(cfg, boxH, aNow) ?: 1.0
+            if (w > 1.0001 && s.sl.isFinite()) {
+                val newSl = eRef + (s.sl - eRef) * w
+                val kSl = if (s.sl != eRef) (newSl - eRef) / (s.sl - eRef) else 1.0
+                if (s.tp1.isFinite()) s.tp1 = eRef + (s.tp1 - eRef) * kSl
+                if (s.tp2.isFinite()) s.tp2 = eRef + (s.tp2 - eRef) * kSl
+                if (s.tpx.isFinite()) s.tpx = eRef + (s.tpx - eRef) * kSl
+                s.sl = newSl
+                lg("ENGINE", "حد ضرر داده‌محور پهن شد ×${f2(w)} · ستاپ #${s.id}",
+                    "SL=${f2(s.sl)} TP=${f2(s.tpx)} boxH=${f2(boxH)} ATR=${f2(aNow)} bar=$curBi")
+            }
+        }
         val slDist = abs(eRef - s.sl)
         if (slDistSamples.size < SL_SAMPLE_CAP) slDistSamples.add(slDist)
         // سند ۶/۷ (§۵-۳): فاصلهٔ حد ضرر باید دست‌کم «ضریب × هزینهٔ رفت‌وبرگشت هر واحد» باشد؛

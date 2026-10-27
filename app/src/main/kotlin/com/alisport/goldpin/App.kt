@@ -767,7 +767,18 @@ class AppState {
         val holdDays: Int = 1,
         val trailStartR: Double = Tuned.MGMT_TRAIL_START_R,
         val trailDistR: Double = Tuned.MGMT_TRAIL_DIST_R,
-        val mgmtVolGate: Double = Tuned.MGMT_VOL_GATE_PCT
+        val mgmtVolGate: Double = Tuned.MGMT_VOL_GATE_PCT,
+        // ── موتور ترکیبی (۱٫۴٫۵۲) ────────────────────────────────────────────────
+        /** ۰ خاموش (رفتار ۱٫۴٫۵۱) · ۱ گیت‌ها · ۲ + حجم هوشمند · ۳ + حد ضرر/تریل رژیم. */
+        val cxMode: Int = 0,
+        val cxGate: Double = 0.33,
+        val cxGateCalm: Double = 0.40,
+        val cxBox: Double = 0.10,
+        val cxSize: Int = 1,
+        val cxCap: Double = 1.5,
+        val cxStress: Double = 1.0,
+        val cxWiden: Double = 1.15,
+        val cxTrail2: Double = 1.10
     )
 
     /** کارمزد مرجع این پیش‌تنظیم‌ها (واحد قیمت). اگر کارمزد کاربر فرق دارد، «تطبیق از داده» را بزند. */
@@ -849,6 +860,16 @@ class AppState {
         cfg.mgmtTrailStartR = p.trailStartR
         cfg.mgmtTrailDistR = p.trailDistR
         cfg.mgmtVolGatePct = p.mgmtVolGate
+        // موتور ترکیبی (۱٫۴٫۵۲) — پیش‌تنظیم‌های قدیمی cxMode=0 دارند ⟹ رفتار ۱٫۴٫۵۱ دست‌نخورده
+        cfg.cxMode = p.cxMode
+        cfg.cxRegimeGate = p.cxGate
+        cfg.cxRegimeGateCalm = p.cxGateCalm
+        cfg.cxBoxMinUnits = p.cxBox
+        cfg.cxSizeMode = p.cxSize
+        cfg.cxCompoundCap = p.cxCap
+        cfg.cxStressFloor = p.cxStress
+        cfg.cxSlWidenMax = p.cxWiden
+        cfg.cxTrailRegime2 = p.cxTrail2
         cfg.cmsnAuto = false
         cfg.cmsnManual = p.cmsn
         Log.i(Log.CAT_CFG, "پیش‌تنظیم تطبیق اعمال شد",
@@ -2582,7 +2603,7 @@ class AppState {
 
     companion object {
         /** نسخهٔ نمایشی — تنها منبع حقیقت برای هدر لاگ. با `versionName` در build.gradle یکی نگه دارید. */
-        const val APP_VERSION = "1.4.48"
+        const val APP_VERSION = "1.4.52"
 
         val instance = AppState()
 
