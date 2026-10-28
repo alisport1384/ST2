@@ -51,6 +51,9 @@ import kotlin.math.max
 class MainActivity : Activity() {
 
     private val s get() = AppState.instance
+
+    /** دسترسی صفحه‌های دیگر (مدیریت) به اکشن‌های همین Activity. */
+    fun showTabPublic(i: Int) = showTab(i)
     private lateinit var root: LinearLayout
     private lateinit var header: LinearLayout
     private lateinit var content: FrameLayout
@@ -102,13 +105,15 @@ class MainActivity : Activity() {
         com.alisport.goldpin.util.AnrWatchdog.start()
         Alerts.bannerSink = { text, color, kind -> showBanner(text, color, kind) }
         buildShell()
-        s.onChange(uiListener)
+        Hub.onChange(uiListener)          // همهٔ نمادها به همین یک شنونده خبر می‌دهند
         showTab(0)
         // بازیابی وضعیت در پس‌زمینه — پیش‌تر همگام روی نخ رابط بود و بالا آمدن اپ را فریز می‌کرد
         s.restoreOrSample(applicationContext) { m ->
             toast(m)
             refreshCurrent(force = true)
         }
+        // نمادهای دیگر هم بالا می‌آیند تا «هر دو نماد هم‌زمان» از همان اول برقرار باشد.
+        Hub.restoreOthers(applicationContext)
         // تمام‌صفحه دیگر اجباری نیست؛ فقط اگر کاربر در تنظیمات ⓪ روشن کرده باشد
         if (s.autoFullscreen) {
             Log.i(Log.CAT_UI, "ورود خودکار به تمام‌صفحه (تنظیمات ⓪ روشن است)")
@@ -123,7 +128,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-        s.offChange(uiListener)                     // جلوگیری از انباشت شنونده‌ها
+        Hub.offChange(uiListener)                   // جلوگیری از انباشت شنونده‌ها
         if (isFinishing) {
             com.alisport.goldpin.util.AnrWatchdog.stop()
             Alerts.bannerSink = null
@@ -202,7 +207,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             setBackgroundColor(Palette.panel)
         }
-        val names = arrayOf("چارت", "سفارش‌ها", "سود و زیان", "گزارش‌ها", "تنظیمات")
+        val names = arrayOf("چارت", "سفارش‌ها", "سود و زیان", "گزارش‌ها", "مدیریت", "تنظیمات")
         names.forEachIndexed { i, n ->
             val b = Ui.tv(this, n, 12f, Palette.dim, true).apply {
                 gravity = Gravity.CENTER
@@ -220,7 +225,7 @@ class MainActivity : Activity() {
         if (fullscreen) setFullscreen(false, keepTab = true)
         tab = i
         chart = null; chartInfo = null; eventsBox = null; mmStatusBox = null
-        Log.d(Log.CAT_UI, "تب ${arrayOf("چارت", "سفارش‌ها", "سود و زیان", "گزارش‌ها", "تنظیمات").getOrElse(i) { "?" }} باز شد")
+        Log.d(Log.CAT_UI, "تب ${arrayOf("چارت", "سفارش‌ها", "سود و زیان", "گزارش‌ها", "مدیریت", "تنظیمات").getOrElse(i) { "?" }} باز شد")
         for (k in 0 until tabButtons.childCount) {
             (tabButtons.getChildAt(k) as TextView).setTextColor(if (k == i) Palette.gold else Palette.dim)
         }
@@ -230,7 +235,8 @@ class MainActivity : Activity() {
             1 -> content.addView(buildOrdersScreen())
             2 -> content.addView(buildPnlScreen())
             3 -> content.addView(buildReportsScreen())
-            4 -> content.addView(buildSettingsScreen())
+            4 -> content.addView(MgmtScreen.build(this))   // مدیریت سرمایه — ثابت و مستقل از نماد
+            5 -> content.addView(buildSettingsScreen())
         }
         tabSignature = "$i|$reportKind|${s.tradesSnapshot().size}|${s.ordersSnapshot().size}|${s.tradesSnapshot().count { !it.open }}"
         refreshCurrent(force = true)
@@ -306,6 +312,19 @@ class MainActivity : Activity() {
                     }
                 }
                 4 -> {
+                    // تب مدیریت: عددها زنده می‌مانند، ولی بازسازی در هر تیک لازم نیست
+                    // (منحنی/جدول با هر تغییر معامله دوباره ساخته می‌شود، نه هر تیک قیمت).
+                    val msig = "mgmt|" + Hub.specs.joinToString {
+                        val st = Hub.state(it)
+                        st.spec.id + ":" + st.tradesSnapshot().size + ":" + st.tradesSnapshot().count { t -> t.open }
+                    }
+                    if (force || msig != tabSignature) {
+                        tabSignature = msig
+                        content.removeAllViews()
+                        content.addView(MgmtScreen.build(this))
+                    }
+                }
+                5 -> {
                     // تنظیمات خودش ساخته شده؛ هیچ‌وقت با تب گزارش جایگزین نشود. فقط کادر وضعیت §۲۰ زنده می‌ماند
                     // (بعد از تغییر مود/عدد، بازسازی در پس‌زمینه تمام می‌شود و عددها باید همان لحظه عوض شوند).
                     mmStatusBox?.let { if (it.isAttachedToWindow) fillMmStatus(it) }
@@ -765,7 +784,7 @@ class MainActivity : Activity() {
                 10 -> showBaseVisibilityDialog()
                 11 -> showEventsDialog()
                 12 -> showLogViewer()
-                13 -> { showTab(4) }
+                13 -> { showTab(5) }
             }
         }.show()
     }
@@ -1050,6 +1069,47 @@ class MainActivity : Activity() {
     // ══════════════════════════════════════════════════════════════════════════
     //  ۵) تنظیمات (شامل لاگر و هشدارها)
     // ══════════════════════════════════════════════════════════════════════════
+    /**
+     * انتخابگر نماد در ابتدای منوی تنظیمات.
+     *
+     * هر گزینه یک دکمه است (به‌جای Spinner) تا وضعیت هر نماد — زنده/فریز/تعداد معامله —
+     * همان‌جا دیده شود. با انتخاب، فقط [Hub.setView] صدا زده می‌شود؛ هیچ بازسازی،
+     * reset یا توقف لایو رخ نمی‌دهد و تنظیمات هر نماد دست‌نخورده می‌ماند.
+     */
+    private fun addSymbolSelector(v: LinearLayout) {
+        v.addView(Ui.section(this, "◆ نماد معامله (فقط نما را عوض می‌کند)"))
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        Hub.specs.forEach { spec ->
+            val st = Hub.state(spec)
+            val selected = Hub.viewId == spec.id
+            val nOpen = st.tradesSnapshot().count { it.open }
+            val realized = st.tradesSnapshot().filter { !it.open }.sumOf { it.pnl() }
+            val b = Ui.btn(
+                this,
+                spec.short + " · " + Fa.signed(realized, 0) + " · باز " + Fa.d(nOpen.toString()),
+                if (selected) Palette.accent else Palette.panel2,
+                if (selected) Palette.bg else Palette.txt,
+                11.5f
+            )
+            b.setOnClickListener {
+                toast(Hub.setView(this@MainActivity, spec.id))
+                Log.i(Log.CAT_CFG, "نماد نمای برنامه", "→ " + spec.id + " (هیچ حالتی ریست نشد)")
+                showTab(5)
+            }
+            row.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = Ui.dp(this@MainActivity, 4f)
+            })
+        }
+        v.addView(row)
+        val cur = Hub.view
+        v.addView(Ui.tv(this,
+            "نماد نمای فعلی: " + cur.spec.label + " · " + cur.spec.unit + " · " +
+                "اسپرد/کارمزد " + Fa.n(cur.cfg.cmsnManual, 2) + " · " +
+                (if (cur.liveRunning) "● زنده" else "○ لایو خاموش") +
+                "\nهر دو نماد هم‌زمان معامله می‌کنند؛ انتخاب این گزینه فقط چارت/تنظیمات/گزارش‌ها را عوض می‌کند.",
+            10.5f, Palette.dim).apply { setPadding(0, Ui.dp(this@MainActivity, 4f), 0, Ui.dp(this@MainActivity, 6f)) })
+    }
+
     private fun buildSettingsScreen(): View {
         val scroll = ScrollView(this)
         val v = LinearLayout(this).apply {
@@ -1058,6 +1118,11 @@ class MainActivity : Activity() {
                 Ui.dp(this@MainActivity, 10f), Ui.dp(this@MainActivity, 24f))
         }
         scroll.addView(v)
+
+        // ══ انتخاب نماد — بالاترین گزینهٔ منوی تنظیمات (خواستهٔ مالک) ══
+        //  عوض کردن این گزینه فقط **نما** را عوض می‌کند: نه ریست، نه توقف نماد دیگر،
+        //  نه پاک‌شدن هیچ حالتی. همهٔ تنظیم‌های زیر هم به همان نماد تعلق می‌گیرند.
+        addSymbolSelector(v)
 
         // ── چارت ──
         // کنترل تک‌به‌تک اجزا فقط در منوی خود چارت قرار دارد تا تب تنظیمات خلوت بماند.
@@ -1104,12 +1169,12 @@ class MainActivity : Activity() {
             Log.setEnabled(this, b)
             s.wireLogging()
             toast(if (b) "لاگر روشن شد — همهٔ رخدادها ثبت می‌شود" else "لاگر خاموش شد")
-            showTab(4)
+            showTab(5)
         })
         v.addView(switchRow("نوشتن در فایل (.md و .txt)", Log.writeToFile) { b -> Log.setWriteToFile(this, b) })
         v.addView(switchRow("نمایش در Logcat", Log.logcat) { b -> Log.setLogcat(this, b) })
         v.addView(numRow("حداقل سطح (۰ ریز · ۱ اشکال‌زدایی · ۲ اطلاع · ۳ هشدار · ۴ خطا)", Log.minLevel.toDouble()) { d ->
-            Log.setLevel(this, d.toInt().coerceIn(0, 4)); showTab(4)
+            Log.setLevel(this, d.toInt().coerceIn(0, 4)); showTab(5)
         })
         val logRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         logRow.addView(Ui.btn(this, "نمایش لاگ", Palette.panel2, Palette.txt, 11f).apply { setOnClickListener { showLogViewer() } })
@@ -1133,7 +1198,7 @@ class MainActivity : Activity() {
                 setOnClickListener {
                     Log.i(Log.CAT_CFG, "مود تایم‌فریمی ${m.idx} انتخاب شد", m.pretty())
                     s.setMode(m.idx); toast("مود ${Fa.d(m.idx.toString())} انتخاب شد")
-                    showTab(4)
+                    showTab(5)
                 }
             })
             v.addView(Ui.spacer(this, 3f))
@@ -1159,7 +1224,7 @@ class MainActivity : Activity() {
                 setOnClickListener {
                     if (s.cfg.strategy != st) {
                         Log.i(Log.CAT_CFG, "استراتژی = ${Strategy.label(st)}")
-                        s.cfg.strategy = st; s.rebuildAsync(); showTab(4)
+                        s.cfg.strategy = st; s.rebuildAsync(); showTab(5)
                     }
                 }
             })
@@ -1186,7 +1251,7 @@ class MainActivity : Activity() {
         dists.forEachIndexed { i, n ->
             v.addView(Ui.btn(this, "توزیع حجم: $n", if (s.cfg.distMode == i) Palette.accent else Palette.panel2,
                 if (s.cfg.distMode == i) Palette.txt else Palette.dim, 11f).apply {
-                setOnClickListener { s.cfg.distMode = i; s.rebuildAsync(); showTab(4) }
+                setOnClickListener { s.cfg.distMode = i; s.rebuildAsync(); showTab(5) }
             })
         }
 
@@ -1287,7 +1352,7 @@ class MainActivity : Activity() {
             Palette.panel2, Palette.txt, 11.5f).apply {
             setOnClickListener {
                 AlertDialog.Builder(this@MainActivity).setTitle("سیستم مدیریت معاملهٔ باز")
-                    .setItems(mgmtNames) { _, w -> s.cfg.mgmtMode = w; s.rebuildAsync(); showTab(4) }
+                    .setItems(mgmtNames) { _, w -> s.cfg.mgmtMode = w; s.rebuildAsync(); showTab(5) }
                     .show()
             }
         })
@@ -1351,7 +1416,7 @@ class MainActivity : Activity() {
                     .setItems(cxNames) { _, w ->
                         s.cfg.cxMode = w
                         Log.i(Log.CAT_CFG, "مود موتور ترکیبی", "cxMode=$w")
-                        s.rebuildAsync(); showTab(4)
+                        s.rebuildAsync(); showTab(5)
                     }.show()
             }
         })
@@ -1379,7 +1444,7 @@ class MainActivity : Activity() {
                 Palette.panel2, Palette.txt, 11.5f).apply {
                 setOnClickListener {
                     AlertDialog.Builder(this@MainActivity).setTitle("اندازهٔ حجم در موتور ترکیبی")
-                        .setItems(sizeNames) { _, w -> s.cfg.cxSizeMode = w; s.rebuildAsync(); showTab(4) }
+                        .setItems(sizeNames) { _, w -> s.cfg.cxSizeMode = w; s.rebuildAsync(); showTab(5) }
                         .show()
                 }
             })
@@ -1462,7 +1527,7 @@ class MainActivity : Activity() {
             if (!sug.isNaN()) {
                 v.addView(Ui.btn(this, "تطبیق ضریب فیلتر با داده (پیشنهاد: ${Fa.n(sug, 2)})",
                     Palette.panel2, Palette.accent, 11f).apply {
-                    setOnClickListener { toast(s.applySuggestedCostMult()); showTab(4) }
+                    setOnClickListener { toast(s.applySuggestedCostMult()); showTab(5) }
                 })
                 v.addView(Ui.spacer(this, 3f))
             }
@@ -1496,7 +1561,7 @@ class MainActivity : Activity() {
         depths.forEachIndexed { i, n ->
             v.addView(Ui.btn(this, "عمق تاریخچه: $n", if (s.depth == i + 1) Palette.accent else Palette.panel2,
                 if (s.depth == i + 1) Palette.txt else Palette.dim, 11f).apply {
-                setOnClickListener { s.depth = i + 1; showTab(4) }
+                setOnClickListener { s.depth = i + 1; showTab(5) }
             })
         }
         v.addView(switchRow("ساخت حجم تقریبی اگر فید حجم نداشت", s.useSyntheticVolume) { s.useSyntheticVolume = it })
@@ -1591,7 +1656,7 @@ class MainActivity : Activity() {
             setOnClickListener {
                 val msg = s.adaptToCommission()
                 toast(msg)
-                if (s.sessionMode == SessionMode.INTERNAL) showTab(4)
+                if (s.sessionMode == SessionMode.INTERNAL) showTab(5)
             }
         })
         v.addView(Ui.tv(this,
@@ -1610,7 +1675,7 @@ class MainActivity : Activity() {
                             else ""))
                         .setPositiveButton("اعمال") { _, _ ->
                             toast(s.applyAdaptPreset(p))
-                            showTab(4)
+                            showTab(5)
                         }
                         .setNegativeButton("نه", null).show()
                 }
@@ -1665,9 +1730,9 @@ class MainActivity : Activity() {
                     toast("بهینه‌ساز شروع شد — پیشرفت در همین بخش دیده می‌شود")
                     s.deepOptimizeAsync(s.optimizeMonths) { msg ->
                         toast(msg)
-                        showTab(4)
+                        showTab(5)
                     }
-                    showTab(4)
+                    showTab(5)
                 }
             })
         }
@@ -1711,7 +1776,7 @@ class MainActivity : Activity() {
                             "سقف N و نگهبان منحنی. کارمزد، سرمایه، ریسک و تایم‌فریم شما دست‌نخورده می‌مانند." +
                             (if (s.sessionMode == SessionMode.INTERNAL)
                                 "\n\nدر نشست بک‌تست داخلی، بعد از اعمال «اجرای مجدد بک‌تست» را بزنید." else ""))
-                        .setPositiveButton("اعمال") { _, _ -> toast(s.applyOptimizerBest()); showTab(4) }
+                        .setPositiveButton("اعمال") { _, _ -> toast(s.applyOptimizerBest()); showTab(5) }
                         .setNegativeButton("نه", null).show()
                 }
             })
@@ -1751,7 +1816,7 @@ class MainActivity : Activity() {
         v.addView(Ui.section(this, "⓪-ب داده و نشست (بک‌تست داخلی)"))
         val internal = s.sessionMode == SessionMode.INTERNAL
         val years = s.selectedBacktestYears
-        val spec = Feed.backtestDataset(years)
+        val spec = Feed.backtestDataset(years, s.spec.id)
         v.addView(Ui.tv(this,
             "نشست فعال: " + (if (internal) "بک‌تست داخلی — فید شبکه خاموش است"
                               else "زنده — فید شبکه و ذخیرهٔ خودکار"),
@@ -1767,7 +1832,7 @@ class MainActivity : Activity() {
                 if (y == years) Palette.bg else Palette.txt, 11f).apply {
                 setOnClickListener {
                     toast(s.selectBacktestYears(applicationContext, y))
-                    showTab(4)
+                    showTab(5)
                 }
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                 marginEnd = Ui.dp(this@MainActivity, 4f)
@@ -1785,7 +1850,7 @@ class MainActivity : Activity() {
                     AlertDialog.Builder(this)
                         .setTitle(if (on) "بک‌تست داخلی" else "حالت زنده")
                         .setMessage(msg).setPositiveButton("باشه", null).show()
-                    showTab(4)
+                    showTab(5)
                 }
             }
         })
@@ -1811,7 +1876,7 @@ class MainActivity : Activity() {
                             runOnUiThread {
                                 AlertDialog.Builder(this@MainActivity).setTitle("نتیجهٔ دانلود").setMessage(msg)
                                     .setPositiveButton("باشه", null).show()
-                                showTab(4)
+                                showTab(5)
                             }
                         }
                     }.setNegativeButton("نه", null).show()
@@ -1824,7 +1889,7 @@ class MainActivity : Activity() {
                         .setMessage("فایل دادهٔ ${Fa.d(years.toString())} ساله از حافظهٔ اپ پاک می‌شود. نتیجهٔ ذخیره‌شدهٔ آن بازه باقی می‌ماند.")
                         .setPositiveButton("بله") { _, _ ->
                             toast(s.deleteBacktestData(applicationContext, years))
-                            showTab(4)
+                            showTab(5)
                         }
                         .setNegativeButton("نه", null).show()
                 }
@@ -1834,7 +1899,8 @@ class MainActivity : Activity() {
 
         if (internal) {
             if (s.backtestStale || years != s.activeBacktestYears) {
-                v.addView(Ui.tv(this, "⚠ بازه یا تنظیمات از اجرای فعلی فرق دارد؛ برای بارگذاری بازهٔ انتخابی اجرای مجدد را بزنید.",
+                v.addView(Ui.tv(this, "⚠ بازه/تنظیمات از اجرای ثبت‌شده فرق دارد. نتیجهٔ قبلی **پاک نمی‌شود** " +
+                    "(سیاست ۱٫۵)؛ برای نتیجهٔ تازه «اجرای مجدد بک‌تست» را بزنید.",
                     11f, Palette.down, true))
             }
             if (s.hasBacktestData(this, years)) {
@@ -1856,9 +1922,42 @@ class MainActivity : Activity() {
                 v.addView(Ui.tv(this, "برای اجرای بازهٔ انتخابی، ابتدا فایل ${Fa.d(years.toString())} ساله را دانلود کنید.",
                     10.5f, Palette.down))
             }
+            // ── توقف بک‌تست در جریان (رفع نقص «باید تا آخر صبر کنی») ──
+            if (s.backtestRunning) {
+                v.addView(Ui.btn(this, "⏹ توقف بک‌تست جاری",
+                    Palette.panel2, Palette.down, 11.5f).apply {
+                    setOnClickListener {
+                        s.cancelBacktest()
+                        toast("درخواست توقف ثبت شد — اجرای نیمه‌کاره ذخیره نمی‌شود")
+                        showTab(5)
+                    }
+                })
+            }
             if (s.backtestInfo.isNotEmpty()) {
                 v.addView(Ui.tv(this, s.backtestInfo, 10.5f, Palette.dim))
             }
+            // ── سیاست نگه‌داری نتیجه + حذف صریح ──
+            v.addView(Ui.tv(this, "📌 " + s.savedBacktestInfo(this, years), 10.5f, Palette.violet))
+            v.addView(Ui.btn(this, "🗑 حذف نتیجهٔ ثبت‌شده و بازگشت به نمونهٔ داخلی + لایو",
+                Palette.panel2, Palette.down, 11f).apply {
+                setOnClickListener {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("حذف نتیجهٔ بک‌تست؟")
+                        .setMessage("تنها راه حذف نتیجه (به‌جز درخواست بک‌تست تازه) همین است. " +
+                            "نتیجهٔ ذخیره‌شدهٔ «" + s.spec.short + "» پاک می‌شود و به نشست زنده/نمونهٔ داخلی برمی‌گردیم. " +
+                            "معاملات زندهٔ هیچ نمادی پاک نمی‌شود.")
+                        .setPositiveButton("حذف کن") { _, _ ->
+                            s.deleteBacktestResult(applicationContext) { msg ->
+                                runOnUiThread {
+                                    AlertDialog.Builder(this@MainActivity).setTitle("نتیجه").setMessage(msg)
+                                        .setPositiveButton("باشه", null).show()
+                                    showTab(5)
+                                }
+                            }
+                        }
+                        .setNegativeButton("نه", null).show()
+                }
+            })
             v.addView(Ui.tv(this,
                 "در نشست داخلی، فید زنده و دانلود تاریخچه خاموش است. نتیجهٔ هر بازه جداگانه ذخیره می‌شود و فایل داده روی گوشی می‌ماند تا برای اجراهای بعدی دوباره دانلود نشود.",
                 10f, Palette.dim))
@@ -1885,7 +1984,7 @@ class MainActivity : Activity() {
                 if (sel) Palette.txt else Palette.dim, 11.5f).apply {
                 setOnClickListener {
                     Log.i(Log.CAT_CFG, "مود مدیریت مالی §۲۰ = ${MoneyMode.label(mode)}")
-                    s.cfg.mmMode = mode; s.rebuildAsync(); s.ensureBrokerSpread(); showTab(4)
+                    s.cfg.mmMode = mode; s.rebuildAsync(); s.ensureBrokerSpread(); showTab(5)
                 }
             })
             v.addView(Ui.spacer(this, 3f))
@@ -1900,12 +1999,12 @@ class MainActivity : Activity() {
             "${Fa.n(mm.minLot(), 2)} اونس = NakedCapital × risk ÷ ۱۰۰", s.cfg.minLotManual,
             onAuto = { on ->
                 if (!on) s.cfg.minLotManual = mm.minLot()            // عددِ فعلیِ مؤثر، نقطهٔ شروع دستی می‌شود
-                s.cfg.minLotAuto = on; s.rebuildAsync(); showTab(4)
+                s.cfg.minLotAuto = on; s.rebuildAsync(); showTab(5)
             },
             onManual = { s.cfg.minLotManual = it; s.rebuildAsync() }))
         v.addView(autoNumRow("div", s.cfg.divAuto,
             "هر سفارش جدا: |ورودی سفارش − حدسود نهایی| (واحد قیمت)", s.cfg.divManual,
-            onAuto = { on -> s.cfg.divAuto = on; s.rebuildAsync(); showTab(4) },
+            onAuto = { on -> s.cfg.divAuto = on; s.rebuildAsync(); showTab(5) },
             onManual = { s.cfg.divManual = it; s.rebuildAsync() }))
         val spreadHint = when {
             mm.spreadIsBroker() -> "${Fa.n(mm.spread(), 3)} (بروکر · ${Fa.jalali(s.cfg.cmsnAutoAt)})"
@@ -1921,8 +2020,8 @@ class MainActivity : Activity() {
                 s.cfg.cmsnAuto = on; s.rebuildAsync()
                 // ⚠ اسپردِ خودکار فقط وقتی گرفته می‌شود که کاربر خودش خواسته باشد؛ و بعد از
                 // گرفتن، اگر با ضریب فیلتر همهٔ سفارش‌ها را رد کند، همان‌جا هشدار داده می‌شود.
-                if (on) s.fetchBrokerSpread { m -> toast(m); showTab(4) }
-                showTab(4)
+                if (on) s.fetchBrokerSpread { m -> toast(m); showTab(5) }
+                showTab(5)
             },
             onManual = { s.cfg.cmsnManual = it; s.rebuildAsync() }))
         if (s.cfg.cmsnAuto) {
@@ -2061,7 +2160,7 @@ class MainActivity : Activity() {
         Ui.btn(this, "$label : ${Tf.label(current)}", Palette.panel2, Palette.txt, 11.5f).apply {
             setOnClickListener {
                 AlertDialog.Builder(this@MainActivity).setTitle(label)
-                    .setItems(tfChoices.map { Tf.label(it) }.toTypedArray()) { _, w -> onPick(tfChoices[w]); showTab(4) }
+                    .setItems(tfChoices.map { Tf.label(it) }.toTypedArray()) { _, w -> onPick(tfChoices[w]); showTab(5) }
                     .show()
             }
         }
@@ -2076,7 +2175,7 @@ class MainActivity : Activity() {
                 val d = e.text.toString().trim().toDoubleOrNull()
                 if (d == null) toast("عدد نامعتبر") else {
                     apply(d); Log.i(Log.CAT_CFG, "تنظیم «$label» = $d")
-                    toast("$label ثبت شد"); showTab(4)
+                    toast("$label ثبت شد"); showTab(5)
                 }
             }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -2090,7 +2189,7 @@ class MainActivity : Activity() {
         row.addView(Ui.tv(this, label, 11.5f, Palette.dim), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.7f))
         row.addView(e, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(Ui.btn(this, "ثبت", Palette.panel2, Palette.accent, 11f).apply {
-            setOnClickListener { apply(e.text.toString().trim()); Log.i(Log.CAT_CFG, "«$label» = ${e.text}"); showTab(4) }
+            setOnClickListener { apply(e.text.toString().trim()); Log.i(Log.CAT_CFG, "«$label» = ${e.text}"); showTab(5) }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         return row
     }

@@ -29,24 +29,45 @@ object Storage {
         return ext ?: ctx.filesDir
     }
 
-    fun autoFile(ctx: Context): File = File(dir(ctx), FILE_NAME)
+    /**
+     * پسوند نام فایل برای هر نماد.
+     *
+     * ⚠ طلا **بدون** پسوند می‌ماند تا فایل‌های نسخهٔ ۱٫۴٫۵۲ کاربران (و دیتاست‌های
+     * منتشرشده) دقیقاً با همان نام خوانده شوند و هیچ وضعیتی از دست نرود.
+     * نفت پسوند `_usoil` می‌گیرد.
+     */
+    private fun symTag(sym: String?): String {
+        val spec = com.alisport.goldpin.core.Symbols.byId(sym)
+        return if (spec.oil) "_" + spec.id.lowercase() else ""
+    }
+
+    fun autoFile(ctx: Context, sym: String? = null): File =
+        File(dir(ctx), FILE_NAME.replace(".json.gz", symTag(sym) + ".json.gz"))
 
     private val supportedBacktestYears = setOf(1, 2, 3, 10, 20)
 
-    fun internalFile(ctx: Context, years: Int = 1): File {
+    fun internalFile(ctx: Context, years: Int = 1, sym: String? = null): File {
         require(years in supportedBacktestYears) { "بازهٔ داده پشتیبانی نمی‌شود: $years سال" }
-        val name = if (years == 1) INTERNAL_FILE_NAME else "goldpin_backtest_${years}y.json.gz"
+        val tag = symTag(sym)                 // "" برای طلا (سازگاری کامل با ۱٫۴٫۵۲)
+        val name = if (tag.isEmpty()) {
+            if (years == 1) INTERNAL_FILE_NAME else "goldpin_backtest_${years}y.json.gz"
+        } else {
+            "goldpin_backtest$tag" + (if (years == 1) "" else "_${years}y") + ".json.gz"
+        }
         return File(dir(ctx), name)
     }
 
-    fun dataFile(ctx: Context, years: Int = 1): File {
+    fun dataFile(ctx: Context, years: Int = 1, sym: String? = null): File {
         require(years in supportedBacktestYears) { "بازهٔ داده پشتیبانی نمی‌شود: $years سال" }
-        val name = if (years == 1) DATA_FILE_NAME else "goldpin_xauusd_m1_${years}y.csv.gz"
+        val spec = com.alisport.goldpin.core.Symbols.byId(sym)
+        val name = if (spec.oil) "goldpin_usoil_m1_${years}y.csv.gz"
+                   else if (years == 1) DATA_FILE_NAME else "goldpin_xauusd_m1_${years}y.csv.gz"
         return File(dir(ctx), name)
     }
 
     /** فایل موقت دانلود داده؛ فقط بعد از تأیید هش به نام نهایی تغییر نام می‌دهد. */
-    fun dataPartFile(ctx: Context, years: Int = 1): File = File(dir(ctx), dataFile(ctx, years).name + ".part")
+    fun dataPartFile(ctx: Context, years: Int = 1, sym: String? = null): File =
+        File(dir(ctx), dataFile(ctx, years, sym).name + ".part")
 
     /**
      * نوشتن اتمیک وضعیت: ابتدا در فایل موقت، سپس جای‌گزینی با فایل اصلی.

@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import com.alisport.goldpin.AppState
+import com.alisport.goldpin.Hub
 import com.alisport.goldpin.MainActivity
 import com.alisport.goldpin.core.OrderStatus
 import com.alisport.goldpin.core.Strategy
@@ -69,8 +70,9 @@ class EngineService : Service() {
     private val tick = object : Runnable {
         override fun run() {
             try {
-                if (state.liveRunning) {
-                    state.updateLiveOnce()
+                if (Hub.liveRunning()) {
+                    // ⚠ هر دو نماد در هر تیک به‌روز می‌شوند — نه فقط نمادِ در حال نمایش.
+                    Hub.tickAll()
                     maybeAutosave()
                     updateNotification()
                 } else {
@@ -87,7 +89,7 @@ class EngineService : Service() {
     /** فاصلهٔ تیک بعدی: `livePollMs` در حالت سالم، و عقب‌گرد نمایی تا ۵ دقیقه وقتی فید خطا می‌دهد. */
     private fun nextDelayMs(): Long {
         val base = state.livePollMs.coerceAtLeast(1000L)
-        val fails = state.liveFailStreak
+        val fails = Hub.failStreak()
         if (fails <= 0) return base
         val factor = 1L shl (fails - 1).coerceAtMost(5)     // ۱،۲،۴،۸،۱۶،۳۲
         return (base * factor).coerceAtMost(MAX_BACKOFF_MS)
@@ -108,8 +110,8 @@ class EngineService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        state.liveRunning = true
-        state.liveFailStreak = 0
+        Hub.setLive(true)
+        Hub.all().forEach { it.liveFailStreak = 0 }
         Alerts.liveRunning = true
         Alerts.inBacktest = false
         Log.i(Log.CAT_LIVE, "سرویس ارزیابی زنده شروع شد", "فاصله=${state.livePollMs}ms نماد=${state.symbol}")
@@ -134,7 +136,7 @@ class EngineService : Service() {
         try { tickThread?.quitSafely() } catch (e: Exception) { }
         tickThread = null
         try { wakeLock?.release() } catch (e: Exception) { }
-        state.liveRunning = false
+        Hub.setLive(false)
         Alerts.liveRunning = false
         // ذخیره روی نخ پس‌زمینه: نوشتن gzip یک وضعیت چند مگابایتی روی نخ اصلی = ANR
         val app = applicationContext
@@ -149,8 +151,8 @@ class EngineService : Service() {
         val now = System.currentTimeMillis()
         if (now - lastAutosave > state.autosaveEveryMs) {
             lastAutosave = now
-            Log.d(Log.CAT_LIVE, "ذخیرهٔ خودکار دوره‌ای در پس‌زمینه")
-            state.io.execute { state.saveToAutoFile(applicationContext) }
+            Log.d(Log.CAT_LIVE, "ذخیرهٔ خودکار دوره‌ای در پس‌زمینه (همهٔ نمادها)")
+            Hub.all().forEach { st -> st.io.execute { st.saveToAutoFile(applicationContext) } }
         }
     }
 
@@ -162,6 +164,25 @@ class EngineService : Service() {
             ch.setShowBadge(false)
             nm.createNotificationChannel(ch)
         }
+    }
+
+    /** متن چندنمادی نوتیفیکیشن: هر نماد یک خط + جمع کل (مستقل از نماد انتخابی). */
+    private fun multiLine(): String {
+        val t = Hub.total()
+        val sb = StringBuilder()
+        t.perSymbol.forEach { p ->
+            val price = Hub.state(p.id).lastLivePrice
+            sb.append(if (p.live) "● " else "○ ").append(p.short).append(" ")
+                .append(if (price.isNaN()) "—" else Fa.n(price, 2))
+                .append(" · ").append(Fa.signed(p.realized, 2))
+                .append(" · باز ").append(p.openCount)
+                .append(if (p.frozen) " ❄" else "")
+                .append("\n")
+        }
+        sb.append("جمع: ").append(Fa.signed(t.realized, 2))
+            .append(" · شناور ").append(Fa.signed(t.unrealized, 2))
+            .append(" · موجودی ").append(Fa.n(t.balance, 2))
+        return sb.toString()
     }
 
     private fun buildNotification(): Notification {
@@ -199,7 +220,9 @@ class EngineService : Service() {
             @Suppress("DEPRECATION") Notification.Builder(this)
         return b.setContentTitle("GoldPin · ارزیابی زنده")
             .setContentText(line2)
-            .setStyle(Notification.BigTextStyle().bigText(if (line4 == null) "$line2\n$line3" else "$line2\n$line3\n$line4"))
+            // چندنمادی: خط هر نماد + جمع کل، سپس متن جزئیات نمادِ در حال نمایش
+            .setStyle(Notification.BigTextStyle().bigText(
+                multiLine() + "\n" + line2 + "\n" + line3 + (if (line4 == null) "" else "\n" + line4)))
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)
             .setOngoing(true)
             .setContentIntent(pi)
@@ -226,7 +249,7 @@ class EngineService : Service() {
         }
 
         fun stop(ctx: Context) {
-            AppState.instance.liveRunning = false
+            Hub.setLive(false)
             ctx.stopService(Intent(ctx, EngineService::class.java))
         }
     }

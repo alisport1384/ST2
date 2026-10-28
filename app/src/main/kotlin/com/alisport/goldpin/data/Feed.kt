@@ -417,6 +417,31 @@ object Feed {
      * §6 سند: زنجیرهٔ منابع قیمت لحظه‌ای زنده: gold-api ← Swissquote ← CoinGecko؛ اولین پاسخ معتبر استفاده می‌شود.
      * در صورت نیامدن قیمت زنده، زنجیره در چارچوب بودجهٔ زمانی به طور مداوم تکرار می‌شود تا منبع دریافت گردد.
      */
+    /**
+     * قیمت لحظه‌ای **هر نماد**: برای طلا همان زنجیرهٔ ۱٫۴٫۵۲ (gold-api → Swissquote → CoinGecko)،
+     * و برای نفت آخرین قیمت `CL=F` از یاهو (منابع طلا برای نفت عدد بی‌معنا می‌دهند).
+     */
+    fun spotPriceFor(
+        symbolId: String?,
+        feedSymbol: String,
+        budgetMs: Long = connectTimeoutMs.toLong() + readTimeoutMs.toLong(),
+        maxRounds: Int = 3
+    ): Pair<Double?, String> {
+        if (!com.alisport.goldpin.core.Symbols.byId(symbolId).oil) return spotPrice(budgetMs, maxRounds)
+        val deadline = System.currentTimeMillis() + budgetMs
+        var round = 0
+        while (round < maxOf(1, maxRounds)) {
+            round++
+            yahooLast(feedSymbol)?.let {
+                Log.d(Log.CAT_FEED, "قیمت لحظه‌ای نفت از Yahoo", com.alisport.goldpin.util.Fa.n(it, 3) + " (" + feedSymbol + ")")
+                return it to "Yahoo($feedSymbol)"
+            }
+            if (System.currentTimeMillis() >= deadline) break
+        }
+        Log.w(Log.CAT_FEED, "قیمت لحظه‌ای نفت به دست نیامد", "نماد=$feedSymbol دور=$round")
+        return null to "ناموفق"
+    }
+
     fun spotPrice(
         budgetMs: Long = connectTimeoutMs.toLong() + readTimeoutMs.toLong(),
         maxRounds: Int = 3
@@ -635,8 +660,38 @@ object Feed {
             BACKTEST_DATA_20Y_URL, BACKTEST_DATA_20Y_FALLBACK_URL)
     )
 
-    fun backtestDataset(years: Int): BacktestDatasetSpec = BACKTEST_DATASETS.firstOrNull { it.years == years }
-        ?: throw FeedException("بازهٔ بک‌تست پشتیبانی نمی‌شود: $years سال")
+    // ── دیتاست‌های نفت WTI (USOIL) — M1 واقعی ۲۰۰۵ تا ۲۰۲۶ ─────────────────────
+    //  منبع خام: مخزن عمومی parshant65-lang/WTI-Crude-Oil-1m-* (OHLCV یک‌دقیقه‌ای با حجم تیکی).
+    //  بازه‌ها همان ۱/۲/۳/۱۰/۲۰ سال طلا هستند تا رابط و مقایسه یک‌شکل بماند.
+    const val OIL_RELEASE_TAG = "data-oil-v1"
+    const val OIL_RELEASE_BASE = "https://github.com/alisport1384/ST2/releases/download/data-oil-v1"
+    const val OIL_RELEASE_MIRROR = "https://github.com/alisport1384/ST1/releases/download/data-oil-v1"
+
+    val BACKTEST_DATASETS_OIL = listOf(
+        BacktestDatasetSpec(1, 347_718, 4_073_006L,
+            "616cb8f68ccce3793c529282a86e9500f1e16ea6e54b55376f07e44150bc8590",
+            "$OIL_RELEASE_BASE/goldpin_usoil_m1_1y.csv.gz", "$OIL_RELEASE_MIRROR/goldpin_usoil_m1_1y.csv.gz"),
+        BacktestDatasetSpec(2, 689_491, 7_545_461L,
+            "78e4a8fdbce2fcd4a39a37f01f3e3a22ffb73cb70aa38cb25594c9447f7d6d0a",
+            "$OIL_RELEASE_BASE/goldpin_usoil_m1_2y.csv.gz", "$OIL_RELEASE_MIRROR/goldpin_usoil_m1_2y.csv.gz"),
+        BacktestDatasetSpec(3, 1_033_192, 11_087_423L,
+            "9394e460c705bdcddc2b3a843beb8ff3769fb72e436565bb8cc84521afc6b21b",
+            "$OIL_RELEASE_BASE/goldpin_usoil_m1_3y.csv.gz", "$OIL_RELEASE_MIRROR/goldpin_usoil_m1_3y.csv.gz"),
+        BacktestDatasetSpec(10, 3_361_756, 35_630_197L,
+            "7c1f7cb1be6bbb3033be3d6c96555a6cebc21b151e4bda1b2cb8fb0a352465ec",
+            "$OIL_RELEASE_BASE/goldpin_usoil_m1_10y.csv.gz", "$OIL_RELEASE_MIRROR/goldpin_usoil_m1_10y.csv.gz"),
+        BacktestDatasetSpec(20, 6_829_560, 69_076_333L,
+            "cee6b304a900e6f0bc2d3a33ee201523c2905714d9ece805aeabfc9028ab6313",
+            "$OIL_RELEASE_BASE/goldpin_usoil_m1_20y.csv.gz", "$OIL_RELEASE_MIRROR/goldpin_usoil_m1_20y.csv.gz")
+    )
+
+    /** مجموعهٔ دیتاستِ هر نماد — کلید چندنمادی‌شدن مسیر دانلود/بک‌تست. */
+    fun datasetsFor(symbolId: String?): List<BacktestDatasetSpec> =
+        if (com.alisport.goldpin.core.Symbols.byId(symbolId).oil) BACKTEST_DATASETS_OIL else BACKTEST_DATASETS
+
+    fun backtestDataset(years: Int, symbolId: String? = null): BacktestDatasetSpec =
+        datasetsFor(symbolId).firstOrNull { it.years == years }
+            ?: throw FeedException("بازهٔ بک‌تست پشتیبانی نمی‌شود: $years سال")
 
     /**
      * خواندن CSV کندل به‌صورت **جریانی** (بدون ساخت رشتهٔ کامل).
@@ -890,8 +945,17 @@ object Feed {
     }
 
     /** باز کردن دارایی نمونهٔ داخلی (هر نامی که بسته‌بندی برایش انتخاب کرده باشد) */
-    fun openSampleAsset(ctx: android.content.Context): java.io.InputStream {
-        val names = listOf("sample_xauusd_m1.csv.gz", "sample_xauusd_m1.csv")
+    /**
+     * دارایی نمونهٔ داخلی — **به تفکیک نماد**.
+     * طلا: sample_xauusd_m1.csv · نفت: sample_usoil_m1.csv (هر دو ۴۰٬۰۰۰ کندل M1).
+     * اگر دارایی نماد درخواستی نبود، به نمونهٔ طلا برمی‌گردد تا اپ هرگز بی‌داده نماند.
+     */
+    fun openSampleAsset(ctx: android.content.Context, symbolId: String? = null): java.io.InputStream {
+        val spec = com.alisport.goldpin.core.Symbols.byId(symbolId)
+        val names = if (spec.oil)
+            listOf("sample_usoil_m1.csv.gz", "sample_usoil_m1.csv", "sample_xauusd_m1.csv.gz", "sample_xauusd_m1.csv")
+        else
+            listOf("sample_xauusd_m1.csv.gz", "sample_xauusd_m1.csv")
         for (n in names) {
             try { return ctx.assets.open(n) } catch (e: Exception) { }
         }
