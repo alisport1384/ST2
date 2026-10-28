@@ -203,6 +203,16 @@ object Symbols {
         s.brokerAppliedAt = System.currentTimeMillis()
         s.cmsnAuto = false
         s.cmsnManual = cost
+        // سواپ شبانه هم از همان پروفایل می‌آید (۱٫۵٫۰۳)
+        profile.symbol(spec.id)?.let { bs ->
+            val sl = bs.swapLong ?: 0.0
+            val ss = bs.swapShort ?: 0.0
+            if (sl != 0.0 || ss != 0.0) {
+                s.swapEnabled = true
+                s.swapLong = sl
+                s.swapShort = ss
+            }
+        }
 
         // ── نرمال‌کردن ضریب فیلتر کارمزد تا آستانهٔ **مطلق** تغییر نکند ─────────────
         //  چرا لازم است: اندازه‌گیری روی نفت ۲۰۲۲–۲۰۲۶ نشان داد اگر فقط کارمزد کم شود و

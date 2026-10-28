@@ -138,7 +138,8 @@ class PaperBroker(private val cfg: Settings) {
 
     /** سفارش‌های معلق و پوزیشن‌های باز (استراتژی ۱: حداکثر یکی؛ استراتژی ۲: از هر جهت یکی). */
     private val pendings = ArrayList<Order>()
-    private val opens = ArrayList<Trade>()
+    /** معاملات باز — internal برای آزمون‌های واحد (تزریق معامله و سنجش سواپ). */
+    internal val opens = ArrayList<Trade>()
 
     /** تعداد سفارش معلق + معاملهٔ باز؛ با [dir] فقط همان جهت (۱ خرید / ‎−۱ فروش). */
     fun activeCount(dir: Int? = null): Int =
@@ -173,6 +174,7 @@ class PaperBroker(private val cfg: Settings) {
         // شمارندهٔ شناسه‌ها هم از صفر (مثل شمارندهٔ ستاپ‌های موتور)؛ وگرنه بعد از هر بازسازی شمارهٔ
         // سفارش/معامله ادامه پیدا می‌کرد (#۲۵، #۵۰ …) و دو اجرای یکسان ظاهراً یکسان نبودند.
         orderSeq = 0L; tradeSeq = 0L
+        swapTotal = 0.0; swapNightsTotal = 0
         lastError = null
         mm.reset()
     }
@@ -405,6 +407,9 @@ class PaperBroker(private val cfg: Settings) {
     fun onBar(cd: Candle, live: Boolean = false) {
         // تعطیلات شنبه و یکشنبه: در بازار بسته هیچ سفارشی پر و هیچ معامله‌ای مدیریت نمی‌شود.
         if (MarketHours.isClosed(cd.t)) return
+        // ⓪ سواپ شبانه (۱٫۵٫۰۳) — پیش از هر تصمیم دیگری: رول‌اورهای گذشته‌شده روی
+        //    حجمِ باقی‌ماندهٔ همان لحظه تسویه می‌شوند (چهارشنبه سه‌برابر).
+        accrueSwap(cd)
         // نمونهٔ ATR% برای دروازهٔ نوسان (هر ساعت یک نمونه) — پیش از هر تصمیم این کندل
         if (cfg.mgmtMode != 0) sampleAtrPct(cd)
         // موتور ترکیبی: وضعیت بازار هر کندل (فقط کندل بسته؛ بدون نگاه به آینده)
@@ -736,6 +741,90 @@ class PaperBroker(private val cfg: Settings) {
         if (!sameEntryBar && t.open && t.be && returnedToEntry) {
             t.commission = 0.0
             closeAll(t, t.entry, cd.t, cd.bi, "خروج سر‌به‌سر")
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  سواپ شبانه (۱٫۵٫۰۳)
+    //
+    //  قاعدهٔ بروکر: هر پوزیشنِ باز در لحظهٔ رول‌اور (پیش‌فرض ۲۱:۰۰ UTC = بسته‌شدن
+    //  نیویورک) یک «شب» سواپ می‌دهد؛ سواپ خرید و فروش جداست (علامت‌دار) و شبِ چهارشنبه
+    //  سه‌برابر حساب می‌شود (جبران تعطیلی آخر هفته).
+    //
+    //  واحد: دلار بر هر **واحد قیمت** (اونس/بشکه/واحد ارز) در هر شب — همان واحد
+    //  `swapLong`/`swapShort` که از پروفایل بروکر می‌آید ([Brokers]).
+    //  مبلغ هر شب = نرخ × حجمِ باقی‌ماندهٔ همان لحظه × contractSize.
+    //
+    //  ⚠ چرا مهم است: روی نفت، سواپ فروش ۰٫۰۷۵۸ $/بشکه ≈ ۵ برابر کل کارمزد یک معامله
+    //  است؛ نادیده‌گرفتنش بک‌تست را به‌شدت خوش‌بینانه می‌کرد.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /** شمارندهٔ شب‌های سواپ پرداخت‌شده در کل اجرا (برای گزارش). */
+    var swapNightsTotal: Int = 0
+        private set
+    /** مجموع سواپ پرداخت‌شده (دلار، منفی = هزینه) در کل اجرا. */
+    var swapTotal: Double = 0.0
+        private set
+
+    /** شمارهٔ «روز رول‌اور» برای یک زمان: روز UTC پس از کسر ساعت رول‌اور. */
+    private fun rollDay(t: Long): Long =
+        Math.floorDiv(t - cfg.swapRollHourUtc * 3_600_000L, 86_400_000L)
+
+    /** آیا این روز رول‌اور در آخر هفته است (شنبه/یکشنبه — بازار بسته، سواپ ندارد)؟ */
+    private fun isWeekendRoll(day: Long): Boolean {
+        val dow = ((day - 4L) % 7L + 7L) % 7L      // 0=دوشنبه … ۵=شنبه · ۶=یکشنبه
+        return dow >= 5L
+    }
+
+    /** آیا این روز رول‌اور «سه‌برابر» است؟ (پیش‌فرض: چهارشنبه) */
+    private fun isTripleRoll(day: Long): Boolean {
+        // ۱۹۷۰-۰۱-۰۱ = پنجشنبه ⇒ روز شمارهٔ ۴ مبدأ هفته = دوشنبه
+        val dow = ((day - 4L) % 7L + 7L) % 7L      // 0=دوشنبه … ۶=یکشنبه
+        return dow == (cfg.swapTripleDow - 1).coerceIn(0, 6).toLong()
+    }
+
+    /**
+     * تسویهٔ رول‌اورهای گذشته‌شده برای همهٔ معاملات باز.
+     * idempotent است: هر روز رول‌اور فقط یک‌بار روی هر معامله حساب می‌شود.
+     */
+    private fun accrueSwap(cd: Candle) {
+        if (!cfg.swapEnabled) return
+        if (cfg.swapLong == 0.0 && cfg.swapShort == 0.0) return
+        if (opens.isEmpty()) return
+        val cur = rollDay(cd.t)
+        for (t in opens) {
+            if (!t.open) continue
+            if (t.swapRollDay == Long.MIN_VALUE) {
+                // اولین باری که این معامله دیده می‌شود: مبدأ = روز رول‌اورِ ورودش
+                t.swapRollDay = rollDay(t.entryT)
+                continue
+            }
+            if (cur <= t.swapRollDay) continue
+            // حجمِ باقی‌مانده در همین لحظه (پله‌های خروج‌خورده سواپ نمی‌دهند)
+            val used = t.fills.filter { it.kind != "ENTRY" }.sumOf { it.qty }
+            val rem = t.qty - used
+            if (rem <= 1e-12) { t.swapRollDay = cur; continue }
+            var nights = 0
+            var amount = 0.0
+            var d = t.swapRollDay + 1
+            while (d <= cur) {
+                // رول‌اورِ شنبه و یکشنبه وجود ندارد (بازار بسته است) و هزینه‌اش از قبل در
+                // ضریب سه‌برابرِ چهارشنبه حساب شده — پس شمرده نمی‌شود.
+                if (!isWeekendRoll(d)) nights += if (isTripleRoll(d)) 3 else 1
+                d += 1
+            }
+            if (nights > 0) {
+                val rate = if (t.dir == 1) cfg.swapLong else cfg.swapShort
+                amount = rate * rem * t.contractSize * nights
+                if (amount != 0.0) {
+                    t.swap += amount
+                    t.swapNights += nights
+                    swapTotal += amount
+                    swapNightsTotal += nights
+                    lg("SWAP", "سواپ شبانه · معامله #${t.id}", "شب=$nights نرخ=${fmt(rate)} حجم=${fmt(rem)} مبلغ=${fmt(amount)} جمع سواپ معامله=${fmt(t.swap)}")
+                }
+            }
+            t.swapRollDay = cur
         }
     }
 

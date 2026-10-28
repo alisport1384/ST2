@@ -1697,9 +1697,10 @@ class MainActivity : Activity() {
         v.addView(Ui.btn(this, "بروکر بعدی؟ فقط یک پروفایل تازه در موتور (Brokers.ALL) اضافه کنید",
             Palette.panel2, Palette.dim, 10.5f))
         v.addView(Ui.tv(this,
-            "⚠ سواپ شبانه در بک‌تست محاسبه **نمی‌شود**. برای نفت این عدد از خودِ کمیسیون " +
-                "بزرگ‌تر است؛ اگر معامله را شب نگه می‌دارید، سود واقعی کمتر از بک‌تست است.",
-            10f, Palette.down))
+            "سواپ شبانه (از ۱٫۵٫۰۳) **در بک‌تست حساب می‌شود**: هر رول‌اور ۲۱:۰۰ UTC روی حجمِ " +
+                "باقی‌ماندهٔ معامله، چهارشنبه سه‌برابر، شب شنبه/یکشنبه صفر. نرخ‌ها از پروفایل بروکر " +
+                "می‌آیند و در «سود/زیان خالص» و منحنی افت سرمایه دیده می‌شوند.",
+            10f, Palette.dim))
     }
 
     /**
@@ -2341,6 +2342,9 @@ class MainActivity : Activity() {
         }
         add("سر‌به‌سر", if (t.be) "فعال (پس از TP1)" else "فعال نشد")
         if (t.commission > 0.0) add("کمیسیون (cmsn، کسرشده از سود/زیان)", "${Fa.n(t.commission, 2)} دلار")
+        if (t.swap != 0.0 || t.swapNights > 0)
+            add("سواپ شبانه (${Fa.d(t.swapNights.toString())} شب · چهارشنبه سه‌برابر)",
+                "${Fa.signed(t.swap)} دلار", if (t.swap >= 0) Palette.up else Palette.down)
         add("سود/زیان", "${Fa.signed(pnl)} دلار", if (pnl >= 0) Palette.up else Palette.down)
         add("بازده بر ریسک", "${Fa.n(t.rMultiple(), 2)} R")
         box.addView(Ui.spacer(this, 6f))

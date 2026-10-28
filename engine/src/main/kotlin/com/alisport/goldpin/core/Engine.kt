@@ -298,6 +298,22 @@ class Settings {
     var brokerRefPrice: Double = 0.0
     /** زمان اعمال پروفایل بروکر (میلی‌ثانیه) — ۰ = هرگز اعمال نشده. */
     var brokerAppliedAt: Long = 0L
+    // ── سواپ شبانه (۱٫۵٫۰۳) ───────────────────────────────────────────────────
+    /**
+     * سواپ شبانه روشن/خاموش.
+     *
+     * تصمیم مالک: «سواپ شبانه رو پیاده‌سازی کن». برای نفت تعیین‌کننده است: سواپ فروش
+     * آلپاری ۰٫۰۷۵۸ دلار بر بشکه در هر شب ≈ ۵ برابر کل کارمزد همان معامله.
+     */
+    var swapEnabled: Boolean = true
+    /** سواپ خرید: دلار بر هر **واحد** (اونس/بشکه/واحد ارز) در هر شب — علامت‌دار (منفی = هزینه). */
+    var swapLong: Double = 0.0
+    /** سواپ فروش: همان واحد. */
+    var swapShort: Double = 0.0
+    /** روز هفتهٔ سواپ سه‌برابر (۱=دوشنبه … ۳=چهارشنبه). آلپاری/اکثر بروکرها: چهارشنبه. */
+    var swapTripleDow: Int = 3
+    /** ساعت UTC رول‌اور (شبی که سواپ تعلق می‌گیرد). پیش‌فرض ۲۱ = بسته‌شدن نیویورک. */
+    var swapRollHourUtc: Int = 21
     /**
      * اگر [Store] هنگام بارگذاری فایل قدیمی، «اسپرد خودکارِ بزرگ» را به «دستی ۰٫۲۰» تبدیل
      * کرده باشد، مقدار قبلی این‌جا می‌آید (۰ = مهاجرتی رخ نداده). فقط برای **اطلاع‌دادن** به
@@ -353,6 +369,8 @@ class Settings {
         it.cmsnAuto = cmsnAuto; it.cmsnManual = cmsnManual
         it.cmsnAutoValue = cmsnAutoValue; it.cmsnAutoAt = cmsnAutoAt
         it.brokerId = brokerId; it.brokerRefPrice = brokerRefPrice; it.brokerAppliedAt = brokerAppliedAt
+        it.swapEnabled = swapEnabled; it.swapLong = swapLong; it.swapShort = swapShort
+        it.swapTripleDow = swapTripleDow; it.swapRollHourUtc = swapRollHourUtc
         it.crtEnabled = crtEnabled; it.crtPct = crtPct
         it.mixedGrowthPct = mixedGrowthPct
         it.lotStep = lotStep; it.lostResetAtFinalTp = lostResetAtFinalTp

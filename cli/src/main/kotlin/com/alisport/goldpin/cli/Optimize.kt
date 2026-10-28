@@ -103,6 +103,10 @@ private class Conf {
     var maxBufUnits = 0.0
     var eb = Tuned.ENTRY_BUF_TICKS
     var cmsn = Tuned.CMSN
+    var tick = 0.0            // ۰ = پیش‌فرض (mintick از Tuned)
+    var swapOn = true
+    var swapL = 0.0
+    var swapS = 0.0
     var risk = 1.0
     var tf = 1
     var setups = 1
@@ -156,6 +160,10 @@ private class Conf {
                 "maxBuf" -> maxBufUnits = v.toDouble()
                 "eb" -> eb = v.toDouble()
                 "cmsn" -> cmsn = v.toDouble()
+                "tick" -> tick = v.toDouble()
+                "swap" -> swapOn = v == "1" || v.equals("true")
+                "swapL" -> swapL = v.toDouble()
+                "swapS" -> swapS = v.toDouble()
                 "risk" -> risk = v.toDouble()
                 "tf" -> tf = v.toInt()
                 "setups" -> setups = v.toInt()
@@ -239,6 +247,10 @@ private class Conf {
             cxTrailRegime2 = this@Conf.cxTrail2
             cmsnAuto = false
             cmsnManual = this@Conf.cmsn
+            if (this@Conf.tick > 0.0) mintick = this@Conf.tick
+            swapEnabled = swapOn
+            swapLong = this@Conf.swapL
+            swapShort = this@Conf.swapS
             minLotAuto = false
             minLotManual = 10.0
             initialEquity = 100_000.0
@@ -260,7 +272,9 @@ private class Stat(
     val finalEquity: Double,
     val riskDollars: Double,
     val monthly: List<Pair<String, Double>>,
-    val secs: Double
+    val secs: Double,
+    val swap: Double = 0.0,
+    val swapNights: Int = 0
 ) {
     val winRate get() = if (trades > 0) wins * 100.0 / trades else 0.0
     val posMonths get() = monthly.count { it.second > 0 }
@@ -299,7 +313,8 @@ private fun runOne(c: Conf, candles: List<Candle>, diag: Boolean = false): Pair<
             "DIAG structBars=${eng.structBars.size} ATR(${cfg.slAtrPeriod})=%.4f price=%.2f atrPct=%.4f%% ".format(
                 atr, lastPx, atr / lastPx * 100.0
             ) + "hourBlocked=${eng.cnt.hourBlocked} atrBlocked=${eng.cnt.atrBlocked} " +
-                "windowBlocked=${eng.cnt.windowBlocked} slN=${eng.cnt.slNBlocked} orders=${broker.orders.size}"
+                "windowBlocked=${eng.cnt.windowBlocked} slN=${eng.cnt.slNBlocked} orders=${broker.orders.size} " +
+                "setup=${eng.cnt.setup} touch=${eng.cnt.touch} mid=${eng.cnt.mid} lv=${eng.cnt.lv} entry=${eng.cnt.entry} zone=${eng.cnt.zoneCount} rej=${eng.cnt.zoneRejected} slCost=${eng.cnt.slCostBlocked}"
         )
     }
     val closed = broker.trades.filter { !it.open }.sortedBy { it.exitT }
@@ -308,21 +323,25 @@ private fun runOne(c: Conf, candles: List<Candle>, diag: Boolean = false): Pair<
     var wins = 0
     val monthly = LinkedHashMap<String, Double>()
     val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+    var swapSum = 0.0
     for (t in closed) {
         gross += t.grossPnl()
         comm += c.cmsn * t.qty * t.contractSize
+        swapSum += t.swap
         riskDollars += t.risk * t.qty * t.contractSize
-        if (t.grossPnl() - c.cmsn * t.qty * t.contractSize > 0) wins++
+        // ۱٫۵٫۰۳: نتیجهٔ خالص = قیمتی + سواپ − کمیسیون (سواپ قبلاً در محاسبه نبود و
+        // بک‌تست نفت را خوش‌بینانه می‌کرد)
+        if (t.grossPnl() + t.swap - c.cmsn * t.qty * t.contractSize > 0) wins++
         cal.timeInMillis = t.exitT!!
         val key = "%04d-%02d".format(cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1)
-        monthly[key] = (monthly[key] ?: 0.0) + (t.grossPnl() - c.cmsn * t.qty * t.contractSize)
+        monthly[key] = (monthly[key] ?: 0.0) + (t.grossPnl() + t.swap - c.cmsn * t.qty * t.contractSize)
     }
-    val netCost = gross - comm
+    val netCost = gross + swapSum - comm
     val st = Stat(
         c, s.trades, wins, gross, comm, s.net, netCost,
         if (riskDollars > 0) netCost / riskDollars else 0.0,
         s.profitFactor, s.maxDD, broker.equity, riskDollars, monthly.toList(),
-        (System.currentTimeMillis() - t0) / 1000.0
+        (System.currentTimeMillis() - t0) / 1000.0, swapSum, broker.swapNightsTotal
     )
     return st to closed
 }
@@ -384,15 +403,15 @@ fun main(args: Array<String>) {
 
     val header = "tag,strategy,mm,fade,k,tp,N,minSl,cost,buf,bufMode,eb,cmsn,risk,tf,trades,wins,winRate," +
         "gross,comm,net,netCost,avgRCost,pf,maxDD,finalEquity,riskDollars,posMonths,months,worst12,seconds," +
-        "mgmt,holdR,holdDays,trailStart,trailDist,mgmtGate"
+        "mgmt,holdR,holdDays,trailStart,trailDist,mgmtGate,swapSum,swapNights"
     val w = if (out.isNotEmpty()) File(out).bufferedWriter() else null
     w?.apply { write(header); newLine() }
     println(String.format("%-34s %6s %8s %9s %9s %8s %7s %7s %8s %6s %7s", "tag", "trd", "win%", "netCost", "avgRCost", "pf", "maxDD", "worst12", "final", "mo+", "secs"))
     for (spec in specs) {
         val c = Conf().apply { parse(spec, null) }
         val (r, trades) = runOne(c, candles, diag)
-        println(String.format("%-34s %6d %8.1f %9.0f %9.4f %8.3f %7.0f %8.0f %8.0f %3d/%-3d %7.1f",
-            c.tag, r.trades, r.winRate, r.netCost, r.avgRCost, r.pf, r.maxDD, r.worst12, r.finalEquity, r.posMonths, r.monthly.size, r.secs))
+        println(String.format("%-34s %6d %8.1f %9.0f %9.4f %8.3f %7.0f %8.0f %8.0f %3d/%-3d %7.1f  swap=%.1f(%d شب)",
+            c.tag, r.trades, r.winRate, r.netCost, r.avgRCost, r.pf, r.maxDD, r.worst12, r.finalEquity, r.posMonths, r.monthly.size, r.secs, r.swap, r.swapNights))
         w?.apply {
             write(listOf(
                 c.tag, c.strategy, c.mm, c.fade, c.k, c.tp, c.nMax, c.minSl, c.cost, c.buf, c.bufMode, c.eb,
@@ -402,7 +421,8 @@ fun main(args: Array<String>) {
                 "%.2f".format(r.riskDollars), r.posMonths,
                 r.monthly.joinToString("|") { "${it.first}:${"%.0f".format(it.second)}" },
                 "%.2f".format(r.worst12), "%.1f".format(r.secs),
-                c.mgmt, c.holdR, c.holdDays, c.trailStart, c.trailDist, c.mgmtGate
+                c.mgmt, c.holdR, c.holdDays, c.trailStart, c.trailDist, c.mgmtGate,
+                "%.2f".format(r.swap), r.swapNights
             ).joinToString(",")); newLine(); flush()
         }
         if (tradesOut.isNotEmpty()) dumpTrades(c, candles, trades, tradesOut)

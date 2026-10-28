@@ -99,6 +99,8 @@ object Store {
         "cmsnAuto" to c.cmsnAuto, "cmsnManual" to c.cmsnManual,
         "cmsnAutoValue" to c.cmsnAutoValue, "cmsnAutoAt" to c.cmsnAutoAt,
         "brokerId" to c.brokerId, "brokerRefPrice" to c.brokerRefPrice, "brokerAppliedAt" to c.brokerAppliedAt,
+        "swapEnabled" to c.swapEnabled, "swapLong" to c.swapLong, "swapShort" to c.swapShort,
+        "swapTripleDow" to c.swapTripleDow, "swapRollHourUtc" to c.swapRollHourUtc,
         "crtEnabled" to c.crtEnabled, "crtPct" to c.crtPct,
         "mixedGrowthPct" to c.mixedGrowthPct,
         "lotStep" to c.lotStep, "lostResetAtFinalTp" to c.lostResetAtFinalTp,
@@ -185,6 +187,11 @@ object Store {
         if (m.containsKey("brokerId")) c.brokerId = m["brokerId"].asS()
         if (m.containsKey("brokerRefPrice")) c.brokerRefPrice = m["brokerRefPrice"].asD()
         if (m.containsKey("brokerAppliedAt")) c.brokerAppliedAt = m["brokerAppliedAt"].asL()
+        if (m.containsKey("swapEnabled")) c.swapEnabled = m["swapEnabled"].asB()
+        if (m.containsKey("swapLong")) c.swapLong = m["swapLong"].asD()
+        if (m.containsKey("swapShort")) c.swapShort = m["swapShort"].asD()
+        if (m.containsKey("swapTripleDow")) c.swapTripleDow = m["swapTripleDow"].asI()
+        if (m.containsKey("swapRollHourUtc")) c.swapRollHourUtc = m["swapRollHourUtc"].asI()
         if (m.containsKey("crtEnabled")) c.crtEnabled = m["crtEnabled"].asB()
         if (m.containsKey("crtPct")) c.crtPct = m["crtPct"].asD()
         if (m.containsKey("mixedGrowthPct")) c.mixedGrowthPct = m["mixedGrowthPct"].asD()
@@ -525,6 +532,7 @@ object Store {
                 "reason" to t.reason, "be" to t.be,
                 "hvTop" to t.hvTop, "hvBot" to t.hvBot,
                 "commission" to t.commission, "mmCm" to t.mmCm,
+                "swap" to t.swap, "swapNights" to t.swapNights, "swapRollDay" to t.swapRollDay,
                 "fills" to t.fills.map { listOf(it.t, it.bi, it.price, it.qty, it.kind, it.pnl) }
             )
         }
@@ -571,6 +579,9 @@ object Store {
             if (t.containsKey("hvTop")) tr.hvTop = t["hvTop"].asD()
             if (t.containsKey("hvBot")) tr.hvBot = t["hvBot"].asD()
             if (t.containsKey("commission")) tr.commission = t["commission"].asD()
+            if (t.containsKey("swap")) tr.swap = t["swap"].asD()
+            if (t.containsKey("swapNights")) tr.swapNights = t["swapNights"].asI()
+            if (t.containsKey("swapRollDay")) tr.swapRollDay = t["swapRollDay"].asL()
             if (t.containsKey("mmCm")) tr.mmCm = t["mmCm"].asB()
             if (t["exitT"].asL() != 0L) {
                 tr.exitT = t["exitT"].asL(); tr.exitBi = t["exitBi"].asI()
