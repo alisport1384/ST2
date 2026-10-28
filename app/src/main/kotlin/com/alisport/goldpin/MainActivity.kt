@@ -1550,6 +1550,7 @@ class MainActivity : Activity() {
 
         // ── تطبیق خودکار با داده/کارمزد ──
         addAdaptSection(v)
+        addFxSection(v)   // ⑦ جفت‌ارز — ۱٫۵٫۰۴
 
         // ── بهینه‌ساز خودکار درون‌اپ (۱٫۴٫۴۹) ──
         addOptimizerSection(v)
@@ -1634,6 +1635,38 @@ class MainActivity : Activity() {
      * حداقل فاصلهٔ حد ضرر است. عدد اشتباه ⇒ یا همهٔ سفارش‌ها رد می‌شوند، یا معامله‌های
      * بازندهٔ کم‌فاصله عبور می‌کنند و منحنی سرمایه را می‌خورند.
      */
+    /**
+     * ⑦ بخش جفت‌ارز (۱٫۵٫۰۴) — **شفاف و بدون وعدهٔ الکی**.
+     *
+     * چرا فقط نمایشی است: قاعده در `engine/core/FxDesk.kt` پیاده و آزموده شده،
+     * ولی اتصال آن به فید زندهٔ ۱۲ جفت و چرخهٔ معاملات اپ هنوز انجام نشده است.
+     * تا آن روز، این بخش عددهای واقعیِ آزمون (درون‌نمونه/بیرون‌نمونه) را نشان
+     * می‌دهد تا کاربر بداند کدام جفت چه تاریخی دارد — نه اینکه یک دکمهٔ «روشن»
+     * بگذارد و پول واقعی روی قاعده‌ای بگذارد که ۹ جفتش بیرون‌نمونه منفی است.
+     */
+    private fun addFxSection(v: LinearLayout) {
+        v.addView(Ui.section(this, "⑦ جفت‌ارز — ۱۲ جفت آزموده‌شده (موتور آماده · رابط در گام بعد)"))
+        v.addView(Ui.tv(this,
+            "قاعده: شکست سقف/کفِ N کندل با پادِ شکست، حد ضرر atr×ATR، هدف k×R، " +
+                "هزینهٔ Pro ECN آلپاری و سواپ ۲۱:۰۰ UTC. دادهٔ آزمون: ۲٬۸ سال کندل ساعتی، " +
+                "۶۰٪ اول برای انتخاب پارامتر و ۴۰٪ آخر برای داوری.",
+            10.5f, Palette.dim))
+        for (p in com.alisport.goldpin.core.FxPairs.ALL) {
+            val c = if (p.oosAvgR > 0.05) Palette.up else if (p.oosAvgR > 0) Palette.gold else Palette.down
+            val head = "${p.id} · ${p.modeFa} · ${Tf.label(p.tfSec.toInt())} · N=${p.lookback} · atr=${Fa.n(p.atrMult, 2)} · هدف ${Fa.n(p.targetR, 1)}R"
+            v.addView(Ui.tv(this, head, 11.5f, Palette.txt, true))
+            v.addView(Ui.tv(this,
+                "داوری بیرون‌نمونه: ${Fa.signed(p.oosAvgR)}R در هر معامله (${Fa.d(p.oosTrades.toString())} معامله) — ${p.note}",
+                10f, c))
+            v.addView(Ui.spacer(this, 1.2f))
+        }
+        v.addView(Ui.tv(this,
+            "⚠ هشدار صریح: فقط سه جفت (EURUSD، GBPUSD، AUDUSD) در دادهٔ داوری مثبت ماندند و " +
+                "۹ جفت دیگر وارونگی کامل داشتند. این بخش عمداً **دکمهٔ روشن‌کردن معاملهٔ واقعی ندارد** " +
+                "تا وقتی خروجی زنده با این اعداد سنجیده شود.",
+            10f, Palette.down))
+    }
+
     private fun addBrokerSection(v: LinearLayout) {
         v.addView(Ui.section(this, "⑥-ب بروکر و کارمزد واقعی (مرجع فعلی: آلپاری)"))
         val active = Brokers.byId(s.cfg.brokerId)

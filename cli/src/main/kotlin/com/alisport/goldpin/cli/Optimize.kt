@@ -357,6 +357,10 @@ fun main(args: Array<String>) {
     var toYear = Int.MAX_VALUE
     var pathsOut = ""
     var lookahead = 2880
+    var fxWf = false
+    var fxCostMult = 1.0
+    var fxPair = ""
+    var fxDir = ""
     var i = 0
     while (i < args.size) {
         when (args[i]) {
@@ -372,10 +376,16 @@ fun main(args: Array<String>) {
             "--to-year" -> toYear = args[++i].toInt()
             "--paths" -> pathsOut = args[++i]
             "--lookahead" -> lookahead = args[++i].toInt()
+            "--fx" -> fxPair = args[++i]
+            "--fxdir" -> fxDir = args[++i]
+            "--fxwf" -> fxWf = true
+            "--fxcost" -> fxCostMult = args[++i].toDouble()
             else -> {}
         }
         i++
     }
+    // ── میز جفت‌ارز (۱٫۵٫۰۴): اجرای قاعدهٔ آزموده‌شده روی فایل CSV/دایرکتوری ──
+    if (fxPair.isNotEmpty() || fxDir.isNotEmpty()) { runFxDesk(fxPair, fxDir, data, fxWf, fxCostMult); return }
     if (data.isEmpty()) { println("--data لازم است"); return }
     val t0 = System.currentTimeMillis()
     val candles = readCandles(data, fromYear, toYear)
@@ -531,4 +541,100 @@ private fun atrAt(bars: List<Candle>, a: DoubleArray, t: Long, tfSec: Int): Doub
         if (bars[mid].t + tfSec * 1000L <= t) { idx = mid; lo = mid + 1 } else hi = mid - 1
     }
     return if (idx >= 0) a[idx] else Double.NaN
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  میز جفت‌ارز — اجرای همان کدی که در اپ اجرا می‌شود، روی دادهٔ محلی
+//
+//  ./cli --fx EURUSD --data /tmp/fx/EURUSD.csv
+//  ./cli --fxdir /tmp/fx            # همهٔ جفت‌ها، هر کدام در فایل <PAIR>.csv
+// ═══════════════════════════════════════════════════════════════════════════════
+private fun runFxDesk(pairId: String, dir: String, singleFile: String,
+                      walkForward: Boolean = false, costMult: Double = 1.0) {
+    // نرخ تبدیل «ارز مظنه → دلار» از آخرین کندل فایل‌های مرجع (برای بک‌تست محلی)
+    val usdPerQuote = HashMap<String, Double>()
+    usdPerQuote["USD"] = 1.0
+    for ((quote, ref) in listOf("JPY" to "USDJPY", "CAD" to "USDCAD", "CHF" to "USDCHF")) {
+        val f = File(dir, "$ref.csv")
+        if (f.exists()) {
+            val c = readCandles(f.absolutePath, Int.MIN_VALUE, Int.MAX_VALUE)
+            if (c.isNotEmpty()) usdPerQuote[quote] = 1.0 / c.last().c
+        }
+    }
+    usdPerQuote["GBP"] = run {
+        val f = File(dir, "GBPUSD.csv")
+        if (f.exists()) readCandles(f.absolutePath, Int.MIN_VALUE, Int.MAX_VALUE).lastOrNull()?.c ?: 1.27 else 1.27
+    }
+
+    val targets = if (pairId.isNotEmpty()) listOf(FxPairs.byId(pairId))
+    else FxPairs.ALL
+
+    println(String.format("%-8s %-7s %-5s %6s %7s %7s %7s %9s %9s %6s",
+        "جفت", "تایم", "حالت", "معامله", "برد٪", "میانگینR", "PF", "سود خالص$", "میانگینR/سال", "شب"))
+
+    var totalR = 0.0; var totalTrd = 0
+    for (p in targets) {
+        val path = if (pairId.isNotEmpty()) singleFile else File(dir, "${p.id}.csv").absolutePath
+        val f = File(path)
+        if (!f.exists()) { println("${p.id}: فایل نیست ($path)"); continue }
+        // فایل‌های جفت‌ارز معمولاً **ثانیه**ای‌اند؛ موتور میلی‌ثانیه می‌خواهد.
+        val raw = readCandles(path, Int.MIN_VALUE, Int.MAX_VALUE)
+        if (raw.isEmpty()) continue
+        val secScale = if (raw.last().t < 100_000_000_000L) 1000L else 1L
+        val base = if (secScale == 1L) raw else raw.map { Candle(it.bi, it.t * secScale, it.o, it.h, it.l, it.c, it.v) }
+        val cost0 = FxCostTable.costFor(p.id, usdPerQuote) ?: run {
+            println("${p.id}: هزینهٔ بروکر تعریف نشده"); null
+        } ?: continue
+        val cost = if (costMult == 1.0) cost0 else cost0.copy(spreadPoints = cost0.spreadPoints * costMult)
+
+        // تجمیع به تایم‌فریم خود جفت
+        val tfMs = p.tfSec * 1000L
+        val agg = LinkedHashMap<Long, Candle>()
+        for (c in base) {
+            val b = Math.floorDiv(c.t, tfMs) * tfMs
+            val prev = agg[b]
+            agg[b] = if (prev == null) Candle(c.bi, b, c.o, c.h, c.l, c.c, c.v)
+            else Candle(prev.bi, b, prev.o, Math.max(prev.h, c.h), Math.min(prev.l, c.l), c.c, prev.v + c.v)
+        }
+        val bars = agg.values.toList()
+
+        fun runOn(slice: List<Candle>): List<FxTrade> {
+            val d = FxDesk(capital = 100_000.0, riskPct = 0.5,
+                commissionPerLotRoundTurn = 5.0 * costMult)
+            d.feed = { cost }
+            val h2 = ArrayList<Candle>(slice.size)
+            for (b in slice) { h2.add(b); d.onBar(p, h2, b) }
+            if (slice.isNotEmpty()) d.closeAll({ slice.last().c }, slice.last().t)
+            return d.closed
+        }
+        if (walkForward) {
+            val cutT = bars.first().t + ((bars.last().t - bars.first().t) * 0.6).toLong()
+            val ins = runOn(bars.filter { it.t < cutT })
+            val oos = runOn(bars.filter { it.t >= cutT })
+            fun st(x: List<FxTrade>): String = if (x.isEmpty()) "—"
+                else String.format("n=%d avgR=%+.3f PF=%.2f", x.size, x.sumOf { it.realizedR() } / x.size,
+                    x.filter { it.realizedR() > 0 }.sumOf { it.realizedR() } /
+                        Math.max(-x.filter { it.realizedR() <= 0 }.sumOf { it.realizedR() }, 1e-9))
+            println(String.format("%-8s %-4s %-6s | درون‌نمونه %-26s | **بیرون‌نمونه %-26s**",
+                p.id, "H" + (p.tfSec / 3600), if (p.dirMode > 0) "trend" else "fade", st(ins), st(oos)))
+            continue
+        }
+
+        val tr = runOn(bars)
+        if (tr.isEmpty()) { println("${p.id}: صفر معامله"); continue }
+        val wins = tr.count { it.realizedR() > 0 }
+        val sumR = tr.sumOf { it.realizedR() }
+        val gains = tr.filter { it.realizedR() > 0 }.sumOf { it.realizedR() }
+        val losses = -tr.filter { it.realizedR() <= 0 }.sumOf { it.realizedR() }
+        val years = Math.max((bars.last().t - bars.first().t) / (365.25 * 24 * 3_600_000.0), 0.1)
+        val net = tr.sumOf { it.netUsd() }
+        val nights = tr.map { it.swapNights }.average()
+        totalR += sumR; totalTrd += tr.size
+        println(String.format("%-8s %-7s %-5s %6d %6.1f%% %+7.3f %7.2f %9.0f %9.2f %6.1f",
+            p.id, "H" + (p.tfSec / 3600), if (p.dirMode > 0) "trend" else "fade",
+            tr.size, 100.0 * wins / tr.size, sumR / tr.size,
+            gains / Math.max(losses, 1e-9), net, sumR / years, nights))
+    }
+    if (totalTrd > 0) println(String.format("— جمع: %d معامله · میانگین R وزنی %+.3f —",
+        totalTrd, totalR / totalTrd))
 }

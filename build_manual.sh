@@ -27,11 +27,13 @@ $BT/aapt2 link -o $W/base.apk -I $AJ --manifest $W/AndroidManifest.xml \
   --version-code $VC --version-name $VN --auto-add-overlay
 
 # ۴) R.java
-javac -nowarn -cp $AJ -d $W/classes $(find $W/gen -name '*.java') 2>&1 | grep -v "^Note" || true
+if ! javac -nowarn -cp $AJ -d $W/classes $(find $W/gen -name '*.java') > $W/javac.log 2>&1; then
+  echo "❌ javac شکست خورد"; tail -20 $W/javac.log; exit 1; fi
 
 # ۵) کاتلین: موتور + اپ
-/tmp/kotlinc/bin/kotlinc -J-Xmx1150m -jvm-target 11 -nowarn -include-runtime \
-  -cp "$AJ:$W/classes" engine/src/main/kotlin app/src/main/kotlin -d $W/kclasses 2>&1 | grep -v "^warning:" || true
+if ! /tmp/kotlinc/bin/kotlinc -J-Xmx1150m -jvm-target 11 -nowarn -include-runtime \
+  -cp "$AJ:$W/classes" engine/src/main/kotlin app/src/main/kotlin -d $W/kclasses > $W/kotlinc.log 2>&1; then
+  echo "❌ kotlinc شکست خورد"; grep -i "error:" $W/kotlinc.log | head -20; exit 1; fi
 
 # ۶) dex
 # stdlib جدا لازم است: با خروجی «دایرکتوری»، -include-runtime کاری نمی‌کند
