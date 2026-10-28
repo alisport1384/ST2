@@ -360,6 +360,9 @@ fun main(args: Array<String>) {
     var fxWf = false
     var fxCostMult = 1.0
     var fxSweep = false
+    var fxBt = false
+    var fxCapital = 10_000.0
+    var fxRisk = 0.25
     var fxTfSec = 0L
     var fxPair = ""
     var fxDir = ""
@@ -384,11 +387,15 @@ fun main(args: Array<String>) {
             "--fxcost" -> fxCostMult = args[++i].toDouble()
             "--fxsweep" -> fxSweep = true
             "--fxtf" -> fxTfSec = args[++i].toLong()
+            "--fxbt" -> fxBt = true
+            "--fxcap" -> fxCapital = args[++i].toDouble()
+            "--fxrisk" -> fxRisk = args[++i].toDouble()
             else -> {}
         }
         i++
     }
     // ── میز جفت‌ارز (۱٫۵٫۰۴): اجرای قاعدهٔ آزموده‌شده روی فایل CSV/دایرکتوری ──
+    if (fxBt) { runFxBacktestAll(fxPair, fxDir, fxCapital, fxRisk, fxCostMult); return }
     if (fxSweep) { runFxSweep(fxPair, fxDir, data, fxTfSec, fxCostMult); return }
     if (fxPair.isNotEmpty() || fxDir.isNotEmpty()) { runFxDesk(fxPair, fxDir, data, fxWf, fxCostMult, fxSweep, fxTfSec); return }
     if (data.isEmpty()) { println("--data لازم است"); return }
@@ -756,4 +763,42 @@ private fun runFxSweep(pairId: String, dir: String, singleFile: String,
         println(String.format("%-7s | %s", p.id, fmt(best)))
         println(String.format("%-7s | منتشرشده: %s", "", fmt(ship)))
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  بک‌تست میز هر جفت (۱٫۵٫۰۶) — دقیقاً همان محاسبه‌ای که اپ در تب مدیریت می‌کند:
+//  سرمایه و ریسک **هر میز جدا** (`--fxcap` و `--fxrisk`)، هزینهٔ آلپاری، و پارامتر
+//  مخصوص همان جفت از `FxPairs.ALL`. خروجی: یک ردیف برای هر جفت + خلاصهٔ جمع.
+// ═══════════════════════════════════════════════════════════════════════════════
+private fun runFxBacktestAll(pairId: String, dir: String, capital: Double, riskPct: Double, costMult: Double) {
+    val usdPerQuote = HashMap<String, Double>()
+    usdPerQuote["USD"] = 1.0
+    for ((quote, ref) in listOf("JPY" to "USDJPY", "CAD" to "USDCAD", "CHF" to "USDCHF", "GBP" to "GBPUSD")) {
+        val f = File(dir, "$ref.csv")
+        if (f.exists()) {
+            val c = FxBacktest.parseCsv(f.readText()).lastOrNull()?.c ?: continue
+            usdPerQuote[quote] = if (ref == "GBPUSD") c else 1.0 / c
+        }
+    }
+    val targets = if (pairId.isNotEmpty()) listOf(FxPairs.byId(pairId)) else FxPairs.ALL
+    println(String.format("%-7s %-4s %6s %6s %8s %6s %10s %9s %8s %7s",
+        "جفت", "میز", "معامله", "برد٪", "میانگینR", "PF", "سود خالص$", "افت$", "افتR", "سال+"))
+    var totTrd = 0; var totR = 0.0; var totNet = 0.0
+    for (p in targets) {
+        val f = File(dir, "${p.id}.csv")
+        if (!f.exists()) { println("${p.id}: فایل نیست (${f.absolutePath})"); continue }
+        val bars = FxBacktest.parseCsv(f.readText())
+        val base = FxCostTable.costFor(p.id, usdPerQuote)
+        if (base == null) { println("${p.id}: هزینه تعریف نشده"); continue }
+        val cost = if (costMult == 1.0) base else FxCost(
+            base.spreadPoints * costMult, base.swapLongPerLot * costMult,
+            base.swapShortPerLot * costMult, base.usdPerQuote)
+        val r = FxBacktest.run(p, bars, cost, capital, riskPct, 5.0 * costMult, source = "cli")
+        totTrd += r.trades; totR += r.sumR; totNet += r.netUsd
+        println(String.format("%-7s %-4s %6d %5.1f%% %+8.3f %6.2f %+10.0f %9.0f %8.1f %4d/%-3d",
+            p.id, if (p.onByDefault) "روشن" else "خاموش", r.trades, r.winRate, r.avgR, r.pf,
+            r.netUsd, r.maxDdUsd, r.maxDdR, r.positiveYears, r.yearCount))
+    }
+    if (totTrd > 0) println(String.format("— جمع: %d معامله · میانگین R وزنی %+.3f · سود خالص %+.0f $ (سرمایهٔ هر میز %.0f $، ریسک %.2f٪) —",
+        totTrd, totR / totTrd, totNet, capital, riskPct))
 }

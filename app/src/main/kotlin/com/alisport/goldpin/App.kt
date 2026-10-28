@@ -2816,7 +2816,7 @@ class AppState(val spec: SymbolSpec = Symbols.GOLD) {
             Hub.init(ctx)
             // میز جفت‌ارز (۱٫۵٫۰۵): وضعیت ذخیره‌شده بازیابی می‌شود تا با هر بار
             // باز شدن اپ، تاریخچهٔ کاغذی از صفر شروع نشود.
-            try { FxLive.restore(ctx) } catch (_: Throwable) { }
+            try { FxLive.init(ctx) } catch (_: Throwable) { }
         }
     }
 }

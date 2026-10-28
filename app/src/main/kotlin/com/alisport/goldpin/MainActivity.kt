@@ -1644,115 +1644,96 @@ class MainActivity : Activity() {
      * جدا از طلا/نفت است. هزینه‌ها: جدول رسمی آلپاری + ۵ دلار کمیسیون در لات.
      */
     private fun addFxSection(v: LinearLayout) {
-        v.addView(Ui.section(this, "⑦ جفت‌ارز — اجرای کاغذی ۶ جفتِ تأییدشده (۲۰ سال + ۳ سال)"))
-        val sm = FxLive.summary()
+        v.addView(Ui.section(this, "⑦ میزهای جفت‌ارز — یک میز کامل برای هر جفت (مثل طلا و نفت)"))
+        v.addView(Ui.tv(this,
+            "هر جفت‌ارز یک میز مستقل دارد: پارامتر خودش، سرمایهٔ خودش، ریسک خودش، " +
+                "آزمون ۲۰ سالهٔ خودش و ردیف خودش در تب مدیریت. هیچ‌کدام از این عددها با طلا و نفت قاطی نمی‌شود.",
+            10.5f, Palette.dim))
 
-        val card = LinearLayout(this).apply {
+        // ── جمع میزهای جفت‌ارز (جدا از طلا/نفت) ─────────────────────────────
+        val tot = FxLive.total()
+        val sum = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Palette.panel2)
             setPadding(Ui.dp(this@MainActivity, 10f), Ui.dp(this@MainActivity, 8f),
                 Ui.dp(this@MainActivity, 10f), Ui.dp(this@MainActivity, 8f))
         }
-        fun line(k: String, val0: String, c: Int = Palette.txt) {
-            card.addView(Ui.tv(this, "$k: $val0", 11f, c))
+        fun sline(k: String, val0: String, c: Int = Palette.txt) {
+            sum.addView(Ui.tv(this, "$k: $val0", 11f, c))
         }
-        line("وضعیت", if (sm.running) "● در حال اجرا (کاغذی)" else "○ خاموش",
-            if (sm.running) Palette.up else Palette.dim)
-        line("جفت‌های فعال", FxLive.activePairs.joinToString(" · "))
-        line("سرمایهٔ میز", Fa.n(FxLive.capital, 0) + " دلار (جدا از طلا/نفت)")
-        line("ریسک هر معامله", Fa.n(FxLive.riskPct, 2) + "٪ سرمایه",
-            if (FxLive.riskPct <= 0.25) Palette.up else Palette.gold)
-        line("موجودی / اکوییتی", "${Fa.n(sm.balance, 2)} / ${Fa.n(sm.equity, 2)}",
-            if (sm.equity >= sm.capital) Palette.up else Palette.down)
-        line("سود/زیان تحقق‌یافته", Fa.signed(sm.realized) + " دلار",
-            if (sm.realized >= 0) Palette.up else Palette.down)
-        line("شناور", Fa.signed(sm.floating) + " دلار",
-            if (sm.floating >= 0) Palette.up else Palette.down)
-        line("معاملات بسته / باز", "${Fa.d(sm.closedCount.toString())} / ${Fa.d(sm.openCount.toString())}")
-        line("نرخ برد", Fa.n(sm.winRate, 1) + "٪")
-        line("بیشترین افت", Fa.n(sm.maxDD, 2) + " دلار", Palette.down)
-        for (p in sm.pairs) {
-            val r = if (p.trades > 0) p.sumR / p.trades else 0.0
-            line("• ${p.pair}", "${Fa.d(p.trades.toString())} معامله · ${Fa.signed(p.sumR)}R " +
-                "(میانگین ${Fa.n(r, 3)}R) · ${if (p.open) "باز " + (if (p.openDir > 0) "خرید" else "فروش") else "بدون پوزیشن"}",
-                if (p.sumR >= 0) Palette.up else Palette.down)
-        }
-        sm.lastError?.let { line("⚠ آخرین خطای فید", it, Palette.down) }
-        card.addView(Ui.tv(this,
-            "کمیسیون: ۵ دلار در لات رفت‌وبرگشت (آلپاری Pro ECN) · اسپرد و سواپ از جدول رسمی بروکر · " +
-                "ریسک دلاری هر معامله = درصد بالا × موجودی میز",
-            9.5f, Palette.dim))
-        v.addView(card)
+        sline("میزهای فعال / روشن", "${Fa.d(tot.enabledCount.toString())} / ${Fa.d(tot.runningCount.toString())}")
+        sline("سرمایهٔ همهٔ میزها", Fa.n(tot.capital, 0) + " دلار (جدا از طلا/نفت)")
+        sline("موجودی جمعی میزها", Fa.n(tot.balance, 2),
+            if (tot.balance >= tot.capital) Palette.up else Palette.down)
+        sline("سود/زیان تحقق‌یافته", Fa.signed(tot.realized), if (tot.realized >= 0) Palette.up else Palette.down)
+        sline("شناور", Fa.signed(tot.floating), if (tot.floating >= 0) Palette.up else Palette.down)
+        sline("معاملات بسته / باز", "${Fa.d(tot.closedCount.toString())} / ${Fa.d(tot.openCount.toString())}")
+        sline("بیشترین افت", Fa.n(tot.maxDD, 2) + " دلار", Palette.down)
+        v.addView(sum)
 
-        // ── کلید روشن/خاموش اجرا ──
-        v.addView(switchRow("اجرای کاغذی جفت‌ارزها", sm.running) { on ->
-            if (on) FxLive.start(this) else FxLive.stop(this)
-            Log.i(Log.CAT_CFG, "میز جفت‌ارز = $on", "جفت‌ها=${FxLive.activePairs}")
-            refreshCurrent(force = true)
-        })
-
-        // ── انتخاب ریسک ──
-        v.addView(Ui.tv(this, "ریسک هر معامله (ب: محافظه‌کارانه · الف: استاندارد)", 11f, Palette.gold, true))
-        val rowRisk = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        for (pct in listOf(0.25, 0.5)) {
-            val b = Ui.btn(this, "${Fa.n(pct, 2)}٪",
-                if (kotlin.math.abs(FxLive.riskPct - pct) < 1e-9) Palette.gold else Palette.panel2,
-                if (kotlin.math.abs(FxLive.riskPct - pct) < 1e-9) Palette.bg else Palette.txt, 11f)
-            b.setOnClickListener {
-                FxLive.setRisk(pct)
-                toast("ریسک میز جفت‌ارز: ${Fa.n(pct, 2)}٪")
-                refreshCurrent(force = true)
-            }
-            rowRisk.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                .apply { marginEnd = Ui.dp(this@MainActivity, 6f) })
-        }
-        v.addView(rowRisk)
-
-        // ── اجرای تاریخچهٔ موجود / پاک‌کردن ──
-        val rowAct = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        rowAct.addView(Ui.btn(this, "اجرای تاریخچهٔ فعلی", Palette.panel2, Palette.txt, 10.5f).apply {
+        // ── کنترل‌های عمومی ─────────────────────────────────────────────────
+        val rowAll = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        rowAll.addView(Ui.btn(this, "▶ روشن‌کردن همهٔ میزهای فعال", Palette.accent, Palette.bg, 10.5f).apply {
             setOnClickListener {
-                FxLive.replayHistory()
-                toast("تاریخچه روی میز اجرا شد")
+                FxLive.startAllEnabled(this@MainActivity)
+                toast("میزهای فعال روشن شدند")
                 refreshCurrent(force = true)
             }
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = Ui.dp(this@MainActivity, 6f) })
-        rowAct.addView(Ui.btn(this, "پاک‌کردن نتایج جفت‌ارز", Palette.panel2, Palette.down, 10.5f).apply {
+        rowAll.addView(Ui.btn(this, "■ خاموش‌کردن همه", Palette.panel2, Palette.txt, 10.5f).apply {
             setOnClickListener {
-                AlertDialog.Builder(this@MainActivity)
-                    .setTitle("پاک‌کردن نتایج جفت‌ارز")
-                    .setMessage("همهٔ معاملات کاغذی جفت‌ارز حذف می‌شوند. طلا و نفت دست نمی‌خورند.")
-                    .setPositiveButton("پاک کن") { _, _ ->
-                        FxLive.desk.reset(); FxLive.persist(); toast("پاک شد"); refreshCurrent(force = true)
-                    }
-                    .setNegativeButton("بی‌خیال", null).show()
+                FxLive.stopAll(this@MainActivity)
+                toast("همهٔ میزها خاموش شدند")
+                refreshCurrent(force = true)
             }
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        v.addView(rowAct)
+        v.addView(rowAll)
 
-        // ── جدول پارامتر و دلیل انتخاب هر جفت ──
-        v.addView(Ui.tv(this, "پارامتر هر جفت (داوری ۴۰٪ آخر داده)", 11.5f, Palette.gold, true))
+        // سرمایهٔ هر میز (همه با هم)
+        v.addView(Ui.tv(this, "سرمایهٔ هر میز (مستقل برای هر جفت)", 11f, Palette.gold, true))
+        val rowCap = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for (capUsd in listOf(5_000.0, 10_000.0, 25_000.0)) {
+            val same = kotlin.math.abs(FxLive.desks.first().capital - capUsd) < 1
+            rowCap.addView(Ui.btn(this, Fa.n(capUsd, 0) + " $",
+                if (same) Palette.gold else Palette.panel2,
+                if (same) Palette.bg else Palette.txt, 10.5f).apply {
+                setOnClickListener {
+                    FxLive.desks.forEach { d -> d.setCapital(capUsd); d.desk.capital = capUsd }
+                    toast("سرمایهٔ هر میز: ${Fa.n(capUsd, 0)} دلار")
+                    refreshCurrent(force = true)
+                }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginEnd = Ui.dp(this@MainActivity, 6f) })
+        }
+        v.addView(rowCap)
+
+        // ── کارت مستقل هر جفت ───────────────────────────────────────────────
+        for (d in FxLive.desks) addFxDeskCard(v, d)
+
+        // ── جدول پارامتر همهٔ جفت‌ها (شامل خاموش‌ها، بدون سانسور) ────────────
+        v.addView(Ui.section(this, "⑦-ب جدول پارامتر و داوری ۲۰ سالهٔ همهٔ جفت‌ها"))
         for (p in com.alisport.goldpin.core.FxPairs.ALL) {
             val c = if (p.avgR20 > 0.1 && p.rec3AvgR > 0) Palette.up
                     else if (p.avgR20 > 0) Palette.gold else Palette.down
             v.addView(Ui.tv(this,
                 "${p.id} · ${p.tfFa} · ${p.modeFa} · N=${p.lookback} · atr=${Fa.n(p.atrMult, 2)} · " +
-                    "هدف ${Fa.n(p.targetR, 1)}R → ۲۰ سال ${Fa.signed(p.avgR20)}R · " +
-                    "۳ سال آخر ${Fa.signed(p.rec3AvgR)}R" + if (p.onByDefault) "  ✅ فعال" else "  ○ خاموش",
-                10f, c))
+                    "هدف ${Fa.n(p.targetR, 1)}R → داوری ۸ ساله ${Fa.signed(p.oosAvgR)}R · " +
+                    "کل ۲۰ سال ${Fa.signed(p.avgR20)}R · ۳ سال آخر ${Fa.signed(p.rec3AvgR)}R" +
+                    (if (p.note.isNotBlank()) " · ${p.note}" else ""),
+                9.5f, c))
         }
-        // ── دیتاست‌های ۱ / ۳ / ۱۰ / ۲۰ سال برای دانلود و بک‌تست ──
-        v.addView(Ui.section(this, "⑦-ب دیتاست جفت‌ارزها — ۱ / ۳ / ۱۰ / ۲۰ سال"))
+
+        // ── دیتاست‌های ۱ / ۳ / ۱۰ / ۲۰ سال ─────────────────────────────────
+        v.addView(Ui.section(this, "⑦-ج دیتاست جفت‌ارزها — ۱ / ۳ / ۱۰ / ۲۰ سال"))
         v.addView(Ui.tv(this,
-            "چهار بستهٔ آمادهٔ دانلود (۱۲ جفت در هر بسته، CSV با ستون‌های t,o,h,l,c,v): " +
-                "۱ سال ساعتی · ۳ سال ساعتی · ۱۰ سال روزانه · ۲۰ سال روزانه. " +
-                "همان فایل‌هایی که آزمون ۲۰ سالهٔ بالا با آن‌ها اجرا شد.",
+            "چهار بستهٔ آمادهٔ دانلود (۱۲ جفت در هر بسته، CSV با ستون‌های t,o,h,l,c,v). " +
+                "همان فایلی که دکمهٔ «بک‌تست ۲۰ ساله» هر میز از آن استفاده می‌کند (یک‌بار دانلود، بعد آفلاین).",
             10f, Palette.dim))
         for ((tag, label, desc) in listOf(
             Triple("1y", "۱ سال — ساعتی", "۶٬۰۸۰ کندل در هر جفت"),
-            Triple("3y", "۳ سال — ساعتی", "۱۷٬۱۹۴ کندل (کل دادهٔ ساعتی موجود)"),
-            Triple("10y", "۱۰ سال — روزانه", "۲٬۶۰۰ کندل در هر جفت"),
-            Triple("20y", "۲۰ سال — روزانه", "۵٬۱۸۳ کندل در هر جفت")
+            Triple("3y", "۳ سال — ساعتی", "۱۷٬۱۹۴ کندل"),
+            Triple("10y", "۱۰ سال — روزانه", "۲٬۶۰۰ کندل"),
+            Triple("20y", "۲۰ سال — روزانه", "۵٬۱۸۳ کندل")
         )) {
             val fname = when (tag) {
                 "1y" -> "goldpin_fx_1y_h1.zip"
@@ -1771,17 +1752,149 @@ class MainActivity : Activity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
                 .apply { topMargin = Ui.dp(this@MainActivity, 3f) })
         }
-        v.addView(Ui.tv(this,
-            "بک‌تست هر بسته روی رایانه: بسته را باز کنید و اجرا کنید " +
-                "`--fxdir <پوشه> --fxwf` (یا `--fxsweep` برای جست‌وجوی پارامتر). " +
-                "بک‌تست درون‌اپ جفت‌ارز در گام بعد وصل می‌شود؛ امروز خروجی زندهٔ کاغذی از همین موتور می‌آید.",
-            9.5f, Palette.dim))
 
         v.addView(Ui.tv(this,
-            "⚠ پارامترها با walk-forward روی ۲۰ سال (روزانه) انتخاب و با ۳ سال آخر آزمون شده‌اند. " +
-                "هر جفتی که در سه سال آخر منفی شد، خاموش است — حتی اگر ۲۰ ساله‌اش درخشان بود. " +
-                "نتایج کاغذی با بک‌تست یکسان است چون هر دو از یک کد (`FxDesk`) می‌آیند و فقط باکت بسته پردازش می‌شود.",
+            "⚠ پارامترها با walk-forward روی ۲۰ سال انتخاب و با ۸ سال آخر داوری شده‌اند و هر جفت " +
+                "جداگانه با ۳ سال آخر آزمون تازگی خورده است. جفتی که در سه سال آخر منفی شد، پیش‌فرض " +
+                "خاموش است — حتی اگر ۲۰ ساله‌اش درخشان بود. اجرای زنده و بک‌تست هر دو از یک کد " +
+                "(`FxDesk`) می‌آیند و فقط باکت بسته پردازش می‌شود.",
             9.5f, Palette.down))
+    }
+
+    /**
+     * کارت یک میز جفت‌ارز — دقیقاً الگوی طلا/نفت: پارامتر خودش، سرمایهٔ خودش،
+     * ریسک خودش، آزمون ۲۰ سالهٔ خودش، و آمار زندهٔ خودش.
+     */
+    private fun addFxDeskCard(v: LinearLayout, d: FxPairDesk) {
+        val p = d.profile
+        val sm = d.summary()
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Ui.rounded(Palette.panel2, 8f, this@MainActivity)
+            setPadding(Ui.dp(this@MainActivity, 10f), Ui.dp(this@MainActivity, 8f),
+                Ui.dp(this@MainActivity, 10f), Ui.dp(this@MainActivity, 8f))
+        }
+        fun line(k: String, val0: String, c: Int = Palette.txt) {
+            card.addView(Ui.tv(this, "$k: $val0", 10.5f, c))
+        }
+        val statusColor = when {
+            sm.running -> Palette.up
+            sm.enabled -> Palette.gold
+            else -> Palette.dim
+        }
+        val statusFa = when {
+            sm.running -> "● روشن (کاغذی)"
+            sm.enabled -> "◐ فعال، خاموش"
+            else -> "○ غیرفعال"
+        }
+        card.addView(Ui.tv(this, "میز ${p.id} — ${p.label}", 12.5f, statusColor, true))
+        line("وضعیت", statusFa, statusColor)
+        line("پارامترهای همین جفت",
+            "${p.tfFa} · ${p.modeFa} · N=${p.lookback} · atr=${Fa.n(p.atrMult, 2)} · " +
+                "هدف ${Fa.n(p.targetR, 1)}R" + (if (p.partial) " · پله در ۱R" else ""))
+        line("داوری ۲۰ ساله (منبع پژوهش)",
+            "بیرون‌نمونه ${Fa.signed(p.oosAvgR)}R (n=${p.oosTrades}) · " +
+                "کل ۲۰ سال ${Fa.signed(p.avgR20)}R · ۳ سال آخر ${Fa.signed(p.rec3AvgR)}R",
+            if (p.avgR20 > 0 && p.rec3AvgR > 0) Palette.up else Palette.down)
+        line("سرمایهٔ میز", Fa.n(sm.capital, 0) + " دلار (مستقل)")
+        line("موجودی / اکوییتی", "${Fa.n(sm.balance, 2)} / ${Fa.n(sm.equity, 2)}",
+            if (sm.equity >= sm.capital) Palette.up else Palette.down)
+        line("سود/زیان تحقق‌یافته / شناور",
+            "${Fa.signed(sm.realized)} / ${Fa.signed(sm.floating)}",
+            if (sm.realized + sm.floating >= 0) Palette.up else Palette.down)
+        line("معاملات بسته / باز", "${Fa.d(sm.closedCount.toString())} / ${Fa.d(sm.openCount.toString())}" +
+            (if (sm.openCount > 0) " · ${if (sm.openDir > 0) "خرید" else "فروش"} از ${Fa.n(sm.openEntry, 5)}" else ""))
+        line("نرخ برد / میانگین R", "${Fa.n(sm.winRate, 1)}٪ / ${Fa.signed(sm.avgR)}R")
+        line("بیشترین افت", Fa.n(sm.maxDD, 2) + " دلار (" + Fa.n(sm.maxDDPct, 1) + "٪)", Palette.down)
+        line("آخرین قیمت / کندل", (if (sm.lastPrice.isNaN()) "—" else Fa.n(sm.lastPrice, 5)) +
+            " · ${Fa.d(sm.bars.toString())} کندل ساعتی")
+        sm.lastError?.let { line("⚠ خطای فید", it, Palette.down) }
+
+        // ریسک همین میز (۰٫۲۵ / ۰٫۵)
+        val rowRisk = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for (pct in listOf(0.25, 0.5)) {
+            val on = kotlin.math.abs(sm.riskPct - pct) < 1e-9
+            rowRisk.addView(Ui.btn(this, "ریسک ${Fa.n(pct, 2)}٪",
+                if (on) Palette.gold else Palette.panel, if (on) Palette.bg else Palette.txt, 10f).apply {
+                setOnClickListener {
+                    d.setRisk(pct)
+                    toast("${p.id}: ریسک ${Fa.n(pct, 2)}٪")
+                    refreshCurrent(force = true)
+                }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginEnd = Ui.dp(this@MainActivity, 5f) })
+        }
+        card.addView(rowRisk, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            .apply { topMargin = Ui.dp(this@MainActivity, 4f) })
+
+        // روشن/خاموش همین میز
+        card.addView(switchRow("اجرای کاغذی همین میز", sm.running) { on ->
+            if (on) FxLive.start(this, p.id) else FxLive.stop(this, p.id)
+            Log.i(Log.CAT_CFG, "میز ${p.id} = $on", "")
+            refreshCurrent(force = true)
+        })
+        card.addView(switchRow("فعال بودن در فهرست میزها", sm.enabled) { on ->
+            d.setEnabled(this, on)
+            refreshCurrent(force = true)
+        })
+
+        // بک‌تست ۲۰ سالهٔ همین میز
+        val btBtn = Ui.btn(this,
+            if (d.backtestBusy) (d.backtestNote ?: "در حال آزمون…")
+            else "بک‌تست ۲۰ سالهٔ همین میز (دادهٔ واقعی)",
+            Palette.accent, Palette.bg, 10.5f)
+        btBtn.setOnClickListener {
+            d.runBacktest(this) { msg -> toast(msg) }
+            refreshCurrent(force = true)
+        }
+        card.addView(btBtn, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            .apply { topMargin = Ui.dp(this@MainActivity, 4f) })
+        d.backtest?.let { b ->
+            line("نتیجهٔ بک‌تست ۲۰ ساله",
+                "${Fa.d(b.trades.toString())} معامله · میانگین ${Fa.n(b.avgR, 3)}R · PF ${Fa.n(b.pf, 2)}",
+                if (b.avgR >= 0) Palette.up else Palette.down)
+            line("سود خالص / افت",
+                "${Fa.signed(b.netUsd)} / ${Fa.n(b.maxDdUsd, 0)} دلار (${Fa.n(b.maxDdR, 1)}R)",
+                if (b.netUsd >= 0) Palette.up else Palette.down)
+            line("سال‌های مثبت",
+                "${Fa.d(b.positiveYears.toString())} از ${Fa.d(b.yearCount.toString())} · " +
+                    "بازه ${Fa.d(((b.toT - b.fromT) / 31_536_000_000L).toString())} سال · " +
+                    "${Fa.d(b.bars.toString())} کندل",
+                if (b.positiveYears * 2 >= b.yearCount) Palette.up else Palette.down)
+            line("سرمایه/ریسک آزمون",
+                "${Fa.n(b.startCapital, 0)} $ · ${Fa.n(b.riskPct, 2)}٪ · کمیسیون ${Fa.n(b.commissionPerLot, 2)} $/لات")
+        }
+
+        // بازپخش / پاک‌کردن همین میز
+        val rowAct = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        rowAct.addView(Ui.btn(this, "بازپخش تاریخچه", Palette.panel, Palette.txt, 9.5f).apply {
+            setOnClickListener {
+                d.replay()
+                toast("${p.id}: تاریخچه روی میز اجرا شد")
+                refreshCurrent(force = true)
+            }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            .apply { marginEnd = Ui.dp(this@MainActivity, 5f) })
+        rowAct.addView(Ui.btn(this, "پاک‌کردن این میز", Palette.panel, Palette.down, 9.5f).apply {
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("پاک‌کردن میز ${p.id}")
+                    .setMessage("همهٔ معاملات کاغذی این میز حذف می‌شود. بقیهٔ میزها، طلا و نفت دست نمی‌خورند.")
+                    .setPositiveButton("پاک کن") { _, _ ->
+                        d.clearResults(); toast("${p.id} پاک شد"); refreshCurrent(force = true)
+                    }
+                    .setNegativeButton("بی‌خیال", null).show()
+            }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        card.addView(rowAct, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            .apply { topMargin = Ui.dp(this@MainActivity, 4f) })
+
+        v.addView(card, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            .apply { topMargin = Ui.dp(this@MainActivity, 6f) })
     }
 
     private fun addBrokerSection(v: LinearLayout) {
@@ -1851,7 +1964,7 @@ class MainActivity : Activity() {
                 "۲٫۵ دلار هر طرف (۵ دلار رفت‌وبرگشت در لات) + اسپرد همان جفت + سواپ شبانه. " +
                 "مقصد: هر معاملهٔ کاغذی جفت‌ارز، همان لحظهٔ ورود، کارمزد و اسپرد را کنار می‌گذارد.",
             10.5f, Palette.dim))
-        for (id in FxLive.activePairs) {
+        for (id in FxLive.desks.filter { it.enabled }.map { it.profile.id }) {
             val c = com.alisport.goldpin.core.FxCostTable.costFor(id)
             if (c == null) {
                 v.addView(Ui.tv(this, "$id: هزینه تعریف نشده", 10.5f, Palette.down))

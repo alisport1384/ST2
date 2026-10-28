@@ -194,43 +194,88 @@ object MgmtScreen {
         note.addView(Ui.tv(ctx, "• عددهای بالا جمع همهٔ نمادهاست و با عوض‌شدن نماد انتخابی تغییر نمی‌کند.\n" +
             "• هر نماد موتور، کارگزار، تنظیمات و فایل ذخیرهٔ خودش را دارد؛ انتخاب نماد فقط نما را عوض می‌کند.\n" +
             "• اگر هر بخشی به بک‌تست برود، لایو همهٔ نمادها متوقف می‌شود و معاملات باز همان لحظه فریز می‌شوند و همین‌جا شمرده می‌شوند.\n" +
-            "• نتیجهٔ بک‌تست فقط با درخواست بک‌تست تازه یا حذف صریح از بین می‌رود.",
+            "• نتیجهٔ بک‌تست فقط با درخواست بک‌تست تازه یا حذف صریح از بین می‌رود.\n" +
+            "• هر جفت‌ارز میز مستقل خودش را دارد (پارامتر، سرمایه، افت، آزمون ۲۰ ساله) و هیچ عددی از آن با طلا/نفت جمع نمی‌شود.",
             11f, Palette.dim))
         col0.addView(note, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        // ── میز جفت‌ارز (۱٫۵٫۰۵) — مستقل از نماد انتخابی، مثل بقیهٔ این تب ──────
+        // ── میزهای جفت‌ارز (۱٫۵٫۰۶) — یک کارت مستقل برای هر جفت، مثل طلا و نفت ──
         run {
-            val f = FxLive.summary()
-            val c = card(ctx, "میز جفت‌ارز — ${FxLive.activePairs.joinToString(" + ")}",
-                if (f.realized >= 0) Palette.up else Palette.down)
-            c.addView(row(ctx, "وضعیت",
-                if (f.running) "● در حال اجرا (کاغذی · ریسک ${Fa.n(f.riskPct, 2)}٪)" else "○ خاموش",
-                if (f.running) Palette.up else Palette.dim))
-            c.addView(row(ctx, "سرمایهٔ میز", Fa.n(f.capital, 2)))
-            c.addView(row(ctx, "موجودی (تحقق‌یافته)", Fa.n(f.balance, 2),
-                if (f.balance >= f.capital) Palette.up else Palette.down))
-            c.addView(row(ctx, "اکوییتی (با شناور)", Fa.n(f.equity, 2),
-                if (f.equity >= f.capital) Palette.up else Palette.down))
-            c.addView(row(ctx, "سود/زیان تحقق‌یافته", money(f.realized),
-                if (f.realized >= 0) Palette.up else Palette.down))
-            c.addView(row(ctx, "شناور", money(f.floating),
-                if (f.floating >= 0) Palette.up else Palette.down))
-            c.addView(row(ctx, "معاملات بسته / باز", "${Fa.d(f.closedCount.toString())} / ${Fa.d(f.openCount.toString())}"))
-            c.addView(row(ctx, "نرخ برد", Fa.n(f.winRate, 1) + "٪"))
-            c.addView(row(ctx, "بیشترین افت", Fa.n(f.maxDD, 2), Palette.down))
-            if (f.curve.size > 1) {
-                val ch = MgmtCurveView(ctx).apply { setData(f.curve, f.capital, Palette.gold) }
-                c.addView(ch, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ctx, 120f))
+            val t2 = FxLive.total()
+            val head2 = card(ctx, "میزهای جفت‌ارز — جمع ${Fa.d(t2.enabledCount.toString())} میز فعال (جدا از طلا و نفت)", Palette.violet)
+            head2.addView(row(ctx, "سرمایهٔ همهٔ میزها", Fa.n(t2.capital, 2)))
+            head2.addView(row(ctx, "موجودی جمعی", Fa.n(t2.balance, 2),
+                if (t2.balance >= t2.capital) Palette.up else Palette.down))
+            head2.addView(row(ctx, "اکوییتی جمعی", Fa.n(t2.equity, 2),
+                if (t2.equity >= t2.capital) Palette.up else Palette.down))
+            head2.addView(row(ctx, "سود/زیان تحقق‌یافته", money(t2.realized),
+                if (t2.realized >= 0) Palette.up else Palette.down))
+            head2.addView(row(ctx, "شناور", money(t2.floating),
+                if (t2.floating >= 0) Palette.up else Palette.down))
+            head2.addView(row(ctx, "معاملات بسته / باز", "${Fa.d(t2.closedCount.toString())} / ${Fa.d(t2.openCount.toString())}"))
+            head2.addView(row(ctx, "نرخ برد جمعی", Fa.n(t2.winRate, 1) + "٪"))
+            head2.addView(row(ctx, "بیشترین افت جمعی", Fa.n(t2.maxDD, 2), Palette.down))
+            if (t2.curve.size > 1) {
+                val ch = MgmtCurveView(ctx).apply { setData(t2.curve, t2.capital, Palette.violet) }
+                head2.addView(ch, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ctx, 130f))
                     .apply { topMargin = Ui.dp(ctx, 6f) })
             }
-            for (p in f.pairs) {
-                c.addView(row(ctx, "• ${p.pair}",
-                    "${Fa.d(p.trades.toString())} معامله · ${Fa.signed(p.sumR)}R" +
-                        (if (p.open) " · باز (${if (p.openDir > 0) "خرید" else "فروش"})" else ""),
-                    if (p.sumR >= 0) Palette.up else Palette.down))
+            head2.addView(Ui.tv(ctx, "این جمع هیچ‌وقت با جمع طلا/نفت قاطی نمی‌شود: سرمایه، " +
+                "موجودی و افت هر میز جداست.", 10f, Palette.dim))
+            col0.addView(head2, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                .apply { bottomMargin = Ui.dp(ctx, 8f) })
+        }
+
+        // ── یک کارت برای هر میز جفت‌ارز: دقیقاً همان الگوی نمادها ──────────────
+        for (d in FxLive.desks) {
+            val sm = d.summary()
+            val p = d.profile
+            val color = when {
+                sm.running -> Palette.up
+                sm.enabled -> Palette.gold
+                else -> Palette.dim
             }
-            c.addView(row(ctx, "توجه",
-                "این حساب جدا از طلا/نفت است؛ سرمایهٔ جمعی بالا شامل آن نمی‌شود.", Palette.dim))
+            val c = card(ctx, "میز ${p.id} — ${p.label}",
+                if (sm.realized + sm.floating >= 0) Palette.up else Palette.down)
+            c.addView(row(ctx, "وضعیت",
+                when {
+                    sm.running -> "● روشن (کاغذی)"
+                    sm.enabled -> "◐ فعال، خاموش"
+                    else -> "○ غیرفعال"
+                }, color))
+            c.addView(row(ctx, "پارامتر خودش",
+                "${p.tfFa} · ${p.modeFa} · N=${p.lookback} · atr=${Fa.n(p.atrMult, 2)} · " +
+                    "هدف ${Fa.n(p.targetR, 1)}R" + (if (p.partial) " · پله" else ""), Palette.dim))
+            c.addView(row(ctx, "ریسک این میز", Fa.n(sm.riskPct, 2) + "٪ سرمایه",
+                if (sm.riskPct <= 0.25) Palette.up else Palette.gold))
+            c.addView(row(ctx, "سرمایهٔ میز", Fa.n(sm.capital, 2)))
+            c.addView(row(ctx, "موجودی / اکوییتی", "${Fa.n(sm.balance, 2)} / ${Fa.n(sm.equity, 2)}"))
+            c.addView(row(ctx, "سود/زیان تحقق‌یافته", money(sm.realized),
+                if (sm.realized >= 0) Palette.up else Palette.down))
+            c.addView(row(ctx, "سود/زیان شناور", money(sm.floating),
+                if (sm.floating >= 0) Palette.up else Palette.down))
+            c.addView(row(ctx, "معاملات بسته / باز", "${Fa.d(sm.closedCount.toString())} / ${Fa.d(sm.openCount.toString())}" +
+                (if (sm.openCount > 0) " · ${if (sm.openDir > 0) "خرید" else "فروش"}" else "")))
+            c.addView(row(ctx, "برده / نرخ برد", "${Fa.d(sm.wins.toString())} / ${Fa.n(sm.winRate, 1)}٪"))
+            c.addView(row(ctx, "میانگین R این میز", Fa.signed(sm.avgR) + "R",
+                if (sm.avgR >= 0) Palette.up else Palette.down))
+            c.addView(row(ctx, "بیشترین افت", Fa.n(sm.maxDD, 2) + " (" + Fa.n(sm.maxDDPct, 1) + "٪)", Palette.down))
+            sm.backtest?.let { b ->
+                c.addView(row(ctx, "آزمون ۲۰ سالهٔ همین میز",
+                    "${Fa.d(b.trades.toString())} معامله · ${Fa.n(b.avgR, 3)}R · PF ${Fa.n(b.pf, 2)} · " +
+                        "سال+ ${Fa.d(b.positiveYears.toString())}/${Fa.d(b.yearCount.toString())}",
+                    if (b.avgR >= 0) Palette.up else Palette.down))
+            } ?: c.addView(row(ctx, "آزمون ۲۰ سالهٔ همین میز",
+                "اجرا نشده — از تنظیمات، دکمهٔ «بک‌تست ۲۰ سالهٔ همین میز»",
+                Palette.dim))
+            if (sm.curve.size > 1) {
+                val mc = MgmtCurveView(ctx).apply {
+                    setData(sm.curve, sm.capital, if (sm.realized >= 0) Palette.up else Palette.down)
+                }
+                c.addView(mc, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ctx, 110f))
+                    .apply { topMargin = Ui.dp(ctx, 6f) })
+            }
+            c.addView(row(ctx, "توجه", "این میز سرمایه و افت خودش را دارد؛ به جمع طلا/نفت اضافه نمی‌شود.", Palette.dim))
             col0.addView(c, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
                 .apply { bottomMargin = Ui.dp(ctx, 8f) })
         }
