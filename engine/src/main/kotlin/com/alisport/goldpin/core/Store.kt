@@ -98,6 +98,7 @@ object Store {
         "divAuto" to c.divAuto, "divManual" to c.divManual,
         "cmsnAuto" to c.cmsnAuto, "cmsnManual" to c.cmsnManual,
         "cmsnAutoValue" to c.cmsnAutoValue, "cmsnAutoAt" to c.cmsnAutoAt,
+        "brokerId" to c.brokerId, "brokerRefPrice" to c.brokerRefPrice, "brokerAppliedAt" to c.brokerAppliedAt,
         "crtEnabled" to c.crtEnabled, "crtPct" to c.crtPct,
         "mixedGrowthPct" to c.mixedGrowthPct,
         "lotStep" to c.lotStep, "lostResetAtFinalTp" to c.lostResetAtFinalTp,
@@ -181,6 +182,9 @@ object Store {
         if (m.containsKey("cmsnManual")) c.cmsnManual = m["cmsnManual"].asD()
         if (m.containsKey("cmsnAutoValue")) c.cmsnAutoValue = m["cmsnAutoValue"].asD()
         if (m.containsKey("cmsnAutoAt")) c.cmsnAutoAt = m["cmsnAutoAt"].asL()
+        if (m.containsKey("brokerId")) c.brokerId = m["brokerId"].asS()
+        if (m.containsKey("brokerRefPrice")) c.brokerRefPrice = m["brokerRefPrice"].asD()
+        if (m.containsKey("brokerAppliedAt")) c.brokerAppliedAt = m["brokerAppliedAt"].asL()
         if (m.containsKey("crtEnabled")) c.crtEnabled = m["crtEnabled"].asB()
         if (m.containsKey("crtPct")) c.crtPct = m["crtPct"].asD()
         if (m.containsKey("mixedGrowthPct")) c.mixedGrowthPct = m["mixedGrowthPct"].asD()

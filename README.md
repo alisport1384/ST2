@@ -1,6 +1,14 @@
 # GoldPin
 
-اپ اندروید و موتور بک‌تست استراتژی GoldPin. نسخهٔ این انتشار: **1.4.51 (versionCode 64)** — دانلود: [`GoldPin-1.4.51-64.apk`](https://github.com/alisport1384/ST2/releases/download/v1.4.51/GoldPin-1.4.51-64.apk) · گزارش: [`docs/GOZARESH-MODIRIYAT-v1.4.51.md`](docs/GOZARESH-MODIRIYAT-v1.4.51.md).
+اپ اندروید و موتور بک‌تست استراتژی GoldPin — **طلا (XAUUSD) و نفت WTI (USOIL) هم‌زمان**.
+نسخهٔ این انتشار: **1.5.02 (versionCode 68)** — دانلود: [`GoldPin-1.5.02-68.apk`](https://github.com/alisport1384/ST2/releases/download/v1.5.02/GoldPin-1.5.02-68.apk) ·
+گزارش: [`docs/GOZARESH-BROKER-ALPARI-v1.5.02.md`](docs/GOZARESH-BROKER-ALPARI-v1.5.02.md).
+
+**تازه در ۱٫۵٫۰۲:** کارمزد هر دو نماد از **پروفایل رسمی بروکر** می‌آید، نه از عدد دستی.
+مرجع فعلی: **آلپاری** (۵ نوع حساب، جدول رسمی ۲۰۲۶-۱۰-۱۴) — طلا ۰٫۲۳۷ و نفت ۰٫۰۱۵۱ دلار بر
+واحد در Pro ECN. بروکر بعدی = یک ردیف داده در `Brokers.ALL`. جدول کامل:
+[`docs/ALPARI-KARMOZD-VA-SPREAD.md`](docs/ALPARI-KARMOZD-VA-SPREAD.md) · دادهٔ خام:
+[`config/alpari-costs.json`](config/alpari-costs.json).
 
 ## دادهٔ بک‌تست طلا (XAUUSD، M1)
 

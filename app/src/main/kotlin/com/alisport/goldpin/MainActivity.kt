@@ -25,6 +25,7 @@ import android.widget.ListView
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
+import com.alisport.goldpin.core.Brokers
 import com.alisport.goldpin.core.MoneyMode
 import com.alisport.goldpin.core.Order
 import com.alisport.goldpin.core.OrderStatus
@@ -1623,6 +1624,85 @@ class MainActivity : Activity() {
     }
 
     /**
+     * ⑥-ب بروکر — کارمزد از پروفایل رسمی بروکر (۱٫۵٫۰۲).
+     *
+     * تصمیم مالک: «دقیقاً با آلپاری ست شود؛ در آینده چند بروکر وصل می‌کنم، فعلاً مرجع
+     * آلپاری است.» برای بروکر بعدی فقط یک [BrokerProfile] به فهرست موتور اضافه
+     * می‌شود و همین‌جا خودکار ظاهر می‌شود — هیچ کد رابط تازه‌ای لازم نیست.
+     *
+     * چرا این بخش لازم است: کارمزد یک عدد سلیقه‌ای نیست؛ ورودیِ فیلتر کارمزد (§۵-۳) و
+     * حداقل فاصلهٔ حد ضرر است. عدد اشتباه ⇒ یا همهٔ سفارش‌ها رد می‌شوند، یا معامله‌های
+     * بازندهٔ کم‌فاصله عبور می‌کنند و منحنی سرمایه را می‌خورند.
+     */
+    private fun addBrokerSection(v: LinearLayout) {
+        v.addView(Ui.section(this, "⑥-ب بروکر و کارمزد واقعی (مرجع فعلی: آلپاری)"))
+        val active = Brokers.byId(s.cfg.brokerId)
+        val px = s.refPrice()
+        if (active != null && s.cfg.brokerAppliedAt > 0L) {
+            v.addView(Ui.tv(this, "بروکر فعال: ${active.labelFa}", 12f, Palette.up, true))
+        } else {
+            v.addView(Ui.tv(this, "حالت دستی — هیچ پروفایل بروکری ست نشده است", 12f, Palette.gold, true))
+        }
+        // کارمزد فعلی هر دو نماد در یک نگاه
+        for (st in Hub.all()) {
+            val p = st.refPrice()
+            val now = st.cfg.cmsnManual
+            val bCost = Brokers.costPerUnit(active, st.spec.id, p)
+            val pct = if (p > 0) now / p * 100.0 else 0.0
+            v.addView(Ui.tv(this,
+                "${st.spec.short}: کارمزد فعلی ${Fa.n(now, 4)} دلار بر ${st.spec.unit} " +
+                    "(${Fa.n(pct, 4)}٪ قیمت)" +
+                    (if (bCost != null) " · پروفایل بروکر: ${Fa.n(bCost, 4)}" else ""),
+                10.5f, Palette.dim))
+        }
+        v.addView(Ui.tv(this,
+            "قیمت مرجع محاسبه: ${Fa.n(px, 2)} — کمیسیون بروکر درصدی است، پس کارمزد با قیمت " +
+                "بالا/پایین می‌رود و همان لحظه ذخیره می‌شود.",
+            10f, Palette.dim))
+        for (b in Brokers.ALL) {
+            val sel = b.id == s.cfg.brokerId && s.cfg.brokerAppliedAt > 0L
+            val g = Brokers.costPerUnit(b, com.alisport.goldpin.core.Symbols.GOLD.id, Hub.state(com.alisport.goldpin.core.Symbols.GOLD).refPrice())
+            val o = Brokers.costPerUnit(b, com.alisport.goldpin.core.Symbols.OIL.id, Hub.state(com.alisport.goldpin.core.Symbols.OIL).refPrice())
+            val title = (if (sel) "✓ " else "") + b.labelFa +
+                " — طلا " + (g?.let { Fa.n(it, 3) } ?: "—") + " · نفت " + (o?.let { Fa.n(it, 4) } ?: "—")
+            v.addView(Ui.btn(this, title, if (sel) Palette.accent else Palette.panel2,
+                if (sel) Palette.bg else Palette.txt, 11f).apply {
+                setOnClickListener {
+                    val gp = Hub.state(com.alisport.goldpin.core.Symbols.GOLD).refPrice()
+                    val op = Hub.state(com.alisport.goldpin.core.Symbols.OIL).refPrice()
+                    val msg = buildString {
+                        appendLine(b.noteFa)
+                        appendLine()
+                        appendLine("• " + Brokers.summaryFa(b, com.alisport.goldpin.core.Symbols.GOLD.id, gp))
+                        appendLine("• " + Brokers.summaryFa(b, com.alisport.goldpin.core.Symbols.OIL.id, op))
+                        appendLine()
+                        appendLine(Brokers.swapWarningFa(b, com.alisport.goldpin.core.Symbols.GOLD.id))
+                        appendLine(Brokers.swapWarningFa(b, com.alisport.goldpin.core.Symbols.OIL.id))
+                        appendLine()
+                        append("دادهٔ رسمی بروکر: ${b.dataDate} · منبع: صفحهٔ Contract Specifications آلپاری")
+                    }
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle(b.labelFa)
+                        .setMessage(msg)
+                        .setPositiveButton("ست کن روی هر دو نماد") { _, _ ->
+                            toast(Hub.applyBroker(b.id))
+                            if (s.sessionMode == SessionMode.INTERNAL) showTab(5)
+                        }
+                        .setNeutralButton("فقط نمایش", null)
+                        .show()
+                }
+            })
+            v.addView(Ui.spacer(this, 2f))
+        }
+        v.addView(Ui.btn(this, "بروکر بعدی؟ فقط یک پروفایل تازه در موتور (Brokers.ALL) اضافه کنید",
+            Palette.panel2, Palette.dim, 10.5f))
+        v.addView(Ui.tv(this,
+            "⚠ سواپ شبانه در بک‌تست محاسبه **نمی‌شود**. برای نفت این عدد از خودِ کمیسیون " +
+                "بزرگ‌تر است؛ اگر معامله را شب نگه می‌دارید، سود واقعی کمتر از بک‌تست است.",
+            10f, Palette.down))
+    }
+
+    /**
      * §تطبیق — یک جا: استراتژی × مود مالی × تریگر ۲ معکوس × کارمزد واقعی.
      *
      * چرا: هر ترکیب، پارامتر بهینهٔ خودش را دارد و کارمزد واقعی آستانه‌ها را جابه‌جا می‌کند
@@ -1630,6 +1710,7 @@ class MainActivity : Activity() {
      * پیش‌تنظیم‌ها از جاروب پارامتر روی **دادهٔ یک‌سالهٔ داخل اپ** آمده‌اند، نه از حدس.
      */
     private fun addAdaptSection(v: LinearLayout) {
+        addBrokerSection(v)
         v.addView(Ui.section(this, "⑥-ج تطبیق خودکار (استراتژی × مود × کارمزد)"))
         val c = s.cfg
         val cmsn = s.effectiveCmsn()

@@ -291,6 +291,13 @@ class Settings {
     /** آخرین اسپرد دریافت‌شده از بروکر (۰ = هنوز دریافت نشده ⇒ cmsnManual) و زمان دریافت (میلی‌ثانیه). */
     var cmsnAutoValue: Double = 0.0
     var cmsnAutoAt: Long = 0L
+    // ── بروکر (۱٫۵٫۰۲) ────────────────────────────────────────────────────────
+    /** شناسهٔ پروفایل بروکر ([Brokers.ALL]) که کارمزد از آن گرفته شده؛ `custom` = دستی. */
+    var brokerId: String = Brokers.DEFAULT_ID
+    /** قیمتی که کارمزد با آن حساب شد (کمیسیون درصدی است، پس قیمت مرجع ذخیره می‌شود). */
+    var brokerRefPrice: Double = 0.0
+    /** زمان اعمال پروفایل بروکر (میلی‌ثانیه) — ۰ = هرگز اعمال نشده. */
+    var brokerAppliedAt: Long = 0L
     /**
      * اگر [Store] هنگام بارگذاری فایل قدیمی، «اسپرد خودکارِ بزرگ» را به «دستی ۰٫۲۰» تبدیل
      * کرده باشد، مقدار قبلی این‌جا می‌آید (۰ = مهاجرتی رخ نداده). فقط برای **اطلاع‌دادن** به
@@ -345,6 +352,7 @@ class Settings {
         it.divAuto = divAuto; it.divManual = divManual
         it.cmsnAuto = cmsnAuto; it.cmsnManual = cmsnManual
         it.cmsnAutoValue = cmsnAutoValue; it.cmsnAutoAt = cmsnAutoAt
+        it.brokerId = brokerId; it.brokerRefPrice = brokerRefPrice; it.brokerAppliedAt = brokerAppliedAt
         it.crtEnabled = crtEnabled; it.crtPct = crtPct
         it.mixedGrowthPct = mixedGrowthPct
         it.lotStep = lotStep; it.lostResetAtFinalTp = lostResetAtFinalTp

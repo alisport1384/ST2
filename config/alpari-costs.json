@@ -1,0 +1,277 @@
+{
+  "source": "https://alpari.com/en/trading-terms/fees/contract-specifications/ (widget data: builder.io model instrument-specification-data, accountType rows)",
+  "source_applied_at_utc": "2026-10-14",
+  "fetched_utc": "2026-10-28",
+  "price_ref": {
+    "XAUUSD": 4061.0,
+    "WTI": 101.2
+  },
+  "note_point": "1 point XAUUSD = 0.01 USD/oz. 1 point WTI/BRN = 0.01 USD/bbl (contract size 1000 bbl).",
+  "accounts": {
+    "proEcnMt5": {
+      "commission": "18 USD per 1,000,000 USD notional on spot metals (per side); 25 USD per 1,000,000 USD notional on commodity CFDs (per side)",
+      "gold": {
+        "ticker": "XAUUSD",
+        "min_spread_points": 9.08,
+        "contract_size": 100,
+        "commission_flag": true,
+        "min_spread_usd_per_unit": 0.0908,
+        "min_spread_usd_per_lot": 9.08,
+        "swap_long": -63.67,
+        "swap_short": 41.01,
+        "swap_type": "By points"
+      },
+      "wti": {
+        "ticker": "WTI",
+        "min_spread_points": 1,
+        "contract_size": 1000,
+        "commission_flag": true,
+        "min_spread_usd_per_unit": 0.01,
+        "min_spread_usd_per_lot": 10.0,
+        "swap_long": 34.32,
+        "swap_short": -75.8,
+        "swap_type": "By symbol currency"
+      },
+      "brent": {
+        "ticker": "BRN",
+        "min_spread_points": 2,
+        "contract_size": 1000,
+        "commission_flag": true,
+        "min_spread_usd_per_unit": 0.02,
+        "min_spread_usd_per_lot": 20.0,
+        "swap_long": 37.05,
+        "swap_short": -113.25,
+        "swap_type": "By symbol currency"
+      }
+    },
+    "proEcnMt4": {
+      "commission": "18 USD per 1,000,000 USD notional on spot metals (per side); 25 USD per 1,000,000 USD notional on commodity CFDs (per side)",
+      "gold": {
+        "ticker": "XAUUSD",
+        "min_spread_points": 9.08,
+        "contract_size": 100,
+        "commission_flag": true,
+        "min_spread_usd_per_unit": 0.0908,
+        "min_spread_usd_per_lot": 9.08,
+        "swap_long": -63.67,
+        "swap_short": 41.01,
+        "swap_type": "By points"
+      },
+      "wti": {
+        "ticker": "WTI",
+        "min_spread_points": null,
+        "contract_size": 1000,
+        "commission_flag": true,
+        "min_spread_usd_per_unit": null,
+        "min_spread_usd_per_lot": null,
+        "swap_long": 34.32,
+        "swap_short": -75.8,
+        "swap_type": "By dollars"
+      },
+      "brent": {
+        "ticker": "BRN",
+        "min_spread_points": 2,
+        "contract_size": 1000,
+        "commission_flag": true,
+        "min_spread_usd_per_unit": 0.02,
+        "min_spread_usd_per_lot": 20.0,
+        "swap_long": 37.05,
+        "swap_short": -113.25,
+        "swap_type": "By dollars"
+      }
+    },
+    "ecnMt4": {
+      "commission": "none",
+      "gold": {
+        "ticker": "XAUUSD",
+        "min_spread_points": 31.9,
+        "contract_size": 100,
+        "commission_flag": false,
+        "min_spread_usd_per_unit": 0.319,
+        "min_spread_usd_per_lot": 31.9,
+        "swap_long": -63.67,
+        "swap_short": 41.01,
+        "swap_type": "By points"
+      },
+      "wti": {
+        "ticker": "WTI",
+        "min_spread_points": 3,
+        "contract_size": 1000,
+        "commission_flag": false,
+        "min_spread_usd_per_unit": 0.03,
+        "min_spread_usd_per_lot": 30.0,
+        "swap_long": 34.32,
+        "swap_short": -75.8,
+        "swap_type": "By dollars"
+      },
+      "brent": {
+        "ticker": "BRN",
+        "min_spread_points": 4,
+        "contract_size": 1000,
+        "commission_flag": false,
+        "min_spread_usd_per_unit": 0.04,
+        "min_spread_usd_per_lot": 40.0,
+        "swap_long": 37.05,
+        "swap_short": -113.25,
+        "swap_type": "By dollars"
+      }
+    },
+    "standardMt4": {
+      "commission": "none",
+      "gold": {
+        "ticker": "XAUUSD",
+        "min_spread_points": 35.9,
+        "contract_size": 100,
+        "commission_flag": false,
+        "min_spread_usd_per_unit": 0.359,
+        "min_spread_usd_per_lot": 35.9,
+        "swap_long": -63.67,
+        "swap_short": 41.01,
+        "swap_type": "By points"
+      },
+      "wti": {
+        "ticker": "WTI",
+        "min_spread_points": 7,
+        "contract_size": 1000,
+        "commission_flag": false,
+        "min_spread_usd_per_unit": 0.07,
+        "min_spread_usd_per_lot": 70.0,
+        "swap_long": 34.32,
+        "swap_short": -75.8,
+        "swap_type": "By dollars"
+      },
+      "brent": {
+        "ticker": "BRN",
+        "min_spread_points": 8,
+        "contract_size": 1000,
+        "commission_flag": false,
+        "min_spread_usd_per_unit": 0.08,
+        "min_spread_usd_per_lot": 80.0,
+        "swap_long": 37.05,
+        "swap_short": -113.25,
+        "swap_type": "By dollars"
+      }
+    },
+    "standardMt5": {
+      "commission": "none",
+      "gold": {
+        "ticker": "XAUUSD_i",
+        "min_spread_points": 35.9,
+        "contract_size": 100,
+        "commission_flag": false,
+        "min_spread_usd_per_unit": 0.359,
+        "min_spread_usd_per_lot": 35.9,
+        "swap_long": -63.67,
+        "swap_short": 41.01,
+        "swap_type": "By points"
+      },
+      "wti": {
+        "ticker": "WTI_i",
+        "min_spread_points": 6,
+        "contract_size": 1000,
+        "commission_flag": false,
+        "min_spread_usd_per_unit": 0.06,
+        "min_spread_usd_per_lot": 60.0,
+        "swap_long": 34.32,
+        "swap_short": -75.8,
+        "swap_type": "By symbol currency"
+      },
+      "brent": {
+        "ticker": "BRN_i",
+        "min_spread_points": 7,
+        "contract_size": 1000,
+        "commission_flag": false,
+        "min_spread_usd_per_unit": 0.07,
+        "min_spread_usd_per_lot": 70.0,
+        "swap_long": 37.05,
+        "swap_short": -113.25,
+        "swap_type": "By symbol currency"
+      }
+    },
+    "microMt4": {
+      "commission": "none",
+      "gold": {
+        "ticker": "XAUUSD_m",
+        "min_spread_points": null,
+        "contract_size": 1,
+        "commission_flag": false,
+        "min_spread_usd_per_unit": null,
+        "min_spread_usd_per_lot": null,
+        "swap_long": -63.67,
+        "swap_short": 41.01,
+        "swap_type": "By points"
+      },
+      "wti": {
+        "ticker": "WTI_m",
+        "min_spread_points": null,
+        "contract_size": 10,
+        "commission_flag": false,
+        "min_spread_usd_per_unit": null,
+        "min_spread_usd_per_lot": null,
+        "swap_long": 0.3432,
+        "swap_short": -0.758,
+        "swap_type": "By dollars"
+      },
+      "brent": {
+        "ticker": "BRN_m",
+        "min_spread_points": null,
+        "contract_size": 10,
+        "commission_flag": false,
+        "min_spread_usd_per_unit": null,
+        "min_spread_usd_per_lot": null,
+        "swap_long": 0.3705,
+        "swap_short": -1.1325,
+        "swap_type": "By dollars"
+      }
+    }
+  },
+  "computed_all_in_round_turn": {
+    "proEcnMt5": {
+      "gold_allin_usd_per_oz_pct": [
+        0.237,
+        0.0058
+      ],
+      "wti_allin_usd_per_bbl_pct": [
+        0.01506,
+        0.0149
+      ]
+    },
+    "proEcnMt4": {
+      "gold_allin_usd_per_oz_pct": [
+        0.237,
+        0.0058
+      ],
+      "wti_allin_usd_per_bbl_pct": null
+    },
+    "ecnMt4": {
+      "gold_allin_usd_per_oz_pct": [
+        0.319,
+        0.0079
+      ],
+      "wti_allin_usd_per_bbl_pct": [
+        0.03,
+        0.0296
+      ]
+    },
+    "standardMt4": {
+      "gold_allin_usd_per_oz_pct": [
+        0.359,
+        0.0088
+      ],
+      "wti_allin_usd_per_bbl_pct": [
+        0.07,
+        0.0692
+      ]
+    },
+    "standardMt5": {
+      "gold_allin_usd_per_oz_pct": [
+        0.359,
+        0.0088
+      ],
+      "wti_allin_usd_per_bbl_pct": [
+        0.06,
+        0.0593
+      ]
+    }
+  }
+}

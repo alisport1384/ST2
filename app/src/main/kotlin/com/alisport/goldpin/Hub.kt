@@ -1,6 +1,8 @@
 package com.alisport.goldpin
 
 import android.content.Context
+import com.alisport.goldpin.core.BrokerProfile
+import com.alisport.goldpin.core.Brokers
 import com.alisport.goldpin.core.SymbolSpec
 import com.alisport.goldpin.core.Symbols
 import com.alisport.goldpin.util.Fa
@@ -113,6 +115,25 @@ object Hub {
         all().filter { it !== st && it.internalRawSize() > 2_000_000 }.forEach { it.releaseHeavyData(ctx) }
         st.restoreOrSample(ctx) { m -> onDone(m) }
     }
+
+    // ── بروکر (۱٫۵٫۰۲) ─────────────────────────────────────────────────────────
+    /**
+     * ست کردن یک پروفایل بروکر روی **همهٔ** نمادها.
+     *
+     * چرا همه با هم: بروکر یک واقعیت حساب است، نه یک تنظیم هر نماد. اگر فقط نمادِ
+     * نمای فعال عوض می‌شد، نماد دیگر با کارمزد قدیمی معامله می‌کرد و جمعِ سود در تب
+     * مدیریت دو هزینهٔ متفاوت را قاطی می‌کرد. هیچ حالتی ریست نمی‌شود و لایو متوقف نمی‌شود.
+     */
+    fun applyBroker(id: String): String {
+        val p = Brokers.byId(id) ?: return "بروکر ناشناس: $id"
+        val lines = all().map { st -> st.applyBroker(p) }
+        fire()
+        Log.i(Log.CAT_CFG, "پروفایل بروکر روی همهٔ نمادها ست شد", "${p.id} · ${lines.size} نماد")
+        return lines.joinToString("\n")
+    }
+
+    /** بروکر فعال (اگر «دستی» باشد `null`). */
+    fun activeBroker(): BrokerProfile? = Brokers.byId(view.cfg.brokerId)
 
     // ── لایو ────────────────────────────────────────────────────────────────────
     /** آیا حلقهٔ زنده برای هر نمادی روشن است؟ */

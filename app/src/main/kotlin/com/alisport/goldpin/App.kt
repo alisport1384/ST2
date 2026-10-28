@@ -878,6 +878,14 @@ class AppState(val spec: SymbolSpec = Symbols.GOLD) {
         cfg.cxTrailRegime2 = p.cxTrail2
         cfg.cmsnAuto = false
         cfg.cmsnManual = p.cmsn
+        // ۱٫۵٫۰۲: اگر بروکر ست شده باشد، کارمزدِ پروفایل بروکر بر عدد ثابتِ پیش‌تنظیم
+        // اولویت دارد (وگرنه زدن یک پیش‌تنظیم، ست‌کردن بروکر را بی‌اثر می‌کرد).
+        val bk = Brokers.byId(cfg.brokerId)
+        if (bk != null && cfg.brokerAppliedAt > 0L) {
+            val c2 = Symbols.applyBrokerCost(cfg, spec, bk, refPrice())
+            if (c2 != null) Log.i(Log.CAT_CFG, "کارمزد پیش‌تنظیم با پروفایل بروکر جایگزین شد",
+                "${p.id}: ${Fa.n(p.cmsn, 4)} → ${Fa.n(c2, 4)} (${bk.id})")
+        }
         Log.i(Log.CAT_CFG, "پیش‌تنظیم تطبیق اعمال شد",
             "${p.id} strategy=${p.strategy} mm=${MoneyMode.label(p.mm)} fade=${p.fade} k=${p.targetR} minSl=${p.minSl} N=${p.maxSl}")
         ensureBrokerSpread()
@@ -1434,6 +1442,54 @@ class AppState(val spec: SymbolSpec = Symbols.GOLD) {
             }
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  بروکر (۱٫۵٫۰۲) — کارمزد از پروفایل رسمی بروکر، نه عدد دستی
+    //
+    //  تصمیم مالک: «دقیقاً با آلپاری ست شود؛ در آینده چند بروکر وصل می‌کنم، فعلاً مرجع
+    //  آلپاری است.» پس بروکر یک موجودیت مستقل است ([Brokers]) و ست‌کردنش **فقط** کارمزد
+    //  را عوض می‌کند؛ هیچ پارامتر استراتژی، سرمایه یا معامله‌ای دست نمی‌خورد.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /** قیمت مرجع برای محاسبهٔ کارمزد: فید زنده ← آخرین کندل ← قیمت جانشین بروکر. */
+    fun refPrice(): Double {
+        val lp = lastLivePrice
+        if (lp.isFinite() && lp > 0.0) return lp
+        val c = candles.lastOrNull()?.c ?: return Brokers.fallbackPrice(spec.id)
+        return if (c.isFinite() && c > 0.0) c else Brokers.fallbackPrice(spec.id)
+    }
+
+    /**
+     * ست کردن پروفایل بروکر روی **همین نماد**.
+     *
+     * فقط سه چیز عوض می‌شود: `cmsnManual` (کارمزد واقعی بروکر)، `cmsnAuto` (خاموش)، و
+     * فیلدهای `broker*` برای ثبت اینکه با چه قیمتی و چه زمانی حساب شد. پارامترهای
+     * استراتژی، حد ضرر، سرمایه و معاملات دست‌نخورده می‌مانند.
+     *
+     * @return پیام فارسی نتیجه (برای toast/گزارش).
+     */
+    fun applyBroker(profile: BrokerProfile): String {
+        val px = refPrice()
+        val before = cfg.cmsnManual
+        val cost = Symbols.applyBrokerCost(cfg, spec, profile, px)
+        if (cost == null) {
+            Log.w(Log.CAT_CFG, "بروکر برای این نماد عدد رسمی ندارد",
+                "${profile.id} / ${spec.id} — کارمزد دست‌نخورده ماند (${Fa.n(before, 4)})")
+            return "بروکر ${profile.labelFa} برای ${spec.short} حداقل اسپرد منتشر نکرده است؛ " +
+                "کارمزد همان ${Fa.n(before, 4)} ماند. خودتان عدد را در تنظیمات ⑥ وارد کنید."
+        }
+        Log.i(Log.CAT_CFG, "کارمزد از پروفایل بروکر ست شد",
+            "${profile.id} · ${spec.id} @ ${Fa.n(px, 2)} · ${Fa.n(before, 4)} → ${Fa.n(cost, 4)} " +
+                "(اسپرد+کمیسیون رفت‌وبرگشت، دلار بر ${spec.unit})")
+        appContextRef?.let { c -> io.execute { try { saveToAutoFile(c) } catch (_: Exception) { } } }
+        rebuildAsync()
+        return "${profile.accountFa} (${profile.platformFa}): کارمزد ${spec.short} " +
+            "${Fa.n(before, 4)} → ${Fa.n(cost, 4)} دلار بر ${spec.unit}"
+    }
+
+    /** کارمزد مؤثر بروکر برای نمایش در رابط (بدون تغییر چیزی). */
+    fun brokerCostNow(): Double? =
+        Brokers.byId(cfg.brokerId)?.let { Brokers.costPerUnit(it, spec.id, refPrice()) }
 
     /** مود §۲۰ روشن، cmsn «خودکار» و هنوز اسپردی نداریم ⇒ یک‌بار بگیر (بعدش فقط با درخواست کاربر عوض می‌شود). */
     fun ensureBrokerSpread() {
@@ -2645,7 +2701,10 @@ class AppState(val spec: SymbolSpec = Symbols.GOLD) {
                 // ۰٫۷ سفارش بدهد. اگر فایلی باشد، مهاجرت specRev در Store همان کار را فقط برای
                 // مقدارهای دست‌نخوردهٔ سند ۷ انجام می‌دهد و تنظیم دستی کاربر دست‌نخورده می‌ماند.
                 if (!Storage.autoFile(ctx, spec.id).exists() && !Storage.internalFile(ctx, selectedBacktestYears, spec.id).exists()) {
-                    if (spec.oil) Symbols.applyOilDefaults(cfg) else Tuned.apply(cfg)
+                    // ۱٫۵٫۰۲: تنظیمِ پیش‌فرض هر نماد با **کارمزد واقعی بروکر** ساخته می‌شود
+                    // (پیش‌فرض = آلپاری Pro ECN). قبلاً نفت با کارمزد دستی ۰٫۳ ساخته می‌شد
+                    // که از جدول رسمی بروکر بیرون نیامده بود.
+                    val c0 = Symbols.applyDefaults(cfg, spec, refPrice())
                     Log.i(Log.CAT_CFG, "نصب تازه → تنظیم آزموده‌شده با داده اعمال شد",
                         "هدف=${Fa.n(cfg.trigger2TargetR, 1)}R بافرحدضرر=${Fa.n(cfg.slBufTicks, 0)}تیک " +
                             "سقف‌N=${Fa.n(cfg.maxSlUnits, 1)} کارمزد=${Fa.n(cfg.cmsnManual, 2)}")
@@ -2682,6 +2741,22 @@ class AppState(val spec: SymbolSpec = Symbols.GOLD) {
                         "قبلی=${Fa.n(cfg.cmsnMigratedFromAuto, 2)} جدید=${Fa.n(cfg.cmsnManual, 2)}")
                     cfg.cmsnMigratedFromAuto = 0.0
                 }
+                // ۱٫۵٫۰۲: یک‌بار به کاربر بگو پروفایل بروکر اضافه شده — **هیچ عددی خودکار عوض نمی‌شود**
+                // (سیاست این پروژه: تنظیم ذخیره‌شدهٔ کاربر هرگز بی‌خبر تغییر نمی‌کند.)
+                try {
+                    if (cfg.brokerAppliedAt <= 0L) {
+                        val p = ctx.getSharedPreferences("goldpin", Context.MODE_PRIVATE)
+                        if (!p.getBoolean("broker_banner_v1502", false)) {
+                            p.edit().putBoolean("broker_banner_v1502", true).apply()
+                            Alerts.bannerSink?.invoke(
+                                "بروکر اضافه شد: در تنظیمات «⑥-ب بروکر» با یک ضربه کارمزد طلا و نفت را " +
+                                    "روی عدد رسمی آلپاری بگذارید (طلا ۰٫۲۴ · نفت ۰٫۰۱۵ دلار). " +
+                                    "کارمزد فعلی شما دست‌نخورده مانده است.",
+                                0, "info"
+                            )
+                        }
+                    }
+                } catch (_: Exception) { }
                 onDone(msg)
                 ensureBrokerSpread()      // §۲۰: اگر cmsn «خودکار» است و هنوز اسپردی ذخیره نشده، یک‌بار بگیر
             }
@@ -2725,7 +2800,7 @@ class AppState(val spec: SymbolSpec = Symbols.GOLD) {
 
     companion object {
         /** نسخهٔ نمایشی — تنها منبع حقیقت برای هدر لاگ. با `versionName` در build.gradle یکی نگه دارید. */
-        const val APP_VERSION = "1.5.01"
+        const val APP_VERSION = "1.5.02"
 
         /**
          * «نمونهٔ» سازگاری: کد رابط همه‌جا `AppState.instance` را می‌خواند و باید
