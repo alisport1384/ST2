@@ -2800,7 +2800,7 @@ class AppState(val spec: SymbolSpec = Symbols.GOLD) {
 
     companion object {
         /** نسخهٔ نمایشی — تنها منبع حقیقت برای هدر لاگ. با `versionName` در build.gradle یکی نگه دارید. */
-        const val APP_VERSION = "1.5.04"
+        const val APP_VERSION = "1.5.05"
 
         /**
          * «نمونهٔ» سازگاری: کد رابط همه‌جا `AppState.instance` را می‌خواند و باید
@@ -2812,6 +2812,11 @@ class AppState(val spec: SymbolSpec = Symbols.GOLD) {
         @Volatile var appContextRef: Context? = null
 
         /** از MainActivity فراخوانی می‌شود: هاب دو نماد + لاگر + هشدارها */
-        fun init(ctx: Context) = Hub.init(ctx)
+        fun init(ctx: Context) {
+            Hub.init(ctx)
+            // میز جفت‌ارز (۱٫۵٫۰۵): وضعیت ذخیره‌شده بازیابی می‌شود تا با هر بار
+            // باز شدن اپ، تاریخچهٔ کاغذی از صفر شروع نشود.
+            try { FxLive.restore(ctx) } catch (_: Throwable) { }
+        }
     }
 }

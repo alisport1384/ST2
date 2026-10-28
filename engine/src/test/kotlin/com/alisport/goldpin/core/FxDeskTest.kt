@@ -34,7 +34,7 @@ class FxDeskTest {
     private fun profile(mode: Int = -1, lookback: Int = 12, atrMult: Double = 1.0,
                         targetR: Double = 4.0, partial: Boolean = false) =
         FxProfile("EURUSD", "یورو/دلار", 5, h, mode, lookback, atrMult, targetR, partial,
-            true, 0.0, 0, "آزمون")
+            true, 0.0, 0, 0.0, 0.0, "آزمون")
 
     private fun desk(cost: FxCost = FxCost(1.0, 0.0, 0.0, 1.0)): FxDesk {
         val d = FxDesk(capital = 100_000.0, riskPct = 0.5)
@@ -186,6 +186,11 @@ class FxDeskTest {
             assertTrue(p.targetR in 1.0..20.0, "${p.id}: targetR نامعتبر")
             assertTrue(p.digits == 3 || p.digits == 5, "${p.id}: digits")
         }
-        assertEquals(3, FxPairs.ENABLED_BY_DEFAULT.size, "پیش‌فرض فقط سه جفتِ بازماندهٔ داوری")
+        // پیش‌فرض = جفت‌هایی که هم ۲۰ سال و هم ۳ سال آخر مثبت‌اند
+        assertTrue(FxPairs.ENABLED_BY_DEFAULT.size >= 3, "پیش‌فرض باید دست‌کم سه جفت باشد")
+        for (p in FxPairs.ENABLED_BY_DEFAULT) {
+            assertTrue(p.avgR20 > 0.0, "${p.id}: جفتِ پیش‌فرض باید ۲۰ سالهٔ مثبت داشته باشد")
+            assertTrue(p.rec3AvgR > 0.0, "${p.id}: جفتِ پیش‌فرض باید ۳ سال آخر مثبت داشته باشد")
+        }
     }
 }

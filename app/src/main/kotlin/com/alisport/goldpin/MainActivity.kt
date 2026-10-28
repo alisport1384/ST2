@@ -1636,35 +1636,151 @@ class MainActivity : Activity() {
      * بازندهٔ کم‌فاصله عبور می‌کنند و منحنی سرمایه را می‌خورند.
      */
     /**
-     * ⑦ بخش جفت‌ارز (۱٫۵٫۰۴) — **شفاف و بدون وعدهٔ الکی**.
+     * ⑦ بخش جفت‌ارز (۱٫۵٫۰۵) — **کنترل واقعی، نه نمایش**.
      *
-     * چرا فقط نمایشی است: قاعده در `engine/core/FxDesk.kt` پیاده و آزموده شده،
-     * ولی اتصال آن به فید زندهٔ ۱۲ جفت و چرخهٔ معاملات اپ هنوز انجام نشده است.
-     * تا آن روز، این بخش عددهای واقعیِ آزمون (درون‌نمونه/بیرون‌نمونه) را نشان
-     * می‌دهد تا کاربر بداند کدام جفت چه تاریخی دارد — نه اینکه یک دکمهٔ «روشن»
-     * بگذارد و پول واقعی روی قاعده‌ای بگذارد که ۹ جفتش بیرون‌نمونه منفی است.
+     * سه جفتِ بازماندهٔ آزمون بیرون‌نمونه اجرا می‌شوند: EURUSD، GBPUSD، AUDUSD.
+     * ریسک هر معامله از همین‌جا انتخاب می‌شود (۰٫۲۵٪ یا ۰٫۵٪) و سرمایهٔ میز
+     * جدا از طلا/نفت است. هزینه‌ها: جدول رسمی آلپاری + ۵ دلار کمیسیون در لات.
      */
     private fun addFxSection(v: LinearLayout) {
-        v.addView(Ui.section(this, "⑦ جفت‌ارز — ۱۲ جفت آزموده‌شده (موتور آماده · رابط در گام بعد)"))
-        v.addView(Ui.tv(this,
-            "قاعده: شکست سقف/کفِ N کندل با پادِ شکست، حد ضرر atr×ATR، هدف k×R، " +
-                "هزینهٔ Pro ECN آلپاری و سواپ ۲۱:۰۰ UTC. دادهٔ آزمون: ۲٬۸ سال کندل ساعتی، " +
-                "۶۰٪ اول برای انتخاب پارامتر و ۴۰٪ آخر برای داوری.",
-            10.5f, Palette.dim))
+        v.addView(Ui.section(this, "⑦ جفت‌ارز — اجرای کاغذی سه جفتِ تأییدشده"))
+        val sm = FxLive.summary()
+
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Palette.panel2)
+            setPadding(Ui.dp(this@MainActivity, 10f), Ui.dp(this@MainActivity, 8f),
+                Ui.dp(this@MainActivity, 10f), Ui.dp(this@MainActivity, 8f))
+        }
+        fun line(k: String, val0: String, c: Int = Palette.txt) {
+            card.addView(Ui.tv(this, "$k: $val0", 11f, c))
+        }
+        line("وضعیت", if (sm.running) "● در حال اجرا (کاغذی)" else "○ خاموش",
+            if (sm.running) Palette.up else Palette.dim)
+        line("جفت‌های فعال", FxLive.activePairs.joinToString(" · "))
+        line("سرمایهٔ میز", Fa.n(FxLive.capital, 0) + " دلار (جدا از طلا/نفت)")
+        line("ریسک هر معامله", Fa.n(FxLive.riskPct, 2) + "٪ سرمایه",
+            if (FxLive.riskPct <= 0.25) Palette.up else Palette.gold)
+        line("موجودی / اکوییتی", "${Fa.n(sm.balance, 2)} / ${Fa.n(sm.equity, 2)}",
+            if (sm.equity >= sm.capital) Palette.up else Palette.down)
+        line("سود/زیان تحقق‌یافته", Fa.signed(sm.realized) + " دلار",
+            if (sm.realized >= 0) Palette.up else Palette.down)
+        line("شناور", Fa.signed(sm.floating) + " دلار",
+            if (sm.floating >= 0) Palette.up else Palette.down)
+        line("معاملات بسته / باز", "${Fa.d(sm.closedCount.toString())} / ${Fa.d(sm.openCount.toString())}")
+        line("نرخ برد", Fa.n(sm.winRate, 1) + "٪")
+        line("بیشترین افت", Fa.n(sm.maxDD, 2) + " دلار", Palette.down)
+        for (p in sm.pairs) {
+            val r = if (p.trades > 0) p.sumR / p.trades else 0.0
+            line("• ${p.pair}", "${Fa.d(p.trades.toString())} معامله · ${Fa.signed(p.sumR)}R " +
+                "(میانگین ${Fa.n(r, 3)}R) · ${if (p.open) "باز " + (if (p.openDir > 0) "خرید" else "فروش") else "بدون پوزیشن"}",
+                if (p.sumR >= 0) Palette.up else Palette.down)
+        }
+        sm.lastError?.let { line("⚠ آخرین خطای فید", it, Palette.down) }
+        card.addView(Ui.tv(this,
+            "کمیسیون: ۵ دلار در لات رفت‌وبرگشت (آلپاری Pro ECN) · اسپرد و سواپ از جدول رسمی بروکر · " +
+                "ریسک دلاری هر معامله = درصد بالا × موجودی میز",
+            9.5f, Palette.dim))
+        v.addView(card)
+
+        // ── کلید روشن/خاموش اجرا ──
+        v.addView(switchRow("اجرای کاغذی جفت‌ارزها", sm.running) { on ->
+            if (on) FxLive.start(this) else FxLive.stop(this)
+            Log.i(Log.CAT_CFG, "میز جفت‌ارز = $on", "جفت‌ها=${FxLive.activePairs}")
+            refreshCurrent(force = true)
+        })
+
+        // ── انتخاب ریسک ──
+        v.addView(Ui.tv(this, "ریسک هر معامله (ب: محافظه‌کارانه · الف: استاندارد)", 11f, Palette.gold, true))
+        val rowRisk = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for (pct in listOf(0.25, 0.5)) {
+            val b = Ui.btn(this, "${Fa.n(pct, 2)}٪",
+                if (kotlin.math.abs(FxLive.riskPct - pct) < 1e-9) Palette.gold else Palette.panel2,
+                if (kotlin.math.abs(FxLive.riskPct - pct) < 1e-9) Palette.bg else Palette.txt, 11f)
+            b.setOnClickListener {
+                FxLive.setRisk(pct)
+                toast("ریسک میز جفت‌ارز: ${Fa.n(pct, 2)}٪")
+                refreshCurrent(force = true)
+            }
+            rowRisk.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginEnd = Ui.dp(this@MainActivity, 6f) })
+        }
+        v.addView(rowRisk)
+
+        // ── اجرای تاریخچهٔ موجود / پاک‌کردن ──
+        val rowAct = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        rowAct.addView(Ui.btn(this, "اجرای تاریخچهٔ فعلی", Palette.panel2, Palette.txt, 10.5f).apply {
+            setOnClickListener {
+                FxLive.replayHistory()
+                toast("تاریخچه روی میز اجرا شد")
+                refreshCurrent(force = true)
+            }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = Ui.dp(this@MainActivity, 6f) })
+        rowAct.addView(Ui.btn(this, "پاک‌کردن نتایج جفت‌ارز", Palette.panel2, Palette.down, 10.5f).apply {
+            setOnClickListener {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("پاک‌کردن نتایج جفت‌ارز")
+                    .setMessage("همهٔ معاملات کاغذی جفت‌ارز حذف می‌شوند. طلا و نفت دست نمی‌خورند.")
+                    .setPositiveButton("پاک کن") { _, _ ->
+                        FxLive.desk.reset(); FxLive.persist(); toast("پاک شد"); refreshCurrent(force = true)
+                    }
+                    .setNegativeButton("بی‌خیال", null).show()
+            }
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        v.addView(rowAct)
+
+        // ── جدول پارامتر و دلیل انتخاب هر جفت ──
+        v.addView(Ui.tv(this, "پارامتر هر جفت (داوری ۴۰٪ آخر داده)", 11.5f, Palette.gold, true))
         for (p in com.alisport.goldpin.core.FxPairs.ALL) {
-            val c = if (p.oosAvgR > 0.05) Palette.up else if (p.oosAvgR > 0) Palette.gold else Palette.down
-            val head = "${p.id} · ${p.modeFa} · ${Tf.label(p.tfSec.toInt())} · N=${p.lookback} · atr=${Fa.n(p.atrMult, 2)} · هدف ${Fa.n(p.targetR, 1)}R"
-            v.addView(Ui.tv(this, head, 11.5f, Palette.txt, true))
+            val c = if (p.avgR20 > 0.1 && p.rec3AvgR > 0) Palette.up
+                    else if (p.avgR20 > 0) Palette.gold else Palette.down
             v.addView(Ui.tv(this,
-                "داوری بیرون‌نمونه: ${Fa.signed(p.oosAvgR)}R در هر معامله (${Fa.d(p.oosTrades.toString())} معامله) — ${p.note}",
+                "${p.id} · ${p.tfFa} · ${p.modeFa} · N=${p.lookback} · atr=${Fa.n(p.atrMult, 2)} · " +
+                    "هدف ${Fa.n(p.targetR, 1)}R → ۲۰ سال ${Fa.signed(p.avgR20)}R · " +
+                    "۳ سال آخر ${Fa.signed(p.rec3AvgR)}R" + if (p.onByDefault) "  ✅ فعال" else "  ○ خاموش",
                 10f, c))
-            v.addView(Ui.spacer(this, 1.2f))
+        }
+        // ── دیتاست‌های ۱ / ۳ / ۱۰ / ۲۰ سال برای دانلود و بک‌تست ──
+        v.addView(Ui.section(this, "⑦-ب دیتاست جفت‌ارزها — ۱ / ۳ / ۱۰ / ۲۰ سال"))
+        v.addView(Ui.tv(this,
+            "چهار بستهٔ آمادهٔ دانلود (۱۲ جفت در هر بسته، CSV با ستون‌های t,o,h,l,c,v): " +
+                "۱ سال ساعتی · ۳ سال ساعتی · ۱۰ سال روزانه · ۲۰ سال روزانه. " +
+                "همان فایل‌هایی که آزمون ۲۰ سالهٔ بالا با آن‌ها اجرا شد.",
+            10f, Palette.dim))
+        for ((tag, label, desc) in listOf(
+            Triple("1y", "۱ سال — ساعتی", "۶٬۰۸۰ کندل در هر جفت"),
+            Triple("3y", "۳ سال — ساعتی", "۱۷٬۱۹۴ کندل (کل دادهٔ ساعتی موجود)"),
+            Triple("10y", "۱۰ سال — روزانه", "۲٬۶۰۰ کندل در هر جفت"),
+            Triple("20y", "۲۰ سال — روزانه", "۵٬۱۸۳ کندل در هر جفت")
+        )) {
+            val fname = when (tag) {
+                "1y" -> "goldpin_fx_1y_h1.zip"
+                "3y" -> "goldpin_fx_3y_h1.zip"
+                "10y" -> "goldpin_fx_10y_d1.zip"
+                else -> "goldpin_fx_20y_d1.zip"
+            }
+            val b = Ui.btn(this, "$label  ·  $desc  ⬇", Palette.panel2, Palette.txt, 10.5f)
+            b.setOnClickListener {
+                try {
+                    startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse("https://github.com/alisport1384/ST2/releases/download/data-fx-v1/$fname")))
+                } catch (_: Exception) { toast("مرورگر پیدا نشد") }
+            }
+            v.addView(b, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                .apply { topMargin = Ui.dp(this@MainActivity, 3f) })
         }
         v.addView(Ui.tv(this,
-            "⚠ هشدار صریح: فقط سه جفت (EURUSD، GBPUSD، AUDUSD) در دادهٔ داوری مثبت ماندند و " +
-                "۹ جفت دیگر وارونگی کامل داشتند. این بخش عمداً **دکمهٔ روشن‌کردن معاملهٔ واقعی ندارد** " +
-                "تا وقتی خروجی زنده با این اعداد سنجیده شود.",
-            10f, Palette.down))
+            "بک‌تست هر بسته روی رایانه: بسته را باز کنید و اجرا کنید " +
+                "`--fxdir <پوشه> --fxwf` (یا `--fxsweep` برای جست‌وجوی پارامتر). " +
+                "بک‌تست درون‌اپ جفت‌ارز در گام بعد وصل می‌شود؛ امروز خروجی زندهٔ کاغذی از همین موتور می‌آید.",
+            9.5f, Palette.dim))
+
+        v.addView(Ui.tv(this,
+            "⚠ پارامترها با walk-forward روی ۲۰ سال (روزانه) انتخاب و با ۳ سال آخر آزمون شده‌اند. " +
+                "هر جفتی که در سه سال آخر منفی شد، خاموش است — حتی اگر ۲۰ ساله‌اش درخشان بود. " +
+                "نتایج کاغذی با بک‌تست یکسان است چون هر دو از یک کد (`FxDesk`) می‌آیند و فقط باکت بسته پردازش می‌شود.",
+            9.5f, Palette.down))
     }
 
     private fun addBrokerSection(v: LinearLayout) {
@@ -1727,6 +1843,30 @@ class MainActivity : Activity() {
             })
             v.addView(Ui.spacer(this, 2f))
         }
+        // ── کمیسیون و اسپرد جفت‌ارزها از همان پروفایل بروکر (۱٫۵٫۰۵) ──
+        v.addView(Ui.section(this, "⑥-ب کمیسیون جفت‌ارزها — همان بروکر، همان منبع"))
+        v.addView(Ui.tv(this,
+            "برای جفت‌ارزها هم عدد از جدول رسمی آلپاری می‌آید: کمیسیون Pro ECN " +
+                "۲٫۵ دلار هر طرف (۵ دلار رفت‌وبرگشت در لات) + اسپرد همان جفت + سواپ شبانه. " +
+                "مقصد: هر معاملهٔ کاغذی جفت‌ارز، همان لحظهٔ ورود، کارمزد و اسپرد را کنار می‌گذارد.",
+            10.5f, Palette.dim))
+        for (id in FxLive.activePairs) {
+            val c = com.alisport.goldpin.core.FxCostTable.costFor(id)
+            if (c == null) {
+                v.addView(Ui.tv(this, "$id: هزینه تعریف نشده", 10.5f, Palette.down))
+                continue
+            }
+            val p = com.alisport.goldpin.core.FxPairs.ALL.firstOrNull { it.id == id }
+            val spreadPx = c.spreadPoints * (p?.point ?: 0.0001)
+            v.addView(Ui.tv(this,
+                "$id · اسپرد ${Fa.n(c.spreadPoints, 2)} پوینت (${Fa.n(spreadPx, 5)} قیمت) · " +
+                    "کمیسیون ۵٫۰۰ دلار در لات · سواپ خرید ${Fa.signed(c.swapLongPerLot)} / " +
+                    "فروش ${Fa.signed(c.swapShortPerLot)} دلار بر لات در شب",
+                10f, Palette.txt))
+        }
+        v.addView(Ui.tv(this,
+            "برای اضافه‌کردن بروکر بعدی: یک ردیف در `FxCostTable` و یک پروفایل در `Brokers.ALL` — هیچ کد دیگری عوض نمی‌شود.",
+            9.5f, Palette.dim))
         v.addView(Ui.btn(this, "بروکر بعدی؟ فقط یک پروفایل تازه در موتور (Brokers.ALL) اضافه کنید",
             Palette.panel2, Palette.dim, 10.5f))
         v.addView(Ui.tv(this,

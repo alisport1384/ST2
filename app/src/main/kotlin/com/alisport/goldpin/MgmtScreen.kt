@@ -198,6 +198,43 @@ object MgmtScreen {
             11f, Palette.dim))
         col0.addView(note, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
+        // ── میز جفت‌ارز (۱٫۵٫۰۵) — مستقل از نماد انتخابی، مثل بقیهٔ این تب ──────
+        run {
+            val f = FxLive.summary()
+            val c = card(ctx, "میز جفت‌ارز — ${FxLive.activePairs.joinToString(" + ")}",
+                if (f.realized >= 0) Palette.up else Palette.down)
+            c.addView(row(ctx, "وضعیت",
+                if (f.running) "● در حال اجرا (کاغذی · ریسک ${Fa.n(f.riskPct, 2)}٪)" else "○ خاموش",
+                if (f.running) Palette.up else Palette.dim))
+            c.addView(row(ctx, "سرمایهٔ میز", Fa.n(f.capital, 2)))
+            c.addView(row(ctx, "موجودی (تحقق‌یافته)", Fa.n(f.balance, 2),
+                if (f.balance >= f.capital) Palette.up else Palette.down))
+            c.addView(row(ctx, "اکوییتی (با شناور)", Fa.n(f.equity, 2),
+                if (f.equity >= f.capital) Palette.up else Palette.down))
+            c.addView(row(ctx, "سود/زیان تحقق‌یافته", money(f.realized),
+                if (f.realized >= 0) Palette.up else Palette.down))
+            c.addView(row(ctx, "شناور", money(f.floating),
+                if (f.floating >= 0) Palette.up else Palette.down))
+            c.addView(row(ctx, "معاملات بسته / باز", "${Fa.d(f.closedCount.toString())} / ${Fa.d(f.openCount.toString())}"))
+            c.addView(row(ctx, "نرخ برد", Fa.n(f.winRate, 1) + "٪"))
+            c.addView(row(ctx, "بیشترین افت", Fa.n(f.maxDD, 2), Palette.down))
+            if (f.curve.size > 1) {
+                val ch = MgmtCurveView(ctx).apply { setData(f.curve, f.capital, Palette.gold) }
+                c.addView(ch, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ctx, 120f))
+                    .apply { topMargin = Ui.dp(ctx, 6f) })
+            }
+            for (p in f.pairs) {
+                c.addView(row(ctx, "• ${p.pair}",
+                    "${Fa.d(p.trades.toString())} معامله · ${Fa.signed(p.sumR)}R" +
+                        (if (p.open) " · باز (${if (p.openDir > 0) "خرید" else "فروش"})" else ""),
+                    if (p.sumR >= 0) Palette.up else Palette.down))
+            }
+            c.addView(row(ctx, "توجه",
+                "این حساب جدا از طلا/نفت است؛ سرمایهٔ جمعی بالا شامل آن نمی‌شود.", Palette.dim))
+            col0.addView(c, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                .apply { bottomMargin = Ui.dp(ctx, 8f) })
+        }
+
         return scroll
     }
 }

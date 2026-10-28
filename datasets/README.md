@@ -69,3 +69,30 @@ curl -fLO $BASE/goldpin_xauusd_m1_20y.csv.gz
 
 این پوشه در `.gitignore` است، پس چیزی به مخزن برنمی‌گردد. اگر فایل نباشد، تست‌های وابسته به
 داده با `assumeTrue` **skip** می‌شوند (build نمی‌شکند).
+
+---
+
+## دیتاست‌های جفت‌ارز (FX) — ۱۲ جفت، تگ [`data-fx-v1`](https://github.com/alisport1384/ST2/releases/tag/data-fx-v1)
+
+هر بسته یک ZIP است و ۱۲ فایل `<PAIR>.csv` با سرستون `t,o,h,l,c,v` دارد
+(`t` = ثانیهٔ UTC، `v` برای فارکس صفر است چون فید رایگان حجم نمی‌دهد).
+
+| بازه | تایم‌فریم | فایل | کندل هر جفت | بازهٔ زمانی | اندازه | SHA-256 |
+|---|---|---|---:|---|---:|---|
+| ۱ سال | ساعتی | [`goldpin_fx_1y_h1.zip`](https://github.com/alisport1384/ST2/releases/download/data-fx-v1/goldpin_fx_1y_h1.zip) | 6,080 | 2025-10-28 → 2026-10-28 | 1,407,493 بایت | `02eae0e83cb527267d01b63719cb74641193e83af63bc3ab7d8386bb4fb9ce06` |
+| ۳ سال | ساعتی | [`goldpin_fx_3y_h1.zip`](https://github.com/alisport1384/ST2/releases/download/data-fx-v1/goldpin_fx_3y_h1.zip) | 17,194 | 2024-01-11 → 2026-10-28 | 4,070,241 بایت | `cdc1753a9a61aa81f296fb61d5cd6905bc77a7fee22e017648a67245a0165169` |
+| ۱۰ سال | روزانه | [`goldpin_fx_10y_d1.zip`](https://github.com/alisport1384/ST2/releases/download/data-fx-v1/goldpin_fx_10y_d1.zip) | 2,600 | 2016-10-31 → 2026-10-28 | 852,492 بایت | `b21511be10d2dcd1742fa3470a6b634ee82a74783dee0f28935e5064a8b8cc37` |
+| ۲۰ سال | روزانه | [`goldpin_fx_20y_d1.zip`](https://github.com/alisport1384/ST2/releases/download/data-fx-v1/goldpin_fx_20y_d1.zip) | 5,183 | 2006-11-02 → 2026-10-28 | 1,627,300 بایت | `769bcc2f3349d72350589fb5d061ce7aa866aa828660549f9c282ef547871b6f` |
+
+این چهار بسته **همان دادهای** هستند که آزمون walk-forward ۲۰ ساله و اسکن ۱۲ جفت با آن اجرا شد
+(اعداد در [`docs/GOZARESH-FX-ANALYZE-v1.5.05.md`](GOZARESH-FX-ANALYZE-v1.5.05.md)). روش بک‌تست:
+
+```bash
+unzip goldpin_fx_20y_d1.zip -d fx20
+java -cp cli.jar com.alisport.goldpin.cli.OptimizeKt --fxdir fx20 --fxwf          # داوری بیرون‌نمونه
+java -cp cli.jar com.alisport.goldpin.cli.OptimizeKt --fxdir fx20 --fxsweep --fxtf 86400   # جست‌وجوی پارامتر
+```
+
+منبع: Yahoo Finance (`{PAIR}=X`، `interval=1h|1d`). کندل‌های ساعتی فقط حدود ۲٫۸ سال عقب‌تر می‌روند،
+پس برش‌های ۱۰ و ۲۰ ساله ناچار **روزانه**‌اند. مانیفست کامل:
+[`docs/fx-1.5.05/dataset-manifest.json`](docs/fx-1.5.05/dataset-manifest.json) (این فایل نسبی در مخزن `datasets/` است).

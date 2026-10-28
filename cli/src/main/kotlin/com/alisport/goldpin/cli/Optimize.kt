@@ -359,6 +359,8 @@ fun main(args: Array<String>) {
     var lookahead = 2880
     var fxWf = false
     var fxCostMult = 1.0
+    var fxSweep = false
+    var fxTfSec = 0L
     var fxPair = ""
     var fxDir = ""
     var i = 0
@@ -380,12 +382,15 @@ fun main(args: Array<String>) {
             "--fxdir" -> fxDir = args[++i]
             "--fxwf" -> fxWf = true
             "--fxcost" -> fxCostMult = args[++i].toDouble()
+            "--fxsweep" -> fxSweep = true
+            "--fxtf" -> fxTfSec = args[++i].toLong()
             else -> {}
         }
         i++
     }
     // ── میز جفت‌ارز (۱٫۵٫۰۴): اجرای قاعدهٔ آزموده‌شده روی فایل CSV/دایرکتوری ──
-    if (fxPair.isNotEmpty() || fxDir.isNotEmpty()) { runFxDesk(fxPair, fxDir, data, fxWf, fxCostMult); return }
+    if (fxSweep) { runFxSweep(fxPair, fxDir, data, fxTfSec, fxCostMult); return }
+    if (fxPair.isNotEmpty() || fxDir.isNotEmpty()) { runFxDesk(fxPair, fxDir, data, fxWf, fxCostMult, fxSweep, fxTfSec); return }
     if (data.isEmpty()) { println("--data لازم است"); return }
     val t0 = System.currentTimeMillis()
     val candles = readCandles(data, fromYear, toYear)
@@ -550,7 +555,8 @@ private fun atrAt(bars: List<Candle>, a: DoubleArray, t: Long, tfSec: Int): Doub
 //  ./cli --fxdir /tmp/fx            # همهٔ جفت‌ها، هر کدام در فایل <PAIR>.csv
 // ═══════════════════════════════════════════════════════════════════════════════
 private fun runFxDesk(pairId: String, dir: String, singleFile: String,
-                      walkForward: Boolean = false, costMult: Double = 1.0) {
+                      walkForward: Boolean = false, costMult: Double = 1.0,
+                      sweep: Boolean = false, tfOverride: Long = 0L) {
     // نرخ تبدیل «ارز مظنه → دلار» از آخرین کندل فایل‌های مرجع (برای بک‌تست محلی)
     val usdPerQuote = HashMap<String, Double>()
     usdPerQuote["USD"] = 1.0
@@ -637,4 +643,117 @@ private fun runFxDesk(pairId: String, dir: String, singleFile: String,
     }
     if (totalTrd > 0) println(String.format("— جمع: %d معامله · میانگین R وزنی %+.3f —",
         totalTrd, totalR / totalTrd))
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  جست‌وجوی پارامتر روی میز جفت‌ارز با کد خودِ اپ (برای آزمون ۲۰ ساله)
+//
+//  ./cli --fxsweep --fxtf 86400 --fxdir <dir>     # دادهٔ روزانه ۲۰ ساله
+// ═══════════════════════════════════════════════════════════════════════════════
+private class FxSweepRow(
+    val mode: Int, val N: Int, val atr: Double, val k: Double, val partial: Boolean,
+    val trades: Int, val avgR: Double, val pf: Double, val h1: Double, val h2: Double,
+    val posYears: Int, val years: Int, val dd: Double
+)
+
+private fun fxScore(avgR: Double, h1: Double, h2: Double, dd: Double, trades: Int): Double {
+    if (trades < 40) return -9e9
+    val worst = Math.min(h1, h2)
+    return worst * 100.0 + avgR * 50.0 - (dd / Math.max(trades, 1)) * 10.0
+}
+
+/** اجرای یک ترکیب روی یک جفت و برگرداندن آمار. */
+private fun fxRun(pair: FxProfile, bars: List<Candle>, cost: FxCost,
+                  mode: Int, N: Int, atr: Double, k: Double, partial: Boolean,
+                  costMult: Double): FxSweepRow? {
+    val prof = FxProfile(pair.id, pair.label, pair.digits, pair.tfSec, mode, N, atr, k,
+        partial, pair.onByDefault, pair.oosAvgR, pair.oosTrades, pair.avgR20, pair.rec3AvgR, pair.note)
+    val d = FxDesk(capital = 100_000.0, riskPct = 0.5,
+        commissionPerLotRoundTurn = 5.0 * costMult)
+    d.feed = { cost }
+    val hist = ArrayList<Candle>(bars.size)
+    for (b in bars) { hist.add(b); d.onBar(prof, hist, b) }
+    if (bars.isNotEmpty()) d.closeAll({ bars.last().c }, bars.last().t)
+    val tr = d.closed
+    if (tr.isEmpty()) return null
+    val R = tr.map { it.realizedR() }
+    val avg = R.average()
+    val gains = R.filter { it > 0 }.sum(); val losses = -R.filter { it <= 0 }.sum()
+    val cut = bars.first().t + ((bars.last().t - bars.first().t) * 0.6).toLong()
+    val h1 = tr.filter { it.entryT < cut }.map { it.realizedR() }.let { if (it.isEmpty()) 0.0 else it.average() }
+    val h2 = tr.filter { it.entryT >= cut }.map { it.realizedR() }.let { if (it.isEmpty()) 0.0 else it.average() }
+    val cal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC"))
+    val yearly = HashMap<Int, Double>()
+    for (x in tr) {
+        cal.timeInMillis = x.exitT
+        val y = cal.get(java.util.Calendar.YEAR)
+        yearly[y] = (yearly[y] ?: 0.0) + x.realizedR()
+    }
+    var eq = 0.0; var peak = 0.0; var dd = 0.0
+    for (v in R) { eq += v; peak = Math.max(peak, eq); dd = Math.max(dd, peak - eq) }
+    return FxSweepRow(mode, N, atr, k, partial, tr.size, avg,
+        gains / Math.max(losses, 1e-9), h1, h2,
+        yearly.count { it.value > 0 }, yearly.size, dd)
+}
+
+private fun runFxSweep(pairId: String, dir: String, singleFile: String,
+                       tfOverride: Long, costMult: Double) {
+    val usdPerQuote = HashMap<String, Double>()
+    usdPerQuote["USD"] = 1.0
+    for ((quote, ref) in listOf("JPY" to "USDJPY", "CAD" to "USDCAD", "CHF" to "USDCHF")) {
+        val f = File(dir, "$ref.csv")
+        if (f.exists()) {
+            val c = readCandles(f.absolutePath, Int.MIN_VALUE, Int.MAX_VALUE)
+            if (c.isNotEmpty()) usdPerQuote[quote] = 1.0 / c.last().c
+        }
+    }
+    usdPerQuote["GBP"] = File(dir, "GBPUSD.csv").let { f ->
+        if (f.exists()) readCandles(f.absolutePath, Int.MIN_VALUE, Int.MAX_VALUE).lastOrNull()?.c ?: 1.27 else 1.27
+    }
+
+    val targets = if (pairId.isNotEmpty()) listOf(FxPairs.byId(pairId)) else FxPairs.ALL
+    println("جفت · بهترین ترکیب روی همین داده (امتیاز = بدترین نیمه + انتظار − افت) · پارامتر منتشرشده روی همین داده")
+    for (p0 in targets) {
+        val p = if (tfOverride > 0) FxProfile(p0.id, p0.label, p0.digits, tfOverride,
+            p0.dirMode, p0.lookback, p0.atrMult, p0.targetR, p0.partial, p0.onByDefault,
+            p0.oosAvgR, p0.oosTrades, p0.avgR20, p0.rec3AvgR, p0.note) else p0
+        val path = if (pairId.isNotEmpty()) singleFile else File(dir, "${p.id}.csv").absolutePath
+        if (!File(path).exists()) { println("${p.id}: فایل نیست"); continue }
+        val raw = readCandles(path, Int.MIN_VALUE, Int.MAX_VALUE)
+        val secScale = if (raw.last().t < 100_000_000_000L) 1000L else 1L
+        val base = if (secScale == 1L) raw else raw.map { Candle(it.bi, it.t * secScale, it.o, it.h, it.l, it.c, it.v) }
+        val tfMs = p.tfSec * 1000L
+        val agg = LinkedHashMap<Long, Candle>()
+        for (c in base) {
+            val b = Math.floorDiv(c.t, tfMs) * tfMs
+            val prev = agg[b]
+            agg[b] = if (prev == null) Candle(c.bi, b, c.o, c.h, c.l, c.c, c.v)
+            else Candle(prev.bi, b, prev.o, Math.max(prev.h, c.h), Math.min(prev.l, c.l), c.c, prev.v + c.v)
+        }
+        val bars = agg.values.toList()
+        if (bars.size < 300) { println("${p.id}: کندل کافی نیست (${bars.size})"); continue }
+        val cost = FxCostTable.costFor(p.id, usdPerQuote) ?: continue
+
+        // پارامتر منتشرشده (همان که در اپ است) روی همین داده
+        val ship = fxRun(p, bars, cost, p.dirMode, p.lookback, p.atrMult, p.targetR, p.partial, costMult)
+
+        var best: FxSweepRow? = null
+        var bestScore = -9e9
+        for (mode in intArrayOf(-1, 1))
+            for (N in intArrayOf(6, 12, 24, 36, 48, 72, 96))
+                for (atr in doubleArrayOf(1.0, 1.5, 2.0, 3.0, 4.0))
+                    for (k in doubleArrayOf(1.5, 2.0, 3.0, 4.0, 7.0))
+                        for (partial in booleanArrayOf(false, true)) {
+                            val r = fxRun(p, bars, cost, mode, N, atr, k, partial, costMult) ?: continue
+                            val sc = fxScore(r.avgR, r.h1, r.h2, r.dd, r.trades)
+                            if (sc > bestScore) { bestScore = sc; best = r }
+                        }
+        fun fmt(r: FxSweepRow?) = if (r == null) "—" else String.format(
+            "%s N=%d atr=%.1f k=%.1f %s | n=%d avgR=%+.3f PF=%.2f نیمه۱=%+.3f نیمه۲=%+.3f سال+ %d/%d افت=%.1fR",
+            if (r.mode > 0) "trend" else "fade", r.N, r.atr, r.k,
+            if (r.partial) "partial" else "single", r.trades, r.avgR, r.pf, r.h1, r.h2,
+            r.posYears, r.years, r.dd)
+        println(String.format("%-7s | %s", p.id, fmt(best)))
+        println(String.format("%-7s | منتشرشده: %s", "", fmt(ship)))
+    }
 }
