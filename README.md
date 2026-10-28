@@ -2,9 +2,11 @@
 
 اپ اندروید و موتور بک‌تست استراتژی GoldPin — **طلا (XAUUSD) و نفت WTI (USOIL) هم‌زمان**،
 به‌همراه **میز مستقل جفت‌ارزها** (سرمایهٔ جدا، ۱۲ جفت).
-نسخهٔ این انتشار: **1.5.05 (versionCode 71)** — دانلود: [`GoldPin-1.5.05-71.apk`](https://github.com/alisport1384/ST2/releases/download/v1.5.05/GoldPin-1.5.05-71.apk) ·
+نسخهٔ این انتشار: **1.5.05b (versionCode 72)** — دانلود: [`GoldPin-1.5.05b-72.apk`](https://github.com/alisport1384/ST2/releases/download/v1.5.05b/GoldPin-1.5.05b-72.apk) ·
 گزارش: [`docs/GOZARESH-FX-ANALYZE-v1.5.05.md`](docs/GOZARESH-FX-ANALYZE-v1.5.05.md) ·
 نمودار: [`docs/fx_20y_walkforward_v1.5.05.png`](docs/fx_20y_walkforward_v1.5.05.png).
+پیش‌ازاین `1.5.05 (71)` منتشر شد؛ `1.5.05b (72)` فقط **متن‌های UI** را اصلاح می‌کند
+(«سه جفت» ← «۶ جفت») و هیچ منطقی را تغییر نمی‌دهد — بیلد قبلی هم append-only منتشرشده می‌ماند.
 
 **تازه در ۱٫۵٫۰۵ — اتصال کامل جفت‌ارز + پارامتر ۲۰ ساله + دیتاست‌های دانلود:**
 * **میز کاغذی جفت‌ارز واقعاً در اپ اجرا می‌شود** (`FxLive.kt`): سرمایهٔ میز **۱۰٬۰۰۰ دلار**،

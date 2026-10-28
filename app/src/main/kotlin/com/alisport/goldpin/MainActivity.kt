@@ -1638,12 +1638,13 @@ class MainActivity : Activity() {
     /**
      * ⑦ بخش جفت‌ارز (۱٫۵٫۰۵) — **کنترل واقعی، نه نمایش**.
      *
-     * سه جفتِ بازماندهٔ آزمون بیرون‌نمونه اجرا می‌شوند: EURUSD، GBPUSD، AUDUSD.
+     * شش جفتِ بازماندهٔ آزمون ۲۰ ساله + ۳ ساله اجرا می‌شوند: GBPUSD، GBPJPY، EURGBP،
+     * EURCHF، USDCAD، USDCHF (EURUSD و پنج جفت دیگر خاموش‌اند و دلیلش کنار هر ردیف نوشته شده).
      * ریسک هر معامله از همین‌جا انتخاب می‌شود (۰٫۲۵٪ یا ۰٫۵٪) و سرمایهٔ میز
      * جدا از طلا/نفت است. هزینه‌ها: جدول رسمی آلپاری + ۵ دلار کمیسیون در لات.
      */
     private fun addFxSection(v: LinearLayout) {
-        v.addView(Ui.section(this, "⑦ جفت‌ارز — اجرای کاغذی سه جفتِ تأییدشده"))
+        v.addView(Ui.section(this, "⑦ جفت‌ارز — اجرای کاغذی ۶ جفتِ تأییدشده (۲۰ سال + ۳ سال)"))
         val sm = FxLive.summary()
 
         val card = LinearLayout(this).apply {
