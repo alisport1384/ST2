@@ -115,7 +115,7 @@ object MgmtScreen {
      */
     @SuppressLint("SetTextI18n")
     fun build(ctx: Context): View {
-        val t = Hub.total()
+        val t = Hub.grandTotal()
         val act = ctx as? MainActivity
         val scroll = ScrollView(ctx).apply { setBackgroundColor(Palette.bg) }
         val col0 = LinearLayout(ctx).apply {
@@ -124,10 +124,13 @@ object MgmtScreen {
         }
         scroll.addView(col0)
 
-        // ── هدر: جمع کل (مستقل از نماد) ────────────────────────────────────────
-        val head = card(ctx, "مدیریت سرمایه — همهٔ نمادها (ثابت، مستقل از نماد انتخابی)", Palette.gold)
-        head.addView(row(ctx, "نمادهای فعال", Hub.specs.joinToString(" + ") { it.short } +
-            (if (Hub.liveRunning()) "" else "  (لایو خاموش)"), Palette.accent))
+        // ── ۱) هدر: منحنی سرمایهٔ کلی (طلا + نفت + جفت‌ارزها) ───────────────────
+        val head = card(ctx, "مدیریت سرمایه — منحنی کلی همهٔ نمادها " +
+            "(طلا + نفت + ${Fa.d(t.fx.desks.count { it.enabled }.toString())} میز جفت‌ارز)", Palette.gold)
+        head.addView(row(ctx, "نمادهای فعال",
+            Hub.specs.joinToString(" + ") { it.short } +
+                " + " + t.fx.desks.filter { it.enabled }.joinToString(", ") { it.id }, Palette.accent))
+        head.addView(row(ctx, "سرمایهٔ کل (وارد‌شده)", Fa.n(Hub.capitalTotal, 2), Palette.gold))
         head.addView(row(ctx, "سرمایهٔ اولیهٔ جمعی", Fa.n(t.startEquity, 2)))
         head.addView(row(ctx, "موجودی جمعی (تحقق‌یافته)", Fa.n(t.balance, 2),
             if (t.balance >= t.startEquity) Palette.up else Palette.down))
@@ -137,7 +140,8 @@ object MgmtScreen {
             if (t.realized >= 0) Palette.up else Palette.down))
         head.addView(row(ctx, "سود/زیان شناور (باز)", money(t.unrealized),
             if (t.unrealized >= 0) Palette.up else Palette.down))
-        head.addView(row(ctx, "بازده کل", Fa.n(if (t.startEquity > 0) 100.0 * (t.balance - t.startEquity) / t.startEquity else 0.0, 2) + "٪",
+        head.addView(row(ctx, "بازده کل",
+            Fa.n(if (t.startEquity > 0) 100.0 * (t.balance - t.startEquity) / t.startEquity else 0.0, 2) + "٪",
             if (t.balance >= t.startEquity) Palette.up else Palette.down))
         head.addView(row(ctx, "معاملات بسته / باز", "${Fa.d(t.closedCount.toString())} / ${Fa.d(t.openCount.toString())}"))
         head.addView(row(ctx, "نرخ برد جمعی", Fa.n(t.winRate, 1) + "٪"))
@@ -145,16 +149,70 @@ object MgmtScreen {
         col0.addView(head, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             .apply { bottomMargin = Ui.dp(ctx, 8f) })
 
-        // ── نمودار جمعی ────────────────────────────────────────────────────────
-        val chartCard = card(ctx, "منحنی سرمایهٔ جمعی (همهٔ نمادها)", Palette.accent)
+        // ── ۲) منحنی سرمایهٔ کلی: یک نمودار برای همه ─────────────────────────
+        val chartCard = card(ctx, "منحنی سرمایهٔ کلی — طلا + نفت + همهٔ میزهای جفت‌ارز", Palette.accent)
         val chart = MgmtCurveView(ctx).apply { setData(t.curve, t.startEquity, Palette.accent) }
-        chartCard.addView(chart, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ctx, 150f))
+        chartCard.addView(chart, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ctx, 170f))
             .apply { topMargin = Ui.dp(ctx, 6f) })
+        chartCard.addView(Ui.tv(ctx,
+            "هر معاملهٔ هر نماد (طلا، نفت و ۱۲ میز جفت‌ارز) روی همین یک منحنی اثر می‌گذارد. " +
+                "نقطهٔ شروع = سرمایهٔ کل ÷ تعداد نمادهای فعال.",
+            10f, Palette.dim))
         col0.addView(chartCard, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             .apply { bottomMargin = Ui.dp(ctx, 8f) })
 
-        // ── هر نماد: خلاصه + نمودار خودش ───────────────────────────────────────
-        t.perSymbol.forEach { p ->
+        // ── ۳) تخصیص سرمایه: عدد را وارد کن، روی نمادها خرج می‌شود ─────────────
+        val capCard = card(ctx, "تخصیص سرمایه — یک عدد، خرج‌شده روی همهٔ نمادها", Palette.violet)
+        capCard.addView(Ui.tv(ctx,
+            "سرمایهٔ کل بین همهٔ نمادهای فعال (طلا، نفت و میزهای جفت‌ارزِ فعال) به نسبت برابر " +
+                "تقسیم می‌شود و هر نماد ریسکش را از سهم خودش برمی‌دارد.",
+            10.5f, Palette.dim))
+        val capRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        for (v in listOf(12_000.0, 25_000.0, 50_000.0)) {
+            val on = kotlin.math.abs(Hub.capitalTotal - v) < 1
+            capRow.addView(Ui.btn(ctx, Fa.n(v, 0) + " $",
+                if (on) Palette.gold else Palette.panel2, if (on) Palette.bg else Palette.txt, 10.5f).apply {
+                setOnClickListener {
+                    Hub.applyCapital(ctx, v)
+                    act?.toastPublic("سرمایهٔ کل: ${Fa.n(v, 0)} دلار — روی ${2 + t.fx.desks.count { it.enabled }} نماد تقسیم شد")
+                    act?.refreshPublic()
+                }
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                .apply { marginEnd = Ui.dp(ctx, 5f) })
+        }
+        capCard.addView(capRow)
+        capCard.addView(Ui.btn(ctx, "ورود مبلغ دلخواه…", Palette.panel2, Palette.txt, 10.5f).apply {
+            setOnClickListener {
+                val input = android.widget.EditText(ctx).apply {
+                    hint = "مثلاً 20000"
+                    setText(Hub.capitalTotal.toInt().toString())
+                    setTextColor(Palette.txt)
+                    setHintTextColor(Palette.dim)
+                }
+                android.app.AlertDialog.Builder(ctx)
+                    .setTitle("سرمایهٔ کل (دلار)")
+                    .setView(input)
+                    .setPositiveButton("تقسیم کن") { _, _ ->
+                        val v = input.text.toString().replace(",", "").trim().toDoubleOrNull()
+                        if (v != null && v >= 100.0) {
+                            Hub.applyCapital(ctx, v)
+                            act?.toastPublic("سرمایهٔ کل: ${Fa.n(v, 0)} دلار")
+                            act?.refreshPublic()
+                        } else act?.toastPublic("عدد نامعتبر")
+                    }
+                    .setNegativeButton("بی‌خیال", null).show()
+            }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            .apply { topMargin = Ui.dp(ctx, 5f) })
+        val enabledFx = t.fx.desks.count { it.enabled }
+        val slots = 2 + enabledFx
+        capCard.addView(row(ctx, "سهم هر نماد", Fa.n(if (slots > 0) Hub.capitalTotal / slots else 0.0, 2) +
+            "  (${Fa.d(slots.toString())} نماد)"))
+        col0.addView(capCard, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            .apply { bottomMargin = Ui.dp(ctx, 8f) })
+
+        // ── ۴) نمادهای طلا و نفت ──────────────────────────────────────────────
+        t.goldOil.perSymbol.forEach { p ->
             val c = card(ctx, "نماد ${p.label}", if (p.realized >= 0) Palette.up else Palette.down)
             c.addView(row(ctx, "وضعیت",
                 when {
@@ -167,6 +225,7 @@ object MgmtScreen {
                     p.live -> Palette.up
                     else -> Palette.dim
                 }))
+            c.addView(row(ctx, "سهم سرمایه", Fa.n(p.startEquity, 2)))
             c.addView(row(ctx, "موجودی / اکوییتی", "${Fa.n(p.balance, 2)} / ${Fa.n(p.equity, 2)}"))
             c.addView(row(ctx, "سود/زیان تحقق‌یافته", money(p.realized), if (p.realized >= 0) Palette.up else Palette.down))
             c.addView(row(ctx, "سود/زیان شناور", money(p.unrealized), if (p.unrealized >= 0) Palette.up else Palette.down))
@@ -177,7 +236,6 @@ object MgmtScreen {
             val mc = MgmtCurveView(ctx).apply { setData(p.curve, p.startEquity, if (p.realized >= 0) Palette.up else Palette.down) }
             c.addView(mc, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ctx, 110f))
                 .apply { topMargin = Ui.dp(ctx, 6f) })
-            // رفتن به نمای همان نماد — فقط نما عوض می‌شود؛ هیچ حالتی ریست نمی‌شود
             val b = Ui.btn(ctx, "نمایش ${p.short}", Palette.panel2, Palette.gold, 11.5f)
             b.setOnClickListener {
                 Hub.setView(ctx, p.id)
@@ -189,96 +247,61 @@ object MgmtScreen {
                 .apply { bottomMargin = Ui.dp(ctx, 8f) })
         }
 
-        // ── یادداشت سیاست ──────────────────────────────────────────────────────
-        val note = card(ctx, "سیاست این تب", Palette.violet)
-        note.addView(Ui.tv(ctx, "• عددهای بالا جمع همهٔ نمادهاست و با عوض‌شدن نماد انتخابی تغییر نمی‌کند.\n" +
-            "• هر نماد موتور، کارگزار، تنظیمات و فایل ذخیرهٔ خودش را دارد؛ انتخاب نماد فقط نما را عوض می‌کند.\n" +
-            "• اگر هر بخشی به بک‌تست برود، لایو همهٔ نمادها متوقف می‌شود و معاملات باز همان لحظه فریز می‌شوند و همین‌جا شمرده می‌شوند.\n" +
-            "• نتیجهٔ بک‌تست فقط با درخواست بک‌تست تازه یا حذف صریح از بین می‌رود.\n" +
-            "• هر جفت‌ارز میز مستقل خودش را دارد (پارامتر، سرمایه، افت، آزمون ۲۰ ساله) و هیچ عددی از آن با طلا/نفت جمع نمی‌شود.",
-            11f, Palette.dim))
-        col0.addView(note, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-
-        // ── میزهای جفت‌ارز (۱٫۵٫۰۶) — یک کارت مستقل برای هر جفت، مثل طلا و نفت ──
-        run {
-            val t2 = FxLive.total()
-            val head2 = card(ctx, "میزهای جفت‌ارز — جمع ${Fa.d(t2.enabledCount.toString())} میز فعال (جدا از طلا و نفت)", Palette.violet)
-            head2.addView(row(ctx, "سرمایهٔ همهٔ میزها", Fa.n(t2.capital, 2)))
-            head2.addView(row(ctx, "موجودی جمعی", Fa.n(t2.balance, 2),
-                if (t2.balance >= t2.capital) Palette.up else Palette.down))
-            head2.addView(row(ctx, "اکوییتی جمعی", Fa.n(t2.equity, 2),
-                if (t2.equity >= t2.capital) Palette.up else Palette.down))
-            head2.addView(row(ctx, "سود/زیان تحقق‌یافته", money(t2.realized),
-                if (t2.realized >= 0) Palette.up else Palette.down))
-            head2.addView(row(ctx, "شناور", money(t2.floating),
-                if (t2.floating >= 0) Palette.up else Palette.down))
-            head2.addView(row(ctx, "معاملات بسته / باز", "${Fa.d(t2.closedCount.toString())} / ${Fa.d(t2.openCount.toString())}"))
-            head2.addView(row(ctx, "نرخ برد جمعی", Fa.n(t2.winRate, 1) + "٪"))
-            head2.addView(row(ctx, "بیشترین افت جمعی", Fa.n(t2.maxDD, 2), Palette.down))
-            if (t2.curve.size > 1) {
-                val ch = MgmtCurveView(ctx).apply { setData(t2.curve, t2.capital, Palette.violet) }
-                head2.addView(ch, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ctx, 130f))
-                    .apply { topMargin = Ui.dp(ctx, 6f) })
-            }
-            head2.addView(Ui.tv(ctx, "این جمع هیچ‌وقت با جمع طلا/نفت قاطی نمی‌شود: سرمایه، " +
-                "موجودی و افت هر میز جداست.", 10f, Palette.dim))
-            col0.addView(head2, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                .apply { bottomMargin = Ui.dp(ctx, 8f) })
-        }
-
-        // ── یک کارت برای هر میز جفت‌ارز: دقیقاً همان الگوی نمادها ──────────────
-        for (d in FxLive.desks) {
-            val sm = d.summary()
-            val p = d.profile
+        // ── ۵) میز هر جفت‌ارز: همان الگو، با پارامتر و حساب خودش ───────────────
+        for (sm in t.fx.desks) {
             val color = when {
                 sm.running -> Palette.up
                 sm.enabled -> Palette.gold
                 else -> Palette.dim
             }
-            val c = card(ctx, "میز ${p.id} — ${p.label}",
+            val c = card(ctx, "نماد ${sm.label}",
                 if (sm.realized + sm.floating >= 0) Palette.up else Palette.down)
             c.addView(row(ctx, "وضعیت",
                 when {
-                    sm.running -> "● روشن (کاغذی)"
+                    sm.running -> "● زنده (کاغذی)"
                     sm.enabled -> "◐ فعال، خاموش"
                     else -> "○ غیرفعال"
                 }, color))
-            c.addView(row(ctx, "پارامتر خودش",
-                "${p.tfFa} · ${p.modeFa} · N=${p.lookback} · atr=${Fa.n(p.atrMult, 2)} · " +
-                    "هدف ${Fa.n(p.targetR, 1)}R" + (if (p.partial) " · پله" else ""), Palette.dim))
-            c.addView(row(ctx, "ریسک این میز", Fa.n(sm.riskPct, 2) + "٪ سرمایه",
-                if (sm.riskPct <= 0.25) Palette.up else Palette.gold))
-            c.addView(row(ctx, "سرمایهٔ میز", Fa.n(sm.capital, 2)))
+            c.addView(row(ctx, "سهم سرمایه", Fa.n(sm.capital, 2)))
             c.addView(row(ctx, "موجودی / اکوییتی", "${Fa.n(sm.balance, 2)} / ${Fa.n(sm.equity, 2)}"))
-            c.addView(row(ctx, "سود/زیان تحقق‌یافته", money(sm.realized),
-                if (sm.realized >= 0) Palette.up else Palette.down))
-            c.addView(row(ctx, "سود/زیان شناور", money(sm.floating),
-                if (sm.floating >= 0) Palette.up else Palette.down))
-            c.addView(row(ctx, "معاملات بسته / باز", "${Fa.d(sm.closedCount.toString())} / ${Fa.d(sm.openCount.toString())}" +
-                (if (sm.openCount > 0) " · ${if (sm.openDir > 0) "خرید" else "فروش"}" else "")))
+            c.addView(row(ctx, "سود/زیان تحقق‌یافته", money(sm.realized), if (sm.realized >= 0) Palette.up else Palette.down))
+            c.addView(row(ctx, "سود/زیان شناور", money(sm.floating), if (sm.floating >= 0) Palette.up else Palette.down))
+            c.addView(row(ctx, "معاملات بسته / باز", "${Fa.d(sm.closedCount.toString())} / ${Fa.d(sm.openCount.toString())}"))
             c.addView(row(ctx, "برده / نرخ برد", "${Fa.d(sm.wins.toString())} / ${Fa.n(sm.winRate, 1)}٪"))
-            c.addView(row(ctx, "میانگین R این میز", Fa.signed(sm.avgR) + "R",
-                if (sm.avgR >= 0) Palette.up else Palette.down))
+            c.addView(row(ctx, "میانگین R", Fa.signed(sm.avgR) + "R", if (sm.avgR >= 0) Palette.up else Palette.down))
             c.addView(row(ctx, "بیشترین افت", Fa.n(sm.maxDD, 2) + " (" + Fa.n(sm.maxDDPct, 1) + "٪)", Palette.down))
             sm.backtest?.let { b ->
-                c.addView(row(ctx, "آزمون ۲۰ سالهٔ همین میز",
+                c.addView(row(ctx, "آزمون ۲۰ ساله",
                     "${Fa.d(b.trades.toString())} معامله · ${Fa.n(b.avgR, 3)}R · PF ${Fa.n(b.pf, 2)} · " +
                         "سال+ ${Fa.d(b.positiveYears.toString())}/${Fa.d(b.yearCount.toString())}",
                     if (b.avgR >= 0) Palette.up else Palette.down))
-            } ?: c.addView(row(ctx, "آزمون ۲۰ سالهٔ همین میز",
-                "اجرا نشده — از تنظیمات، دکمهٔ «بک‌تست ۲۰ سالهٔ همین میز»",
-                Palette.dim))
+            }
             if (sm.curve.size > 1) {
                 val mc = MgmtCurveView(ctx).apply {
                     setData(sm.curve, sm.capital, if (sm.realized >= 0) Palette.up else Palette.down)
                 }
-                c.addView(mc, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ctx, 110f))
+                c.addView(mc, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ctx, 100f))
                     .apply { topMargin = Ui.dp(ctx, 6f) })
             }
-            c.addView(row(ctx, "توجه", "این میز سرمایه و افت خودش را دارد؛ به جمع طلا/نفت اضافه نمی‌شود.", Palette.dim))
+            val b = Ui.btn(ctx, "نمایش ${sm.id}", Palette.panel2, Palette.gold, 11f)
+            b.setOnClickListener {
+                Hub.setView(ctx, sm.id)
+                act?.showTabPublic(0)
+            }
+            c.addView(b, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                .apply { topMargin = Ui.dp(ctx, 6f) })
             col0.addView(c, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
                 .apply { bottomMargin = Ui.dp(ctx, 8f) })
         }
+
+        // ── ۶) سیاست این تب ───────────────────────────────────────────────────
+        val note = card(ctx, "سیاست این تب", Palette.violet)
+        note.addView(Ui.tv(ctx, "• یک منحنی سرمایهٔ کلی داریم: هر معاملهٔ طلا، نفت و هر میز جفت‌ارز روی همان اثر می‌گذارد.\n" +
+            "• سرمایه را یک‌بار وارد می‌کنید و بین همهٔ نمادهای فعال تقسیم می‌شود؛ هر نماد ریسکش را از سهم خودش برمی‌دارد.\n" +
+            "• با عوض‌شدن نماد انتخابی هیچ عددی این تب تغییر نمی‌کند (به Hub نگاه می‌کند، نه به نماد نما).\n" +
+            "• نتیجهٔ بک‌تست فقط با درخواست تازه یا حذف صریح از بین می‌رود.",
+            11f, Palette.dim))
+        col0.addView(note, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         return scroll
     }

@@ -91,9 +91,58 @@ class FxPairDesk(val profile: FxProfile) {
         private set
 
     /** کمیسیون آلپاری Pro ECN: ۲٫۵ دلار هر طرف ⇒ ۵ دلار رفت‌وبرگشت برای هر لات. */
-    val commissionPerLot: Double = 5.0
+    var commissionOverride: Double = 5.0
+    val commissionPerLot: Double get() = commissionOverride
+
+    /** تایم‌فریم چارت این نماد (مستقل از تایم‌فریم تحلیل). */
+    var lastChartTf: Long = 86_400L
+
+    /** تایم‌فریم تحلیل به فارسی، برای هدرها. */
+    val tfFaNow: String get() = when (tfSec) {
+        86_400L -> "روزانه"
+        14_400L -> "۴ ساعته"
+        3_600L -> "ساعتی"
+        else -> "${tfSec / 60} دقیقه"
+    }
+
+    /** کندل‌های خام زندهٔ همین میز (برای چارت وقتی دادهٔ بسته دانلود نشده). */
+    fun rawCandles(): List<Candle> = raw.toList()
+
+    /** تغییر کمیسیون — روی موتور همان میز اثر می‌گذارد. */
+    fun setCommission(usd: Double) {
+        commissionOverride = usd.coerceIn(0.0, 50.0)
+        desk.commissionPerLotRoundTurn = commissionOverride
+        persist(); FxLive.fire()
+    }
 
     val desk = FxDesk(capital = 10_000.0, riskPct = 0.25, commissionPerLotRoundTurn = 5.0)
+
+    // ── پارامترهای قابل‌ویرایش همین میز (۱٫۵٫۰۷) ───────────────────────────────
+    //  خواستهٔ مالک: «مثل طلا و نفت، تمام تنظیمات و پارامترها برای هر جفت فعال باشد».
+    //  مقدار اولیه = همان پارامتر برندهٔ walk-forward ۲۰ سالهٔ همین جفت؛ کاربر می‌تواند
+    //  عوض کند و از همان لحظه در اجرای زنده و بک‌تست اثر می‌گذارد.
+    var tfSec: Long = profile.tfSec
+    var dirMode: Int = profile.dirMode          // +1 هم‌جهت شکست · -1 پاد شکست
+    var lookback: Int = profile.lookback
+    var atrMult: Double = profile.atrMult
+    var targetR: Double = profile.targetR
+    var partial: Boolean = profile.partial
+    var maxHoldBars: Int = 60
+    /** بازهٔ بک‌تست پیش‌فرض این میز: ۱ / ۳ / ۵ / ۱۰ / ۲۰ سال. */
+    var backtestYears: Int = 20
+
+    /** پروفایل مؤثر = پارامترهای پایهٔ جفت با ویرایش‌های کاربر. */
+    fun activeProfile(): FxProfile = profile.copy(
+        tfSec = tfSec, dirMode = dirMode, lookback = lookback,
+        atrMult = atrMult, targetR = targetR, partial = partial
+    )
+
+    /** برگرداندن پارامترها به مقدار آزمون‌شدهٔ ۲۰ ساله. */
+    fun resetParams() {
+        tfSec = profile.tfSec; dirMode = profile.dirMode; lookback = profile.lookback
+        atrMult = profile.atrMult; targetR = profile.targetR; partial = profile.partial
+        persist(); FxLive.fire()
+    }
 
     // ── وضعیت اجرای زنده ──────────────────────────────────────────────────────
     @Volatile var lastError: String? = null
@@ -152,6 +201,8 @@ class FxPairDesk(val profile: FxProfile) {
         lastError = null
         desk.capital = capital
         desk.riskPct = riskPct
+        desk.maxHoldBars = maxHoldBars
+        desk.commissionPerLotRoundTurn = commissionOverride
         desk.feed = { FxCostTable.costFor(profile.id, FxLive.usdPerQuote) }
         Log.i(Log.CAT_LIVE, "میز ${profile.id} روشن شد",
             "ریسک=${Fa.n(riskPct, 2)}٪ سرمایه=${Fa.n(capital, 0)}")
@@ -191,7 +242,7 @@ class FxPairDesk(val profile: FxProfile) {
             raw.addAll(fresh)
             if (raw.size > 20_000) raw.subList(0, raw.size - 20_000).clear()
             // تجمیع به تایم‌فریم همین جفت
-            val tfMs = profile.tfSec * 1000L
+            val tfMs = tfSec * 1000L
             for (c in fresh) {
                 val b = Math.floorDiv(c.t, tfMs) * tfMs
                 val prev = buckets[b]
@@ -208,7 +259,7 @@ class FxPairDesk(val profile: FxProfile) {
         lastTickMs = System.currentTimeMillis()
 
         // فقط باکت‌های بسته و تازه
-        val tfMs = profile.tfSec * 1000L
+        val tfMs = tfSec * 1000L
         val lastRawT = raw.lastOrNull()?.t ?: return
         val ready = buckets.keys.filter { it > lastEmit && it + tfMs <= lastRawT }.sorted()
         if (ready.isEmpty()) return
@@ -216,7 +267,7 @@ class FxPairDesk(val profile: FxProfile) {
         for (b in ready) {
             val bar = buckets[b] ?: continue
             val hist = keys.filter { it <= b }.mapNotNull { buckets[it] }
-            desk.onBar(profile, hist, bar)
+            desk.onBar(activeProfile(), hist, bar)
             lastEmit = b
         }
         persist()
@@ -227,7 +278,7 @@ class FxPairDesk(val profile: FxProfile) {
     fun replay() {
         val cost = FxCostTable.costFor(profile.id, FxLive.usdPerQuote) ?: return
         desk.feed = { cost }
-        val tfMs = profile.tfSec * 1000L
+        val tfMs = tfSec * 1000L
         val map = LinkedHashMap<Long, Candle>()
         for (c in raw) {
             val b = Math.floorDiv(c.t, tfMs) * tfMs
@@ -239,7 +290,7 @@ class FxPairDesk(val profile: FxProfile) {
         val keys = map.keys.sorted()
         for (b in keys) {
             val hist = keys.filter { it <= b }.mapNotNull { map[it] }
-            desk.onBar(profile, hist, map[b]!!)
+            desk.onBar(activeProfile(), hist, map[b]!!)
         }
         lastEmit = keys.lastOrNull() ?: Long.MIN_VALUE
         persist()
@@ -265,32 +316,34 @@ class FxPairDesk(val profile: FxProfile) {
      * داده از بستهٔ رسمی ریلیز (`goldpin_fx_20y_d1.zip`) گرفته و یک‌بار در حافظهٔ اپ
      * کش می‌شود؛ بعد از آن هیچ دانلودی لازم نیست. اگر شبکه نبود، از کش می‌خواند.
      */
-    fun runBacktest(ctx: Context, onDone: (String) -> Unit) {
+    fun runBacktest(ctx: Context, years: Int = 0, onDone: (String) -> Unit) {
         if (backtestBusy) { onDone("آزمون همین میز در جریان است"); return }
+        val yrs = if (years in listOf(1, 3, 5, 10, 20)) years else backtestYears
+        backtestYears = yrs
+        val pack = FxLive.packName(yrs)
         backtestBusy = true
-        backtestNote = "در حال گرفتن دادهٔ ۲۰ ساله…"
+        backtestNote = "در حال گرفتن دادهٔ ${Fa.d(yrs.toString())} ساله…"
         val app = ctx.applicationContext
         Thread {
             var msg: String
             try {
-                val zip = FxLive.datasetZip(app, "goldpin_fx_20y_d1.zip") { note -> backtestNote = note }
+                val zip = FxLive.datasetZip(app, pack) { note -> backtestNote = note }
                 val csv = FxBacktest.pairCsvFromZip(zip, profile.id)
                 if (csv == null) {
-                    msg = "فایل ${profile.id} در بستهٔ ۲۰ ساله نبود"
+                    msg = "فایل ${profile.id} در بستهٔ ${Fa.d(yrs.toString())} ساله نبود"
                 } else {
                     val bars = FxBacktest.parseCsv(csv)
-                    val tfBars = if (profile.tfSec == 86_400L) bars
-                                 else FxBacktest.aggregate(bars, profile.tfSec)
+                    val tfBars = if (tfSec == 86_400L) bars else FxBacktest.aggregate(bars, tfSec)
                     val cost = FxCostTable.costFor(profile.id, FxLive.usdPerQuote)
                     if (cost == null) {
                         msg = "هزینهٔ بروکر برای ${profile.id} تعریف نشده"
                     } else {
                         backtestNote = "در حال آزمون ${profile.id} روی ${Fa.d(tfBars.size.toString())} کندل…"
                         val r = FxBacktest.run(
-                            profile, tfBars, cost,
+                            activeProfile(), tfBars, cost,
                             capital = capital, riskPct = riskPct,
                             commissionPerLot = commissionPerLot,
-                            source = "goldpin_fx_20y_d1.zip"
+                            source = pack
                         )
                         backtest = r
                         msg = "${profile.id}: ${Fa.d(r.trades.toString())} معامله · " +
@@ -376,6 +429,11 @@ class FxPairDesk(val profile: FxProfile) {
             root.put("running", running)
             root.put("capital", capital)
             root.put("riskPct", riskPct)
+            root.put("tfSec", tfSec); root.put("dirMode", dirMode)
+            root.put("lookback", lookback); root.put("atrMult", atrMult)
+            root.put("targetR", targetR); root.put("partial", partial)
+            root.put("maxHold", maxHoldBars); root.put("btYears", backtestYears)
+            root.put("comm", commissionOverride); root.put("chartTf", lastChartTf)
             val arr = JSONArray()
             for (t in desk.closed) {
                 arr.put(JSONObject().apply {
@@ -426,6 +484,18 @@ class FxPairDesk(val profile: FxProfile) {
             enabled = root.optBoolean("enabled", enabled)
             capital = root.optDouble("capital", capital)
             riskPct = root.optDouble("riskPct", riskPct)
+            tfSec = root.optLong("tfSec", tfSec)
+            dirMode = root.optInt("dirMode", dirMode)
+            lookback = root.optInt("lookback", lookback)
+            atrMult = root.optDouble("atrMult", atrMult)
+            targetR = root.optDouble("targetR", targetR)
+            partial = root.optBoolean("partial", partial)
+            maxHoldBars = root.optInt("maxHold", maxHoldBars)
+            backtestYears = root.optInt("btYears", backtestYears)
+            commissionOverride = root.optDouble("comm", commissionOverride)
+            lastChartTf = root.optLong("chartTf", lastChartTf)
+            desk.commissionPerLotRoundTurn = commissionOverride
+            desk.maxHoldBars = maxHoldBars
             desk.capital = capital
             desk.riskPct = riskPct
             desk.feed = { FxCostTable.costFor(profile.id, FxLive.usdPerQuote) }
@@ -631,10 +701,24 @@ object FxLive {
         )
     }
 
-    // ── دادهٔ ۲۰ ساله (بستهٔ رسمی ریلیز) ──────────────────────────────────────
+    /** نام بستهٔ ریلیز برای هر بازه (۱/۳/۵/۱۰/۲۰ سال). */
+    fun packName(years: Int): String = when (years) {
+        1 -> "goldpin_fx_1y_h1.zip"
+        3 -> "goldpin_fx_3y_h1.zip"
+        5 -> "goldpin_fx_5y_d1.zip"
+        10 -> "goldpin_fx_10y_d1.zip"
+        else -> "goldpin_fx_20y_d1.zip"
+    }
+
+    val RANGES: List<Int> = listOf(1, 3, 5, 10, 20)
+
+    /** تایم‌فریم بستهٔ هر بازه: ۱ و ۳ ساله ساعتی، ۵ و ۱۰ و ۲۰ ساله روزانه. */
+    fun packTf(years: Int): Long = if (years <= 3) 3_600L else 86_400L
+
+    // ── دادهٔ نمودار و آزمون (بستهٔ رسمی ریلیز) ───────────────────────────────
     private val DATASET_URLS = listOf(
-        "https://github.com/alisport1384/ST2/releases/download/data-fx-v1/",
-        "https://github.com/alisport1384/ST1/releases/download/data-fx-v1/"
+        "https://github.com/alisport1384/ST2/releases/download/data-fx-v2/",
+        "https://github.com/alisport1384/ST1/releases/download/data-fx-v2/"
     )
 
     /**
@@ -674,5 +758,25 @@ object FxLive {
             if (code !in 200..299) throw IllegalStateException("HTTP $code")
             return conn.inputStream.readBytes()
         } finally { conn.disconnect() }
+    }
+
+    /** کندل‌های یک جفت از بستهٔ انتخابی، برای چارت و آزمون. */
+    fun candlesFor(ctx: Context, pair: String, years: Int): List<com.alisport.goldpin.core.Candle> {
+        val zip = datasetZip(ctx, packName(years))
+        val csv = FxBacktest.pairCsvFromZip(zip, pair) ?: return emptyList()
+        return FxBacktest.parseCsv(csv)
+    }
+
+    /**
+     * توزیع سرمایهٔ کل روی نمادها — خواستهٔ مالک: «وقتی سرمایه وارد شد روی نمادهای
+     * مختلف خرج می‌شود». سرمایهٔ کل بین **همهٔ نمادهای فعال** (طلا، نفت و میزهای
+     * جفت‌ارز فعال) به نسبت برابر تقسیم می‌شود.
+     */
+    fun distributeCapital(total: Double): Pair<Double, Double> {
+        val fxCount = enabledDesks.size
+        val slots = 2 + fxCount            // طلا + نفت + میزهای جفت‌ارز فعال
+        val share = if (slots <= 0) total else total / slots
+        for (d in enabledDesks) d.setCapital(share)
+        return share to (total - share * fxCount)
     }
 }

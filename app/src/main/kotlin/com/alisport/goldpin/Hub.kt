@@ -56,7 +56,8 @@ object Hub {
     fun init(ctx: Context) {
         AppState.appContextRef = ctx.applicationContext
         val p = ctx.getSharedPreferences("goldpin", Context.MODE_PRIVATE)
-        viewId = Symbols.byId(p.getString("view_symbol", Symbols.GOLD.id)).id
+        val saved = p.getString("view_symbol", Symbols.GOLD.id) ?: Symbols.GOLD.id
+        viewId = if (isFx(saved)) saved else Symbols.byId(saved).id
         specs.forEach { spec ->
             val st = state(spec)
             if (!st.stateLoaded) st.initApp(ctx)
@@ -73,6 +74,19 @@ object Hub {
      * دقیقاً همان‌جایی است که لحظهٔ قبل بود.
      */
     fun setView(ctx: Context, id: String): String {
+        // ── نماد جفت‌ارز (۱٫۵٫۰۷): هر جفت یک نماد کامل مثل طلا و نفت ──
+        if (isFx(id)) {
+            val d = FxLive.desk(id) ?: return "جفت‌ارز پیدا نشد"
+            if (viewId == id) return "نماد «${d.profile.label}» همین حالا انتخاب شده است"
+            viewId = id
+            try {
+                ctx.getSharedPreferences("goldpin", Context.MODE_PRIVATE).edit()
+                    .putString("view_symbol", id).apply()
+            } catch (_: Exception) { }
+            Log.i(Log.CAT_APP, "نماد نمای برنامه عوض شد", "→ $id (میز جفت‌ارز، بدون هیچ ریست)")
+            fire()
+            return "نماد «${d.profile.label}» انتخاب شد — چارت و تنظیمات همین جفت فعال است"
+        }
         val spec = Symbols.byId(id)
         if (viewId == spec.id) return "نماد «${spec.short}» همین حالا انتخاب شده است"
         viewId = spec.id
@@ -312,6 +326,94 @@ object Hub {
         )
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    //  جفت‌ارزها به‌عنوان نماد کامل (۱٫۵٫۰۷)
+    //  خواستهٔ مالک: هر جفت‌ارز در بخش نمادها دقیقاً مثل طلا و نفت یک تب داشته باشد،
+    //  چارت خودش، تنظیمات خودش، دادهٔ ۱/۳/۵/۱۰/۲۰ سال، و در **یک منحنی سرمایهٔ کلی**
+    //  با طلا و نفت حساب شود.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /** شناسهٔ همهٔ جفت‌ارزها (به ترتیب جدول پارامترها). */
+    val fxIds: List<String> get() = FxLive.desks.map { it.profile.id }
+
+    /** همهٔ شناسه‌های قابل انتخاب = طلا + نفت + جفت‌ارزها. */
+    val allIds: List<String> get() = Symbols.ALL.map { it.id } + fxIds
+
+    fun isFx(id: String?): Boolean = id != null && FxLive.desks.any { it.profile.id == id }
+
+    /** آیا نماد نمای فعلی یک جفت‌ارز است؟ */
+    val isFxView: Boolean get() = isFx(viewId)
+
+    fun fxDesk(): FxPairDesk? = FxLive.desk(viewId)
+
+    /** سرمایهٔ کل حساب — همان عددی که کاربر وارد می‌کند و روی نمادها خرج می‌شود. */
+    @Volatile var capitalTotal: Double = 12_000.0
+        private set
+
+    fun loadCapital(ctx: Context) {
+        val p = ctx.getSharedPreferences("goldpin", Context.MODE_PRIVATE)
+        capitalTotal = p.getFloat("capital_total", capitalTotal.toFloat()).toDouble()
+        if (capitalTotal < 100.0) capitalTotal = 12_000.0
+    }
+
+    /**
+     * توزیع سرمایهٔ کل روی نمادهای فعال (طلا + نفت + میزهای جفت‌ارز فعال).
+     * سهم هر نماد = سرمایهٔ کل ÷ تعداد نمادهای فعال.
+     */
+    fun applyCapital(ctx: Context, total: Double) {
+        capitalTotal = total.coerceIn(100.0, 100_000_000.0)
+        val fxEnabled = FxLive.enabledDesks
+        val slots = 2 + fxEnabled.size
+        val share = if (slots > 0) capitalTotal / slots else capitalTotal
+        for (st in all()) {
+            try { st.cfg.initialEquity = share } catch (_: Throwable) { }
+        }
+        for (d in fxEnabled) d.setCapital(share)
+        for (d in FxLive.desks) if (!d.enabled) d.setCapital(0.0)
+        try {
+            ctx.getSharedPreferences("goldpin", Context.MODE_PRIVATE).edit()
+                .putFloat("capital_total", capitalTotal.toFloat()).apply()
+        } catch (_: Exception) { }
+        Log.i(Log.CAT_CFG, "توزیع سرمایه", "کل=${Fa.n(capitalTotal, 2)} · هر نماد=${Fa.n(share, 2)} · تعداد=${slots}")
+        fire()
+    }
+
+    /** جمع همهٔ حساب‌ها: طلا + نفت + همهٔ میزهای جفت‌ارز، در **یک** منحنی سرمایه. */
+    fun grandTotal(): GrandTotal {
+        val g = total()
+        val f = FxLive.total()
+        val start = g.startEquity + f.capital
+        val deltas = ArrayList<Pair<Long, Double>>()
+        g.curve.drop(1).forEach { deltas.add(it.first to (it.second - g.startEquity)) }
+        for (smm in f.desks) {
+            smm.curve.drop(1).forEach { deltas.add(it.first to (it.second - smm.capital)) }
+        }
+        deltas.sortBy { it.first }
+        val pts = ArrayList<Pair<Long, Double>>(deltas.size + 1)
+        pts.add(0L to start)
+        var run = start
+        for (d in deltas) { run += d.second; pts.add(d.first to run) }
+        var peak = start
+        var dd = 0.0
+        for (p in pts) { if (p.second > peak) peak = p.second; val d = peak - p.second; if (d > dd) dd = d }
+        val closed = g.closedCount + f.closedCount
+        val wins = g.wins + f.desks.sumOf { it.wins }
+        return GrandTotal(
+            startEquity = start,
+            balance = g.balance + f.balance,
+            equity = g.equity + f.equity,
+            realized = g.realized + f.realized,
+            unrealized = g.unrealized + f.floating,
+            openCount = g.openCount + f.openCount,
+            closedCount = closed,
+            winRate = if (closed == 0) 0.0 else 100.0 * wins / closed,
+            maxDD = dd,
+            curve = pts,
+            goldOil = g,
+            fx = f
+        )
+    }
+
     /** متن خلاصه برای لاگ/گزارش. */
     fun summaryText(): String {
         val t = total()
@@ -331,3 +433,22 @@ object Hub {
         return sb.toString()
     }
 }
+
+/** نوع جمع طلا+نفت (همان `Hub.Total`). */
+typealias HubTotal = Hub.Total
+
+/** جمع کل حساب: طلا + نفت + همهٔ میزهای جفت‌ارز، در یک منحنی سرمایه. */
+data class GrandTotal(
+    val startEquity: Double,
+    val balance: Double,
+    val equity: Double,
+    val realized: Double,
+    val unrealized: Double,
+    val openCount: Int,
+    val closedCount: Int,
+    val winRate: Double,
+    val maxDD: Double,
+    val curve: List<Pair<Long, Double>>,
+    val goldOil: HubTotal,
+    val fx: FxPortfolio
+)

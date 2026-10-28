@@ -55,6 +55,8 @@ class MainActivity : Activity() {
 
     /** دسترسی صفحه‌های دیگر (مدیریت) به اکشن‌های همین Activity. */
     fun showTabPublic(i: Int) = showTab(i)
+    fun toastPublic(msg: String) = toast(msg)
+    fun refreshPublic() = refreshCurrent(force = true)
     private lateinit var root: LinearLayout
     private lateinit var header: LinearLayout
     private lateinit var content: FrameLayout
@@ -231,6 +233,20 @@ class MainActivity : Activity() {
             (tabButtons.getChildAt(k) as TextView).setTextColor(if (k == i) Palette.gold else Palette.dim)
         }
         content.removeAllViews()
+        // ── هر جفت‌ارز یک نماد کامل است (۱٫۵٫۰۷): تب‌های خودش، دقیقاً مثل طلا و نفت ──
+        if (Hub.isFxView) {
+            when (i) {
+                0 -> content.addView(FxScreens.chart(this))
+                1 -> content.addView(FxScreens.orders(this))
+                2 -> content.addView(FxScreens.pnl(this))
+                3 -> content.addView(FxScreens.reports(this))
+                4 -> content.addView(MgmtScreen.build(this))   // منحنی کلی: طلا + نفت + جفت‌ارزها
+                5 -> content.addView(FxScreens.settings(this))
+            }
+            tabSignature = "fx|$i|${Hub.viewId}"
+            refreshCurrent(force = true)
+            return
+        }
         when (i) {
             0 -> content.addView(buildChartScreen())
             1 -> content.addView(buildOrdersScreen())
@@ -261,6 +277,20 @@ class MainActivity : Activity() {
         lastRefreshAt = now
         refreshing = true
         try {
+            // ── نمای جفت‌ارز (۱٫۵٫۰۷): هدر از میز همان جفت می‌آید، نه از موتور طلا ──
+            val fx = if (Hub.isFxView) Hub.fxDesk() else null
+            if (fx != null) {
+                val sm = fx.summary()
+                headerPrice.text = if (sm.lastPrice.isNaN()) "—" else Fa.n(sm.lastPrice, fx.profile.digits)
+                headerStatus.maxLines = 2
+                headerStatus.text = "${fx.profile.label} · " +
+                    (if (sm.running) "● زنده" else "○ خاموش") + " · " +
+                    "معاملات ${Fa.d(sm.closedCount.toString())} · " +
+                    "سود ${Fa.signed(sm.realized)}$ · اکوییتی ${Fa.n(sm.equity, 0)}$" +
+                    (sm.lastError?.let { " · ⚠ " + it } ?: "")
+                if (tab == 0) refreshFxChartTab()
+                return
+            }
             headerPrice.text = if (s.lastLivePrice.isNaN()) "—" else Fa.n(s.lastLivePrice, 2)
             val trend = if (s.cfg.strategy == Strategy.NO_TREND) "ندارد (استراتژی ۲)"
                 else when (s.engine.trend) { 1 -> "صعودی"; -1 -> "نزولی"; else -> "بدون روند" }
@@ -816,6 +846,19 @@ class MainActivity : Activity() {
             .setPositiveButton("بستن", null).show()
     }
 
+    /** تازه‌سازی چارت جفت‌ارز — فقط وقتی نمای فعال یک جفت است صدا زده می‌شود. */
+    private fun refreshFxChartTab() {
+        val cv = chart ?: return
+        val fx = Hub.fxDesk() ?: return
+        val base = FxChartStore.cached(fx.profile.id, fx.backtestYears) ?: fx.rawCandles()
+        val tf = fx.lastChartTf
+        cv.candles = if (tf == 3_600L) base else com.alisport.goldpin.core.FxBacktest.aggregate(base, tf)
+        cv.chartTfSec = tf.toInt()
+        cv.symbolName = fx.profile.id
+        cv.livePulse = fx.running
+        cv.refresh()
+    }
+
     private fun refreshChartTab() {
         val cv = chart ?: return
         val snap = s.uiSnapshot()
@@ -1101,6 +1144,33 @@ class MainActivity : Activity() {
                 marginEnd = Ui.dp(this@MainActivity, 4f)
             })
         }
+        // ── ردیف جفت‌ارزها (۱٫۵٫۰۷): هر جفت یک نماد کامل مثل طلا و نفت ──
+        v.addView(Ui.tv(this, "جفت‌ارزها — هر کدام یک نماد با چارت، تنظیمات و دادهٔ ۱/۳/۵/۱۰/۲۰ ساله",
+            10.5f, Palette.violet, true).apply {
+            setPadding(0, Ui.dp(this@MainActivity, 6f), 0, Ui.dp(this@MainActivity, 2f))
+        })
+        var fxRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        var inRow = 0
+        for (d in FxLive.desks) {
+            val sm = d.summary()
+            val selected = Hub.viewId == d.profile.id
+            val b = Ui.btn(this,
+                d.profile.id + " · " + Fa.signed(sm.realized, 0) + " · " +
+                    (if (sm.running) "●" else if (d.enabled) "◐" else "○"),
+                if (selected) Palette.gold else Palette.panel2,
+                if (selected) Palette.bg else Palette.txt, 10.5f)
+            b.setOnClickListener {
+                toast(Hub.setView(this@MainActivity, d.profile.id))
+                Log.i(Log.CAT_CFG, "نماد نمای برنامه", "→ ${d.profile.id} (میز جفت‌ارز)")
+                showTab(5)
+            }
+            fxRow.addView(b, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = Ui.dp(this@MainActivity, 4f)
+            })
+            inRow++
+            if (inRow == 3) { v.addView(fxRow); fxRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }; inRow = 0 }
+        }
+        if (inRow > 0) v.addView(fxRow)
         v.addView(row)
         val cur = Hub.view
         v.addView(Ui.tv(this,
@@ -1724,7 +1794,7 @@ class MainActivity : Activity() {
         }
 
         // ── دیتاست‌های ۱ / ۳ / ۱۰ / ۲۰ سال ─────────────────────────────────
-        v.addView(Ui.section(this, "⑦-ج دیتاست جفت‌ارزها — ۱ / ۳ / ۱۰ / ۲۰ سال"))
+        v.addView(Ui.section(this, "⑦-ج دیتاست جفت‌ارزها — ۱ / ۳ / ۵ / ۱۰ / ۲۰ سال"))
         v.addView(Ui.tv(this,
             "چهار بستهٔ آمادهٔ دانلود (۱۲ جفت در هر بسته، CSV با ستون‌های t,o,h,l,c,v). " +
                 "همان فایلی که دکمهٔ «بک‌تست ۲۰ ساله» هر میز از آن استفاده می‌کند (یک‌بار دانلود، بعد آفلاین).",
@@ -1732,12 +1802,14 @@ class MainActivity : Activity() {
         for ((tag, label, desc) in listOf(
             Triple("1y", "۱ سال — ساعتی", "۶٬۰۸۰ کندل در هر جفت"),
             Triple("3y", "۳ سال — ساعتی", "۱۷٬۱۹۴ کندل"),
+            Triple("5y", "۵ سال — روزانه", "۱٬۲۹۸ کندل"),
             Triple("10y", "۱۰ سال — روزانه", "۲٬۶۰۰ کندل"),
             Triple("20y", "۲۰ سال — روزانه", "۵٬۱۸۳ کندل")
         )) {
             val fname = when (tag) {
                 "1y" -> "goldpin_fx_1y_h1.zip"
                 "3y" -> "goldpin_fx_3y_h1.zip"
+                "5y" -> "goldpin_fx_5y_d1.zip"
                 "10y" -> "goldpin_fx_10y_d1.zip"
                 else -> "goldpin_fx_20y_d1.zip"
             }
@@ -1745,7 +1817,7 @@ class MainActivity : Activity() {
             b.setOnClickListener {
                 try {
                     startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
-                        android.net.Uri.parse("https://github.com/alisport1384/ST2/releases/download/data-fx-v1/$fname")))
+                        android.net.Uri.parse("https://github.com/alisport1384/ST2/releases/download/data-fx-v2/$fname")))
                 } catch (_: Exception) { toast("مرورگر پیدا نشد") }
             }
             v.addView(b, LinearLayout.LayoutParams(

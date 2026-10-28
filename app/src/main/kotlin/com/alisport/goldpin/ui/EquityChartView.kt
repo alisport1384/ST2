@@ -75,6 +75,21 @@ class EquityChartView @JvmOverloads constructor(
         invalidate()
     }
 
+    /**
+     * منحنی سرمایه از نقاط آماده (۱٫۵٫۰۷ — برای میزهای جفت‌ارز که معامله‌شان از نوع
+     * `FxTrade` است و به `Trade` تبدیل نمی‌شود).
+     */
+    fun setCurve(points: List<Pair<Long, Double>>, initialEquity: Double) {
+        this.trades = emptyList()
+        this.ordered = emptyList()
+        this.initial = initialEquity
+        this.pts = if (points.isEmpty()) listOf(0L to initialEquity) else points
+        visibleFrom = 0
+        visibleTo = max(0, pts.size - 1)
+        scale = 1f; pan = 0f
+        invalidate()
+    }
+
     fun resetZoom() {
         scale = 1f; pan = 0f
         visibleFrom = 0; visibleTo = max(0, pts.size - 1)
