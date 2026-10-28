@@ -1,15 +1,5 @@
 # GoldPin
 
-اپ اندروید و موتور بک‌تست استراتژی GoldPin. نسخهٔ این انتشار: **1.5.00 (versionCode 66) — دو نمادی: طلا + نفت WTI** · دانلود: [`GoldPin-1.5.00-66.apk`](https://github.com/alisport1384/ST2/releases/download/v1.5.00/GoldPin-1.5.00-66.apk) · گزارش نسخهٔ نفت: [`docs/GOZARESH-OIL-v1.5.00.md`](docs/GOZARESH-OIL-v1.5.00.md).
-
-> ### چه چیزی در ۱٫۵٫۰۰ تازه است
-> - **هر دو نماد هم‌زمان زنده معامله می‌کنند** (طلا XAUUSD + نفت WTI USOIL). انتخاب نماد فقط **نما** را عوض می‌کند؛ هیچ حالتی ریست نمی‌شود و نماد دیگر متوقف نمی‌شود.
-> - **تب تازهٔ «مدیریت سرمایه»**: جمع سود/زیان همهٔ نمادها + نمودار جمعی + نمودار و خلاصهٔ هر نماد؛ ثابت و مستقل از نماد انتخابی.
-> - **انتخاب نماد در بالای منوی تنظیمات**؛ هر نماد تنظیمات، موتور، کارگزار، فایل ذخیره و نتیجهٔ بک‌تست مستقل خودش را دارد.
-> - **ورود به بک‌تست ⇒ لایو همهٔ نمادها متوقف و معاملات باز فریز می‌شوند** و در تب مدیریت شمرده می‌شوند.
-> - **بک‌تست دیگر اجباری نیست**: دکمهٔ توقف دارد و نتیجهٔ ثبت‌شده با تغییر تنظیمات پاک نمی‌شود (فقط با بک‌تست تازه یا حذف صریح).
-> - نصب روی ۱٫۴٫۵۲ هیچ وضعیت یا دیتاست طلایی را از بین نمی‌برد (نام فایل‌های طلا عوض نشده است).
-
 اپ اندروید و موتور بک‌تست استراتژی GoldPin. نسخهٔ این انتشار: **1.4.51 (versionCode 64)** — دانلود: [`GoldPin-1.4.51-64.apk`](https://github.com/alisport1384/ST2/releases/download/v1.4.51/GoldPin-1.4.51-64.apk) · گزارش: [`docs/GOZARESH-MODIRIYAT-v1.4.51.md`](docs/GOZARESH-MODIRIYAT-v1.4.51.md).
 
 ## دادهٔ بک‌تست طلا (XAUUSD، M1)
@@ -24,23 +14,6 @@
 | ۳ سال | ۱٬۰۴۰٬۷۳۰ | ۱۴٫۳ MB | [`3y`](https://github.com/alisport1384/ST2/releases/download/data-v1/goldpin_xauusd_m1_3y.csv.gz) |
 | ۱۰ سال | ۳٬۴۰۲٬۱۲۶ | ۴۳٫۳ MB | [`10y`](https://github.com/alisport1384/ST2/releases/download/data-v1/goldpin_xauusd_m1_10y.csv.gz) |
 | ۲۰ سال | ۶٬۵۶۳٬۷۲۳ | ۷۷٫۸ MB | [`20y`](https://github.com/alisport1384/ST2/releases/download/data-v1/goldpin_xauusd_m1_20y.csv.gz) |
-
-## دادهٔ بک‌تست نفت (USOIL/WTI، M1)
-
-همان پنج بازه، این بار برای نفت — قیمت به **دلار بر بشکه**:
-
-| برش | کندل | حجم فشرده | دانلود |
-|---|---:|---:|---|
-| ۱ سال | ۳۴۷٬۷۱۸ | ۴٫۱ MB | [`1y`](https://github.com/alisport1384/ST2/releases/download/data-oil-v1/goldpin_usoil_m1_1y.csv.gz) |
-| ۲ سال | ۶۸۹٬۴۹۱ | ۷٫۵ MB | [`2y`](https://github.com/alisport1384/ST2/releases/download/data-oil-v1/goldpin_usoil_m1_2y.csv.gz) |
-| ۳ سال | ۱٬۰۳۳٬۱۹۲ | ۱۱٫۱ MB | [`3y`](https://github.com/alisport1384/ST2/releases/download/data-oil-v1/goldpin_usoil_m1_3y.csv.gz) |
-| ۱۰ سال | ۳٬۳۶۱٬۷۵۶ | ۳۵٫۶ MB | [`10y`](https://github.com/alisport1384/ST2/releases/download/data-oil-v1/goldpin_usoil_m1_10y.csv.gz) |
-| ۲۰ سال | ۶٬۸۲۹٬۵۶۰ | ۶۹٫۱ MB | [`20y`](https://github.com/alisport1384/ST2/releases/download/data-oil-v1/goldpin_usoil_m1_20y.csv.gz) |
-
-بازه: ۲۰۰۵-۰۱-۰۳ تا ۲۰۲۶-۱۰-۲۲ · منبع خام: `parshant65-lang/WTI-Crude-Oil-1m-*` · ریلیز: [`data-oil-v1`](https://github.com/alisport1384/ST2/releases/tag/data-oil-v1).
-
-⚠ **عدد کارمزد باید هم‌واحد نفت باشد**: اسپرد ۰٫۰۳ دلار بر بشکه. با عدد ۰٫۷ طلا، همان استراتژی روی نفت
-از ‎+۲۸۹$‎ به ‎−۳٬۸۰۵$‎ می‌رسد (جزئیات و جدول کامل در گزارش نفت).
 
 هیچ فایل دیتاستی **نه داخل APK و نه داخل مخزن** نیست: هر برش asset همان
 [Release با تگ `data-v1`](https://github.com/alisport1384/ST2/releases/tag/data-v1) است و اپ هنگام

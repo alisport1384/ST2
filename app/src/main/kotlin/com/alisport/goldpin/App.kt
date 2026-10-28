@@ -2725,7 +2725,7 @@ class AppState(val spec: SymbolSpec = Symbols.GOLD) {
 
     companion object {
         /** نسخهٔ نمایشی — تنها منبع حقیقت برای هدر لاگ. با `versionName` در build.gradle یکی نگه دارید. */
-        const val APP_VERSION = "1.5.00"
+        const val APP_VERSION = "1.5.01"
 
         /**
          * «نمونهٔ» سازگاری: کد رابط همه‌جا `AppState.instance` را می‌خواند و باید

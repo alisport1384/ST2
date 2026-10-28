@@ -69,22 +69,3 @@ curl -fLO $BASE/goldpin_xauusd_m1_20y.csv.gz
 
 این پوشه در `.gitignore` است، پس چیزی به مخزن برنمی‌گردد. اگر فایل نباشد، تست‌های وابسته به
 داده با `assumeTrue` **skip** می‌شوند (build نمی‌شکند).
-
----
-
-## دیتاست‌های نفت WTI (USOIL) — ریلیز `data-oil-v1`
-
-| بازه | فایل | کندل | اندازهٔ فشرده | شروع UTC | پایان UTC | SHA-256 |
-|---|---|---:|---:|---|---|---|
-| ۱ سال | [`goldpin_usoil_m1_1y.csv.gz`](https://github.com/alisport1384/ST2/releases/download/data-oil-v1/goldpin_usoil_m1_1y.csv.gz) | 347,718 | 4,073,006 بایت | 2025-10-23 00:00 | 2026-10-22 04:28 | `616cb8f68ccce3793c529282a86e9500f1e16ea6e54b55376f07e44150bc8590` |
-| ۲ سال | [`goldpin_usoil_m1_2y.csv.gz`](https://github.com/alisport1384/ST2/releases/download/data-oil-v1/goldpin_usoil_m1_2y.csv.gz) | 689,491 | 7,545,461 بایت | 2024-10-23 00:00 | 2026-10-22 04:28 | `78e4a8fdbce2fcd4a39a37f01f3e3a22ffb73cb70aa38cb25594c9447f7d6d0a` |
-| ۳ سال | [`goldpin_usoil_m1_3y.csv.gz`](https://github.com/alisport1384/ST2/releases/download/data-oil-v1/goldpin_usoil_m1_3y.csv.gz) | 1,033,192 | 11,087,423 بایت | 2023-10-23 00:00 | 2026-10-22 04:28 | `9394e460c705bdcddc2b3a843beb8ff3769fb72e436565bb8cc84521afc6b21b` |
-| ۱۰ سال | [`goldpin_usoil_m1_10y.csv.gz`](https://github.com/alisport1384/ST2/releases/download/data-oil-v1/goldpin_usoil_m1_10y.csv.gz) | 3,361,756 | 35,630,197 بایت | 2016-10-23 22:00 | 2026-10-22 04:28 | `7c1f7cb1be6bbb3033be3d6c96555a6cebc21b151e4bda1b2cb8fb0a352465ec` |
-| ۲۰ سال | [`goldpin_usoil_m1_20y.csv.gz`](https://github.com/alisport1384/ST2/releases/download/data-oil-v1/goldpin_usoil_m1_20y.csv.gz) | 6,829,560 | 69,076,333 بایت | 2005-01-03 00:00 | 2026-10-22 04:28 | `cee6b304a900e6f0bc2d3a33ee201523c2905714d9ece805aeabfc9028ab6313` |
-
-- منبع خام: مخزن عمومی [`parshant65-lang/WTI-Crude-Oil-1m-2005-2015`](https://github.com/parshant65-lang/WTI-Crude-Oil-1m-2005-2015-Historical-Data) و [`...-2016-2025`](https://github.com/parshant65-lang/WTI-Crude-Oil-1m-2016-2025-Historical-Data) — OHLCV یک‌دقیقه‌ای با حجم تیکی.
-- ساخت: ۶٬۷۱۹ فایل روزانه دانلود شد (۰ خطا)، ردیف‌ها بر timestamp مرتب و تکراری‌ها حذف شد؛ ۰ ردیف نامعتبر، ۰ کندل بی‌حجم.
-- واحد قیمت: **دلار بر بشکه** (حداقل ۱۱٫۱۷۵ و حداکثر ۱۴۶٫۸۹۳ در کل بازه). ستون‌ها مثل طلا: `timestamp(ms,UTC),open,high,low,close,volume`.
-- `.meta.json` هر برش کنار همین فایل در مخزن است.
-- اپ این فایل‌ها را فقط وقتی دانلود می‌کند که **نماد نفت** انتخاب شده باشد (اول `ST2`، بعد آینهٔ `ST1`)، و SHA-256 را قبل از پذیرش بررسی می‌کند.
-- ⚠ اسپرد/کارمزد پیش‌فرض نفت **۰٫۰۳ دلار بر بشکه** است، نه ۰٫۷ طلا؛ توضیح در [`docs/GOZARESH-OIL-v1.5.00.md`](../docs/GOZARESH-OIL-v1.5.00.md).
